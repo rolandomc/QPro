@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, Pressable } from 'react-native';
+import { FlatList, StyleSheet, Text, Pressable } from 'react-native';
 
 const CATEGORIAS = ['Todos', 'Mundial 2026', 'Champions', 'Liga MX', 'Premier'];
 
@@ -7,21 +7,21 @@ export default function FilterPills() {
   const [active, setActive] = useState('Todos');
 
   return (
-    <ScrollView 
-      horizontal 
-      showsHorizontalScrollIndicator={false} 
+    <FlatList
+      horizontal
+      data={CATEGORIAS}
+      keyExtractor={(item) => item}
+      showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.container}
-    >
-      {CATEGORIAS.map((cat) => (
+      renderItem={({ item: cat }) => (
         <Pressable
-          key={cat}
           onPress={() => setActive(cat)}
           style={[styles.pill, active === cat && styles.pillActive]}
         >
           <Text style={[styles.text, active === cat && styles.textActive]}>{cat}</Text>
         </Pressable>
-      ))}
-    </ScrollView>
+      )}
+    />
   );
 }
 

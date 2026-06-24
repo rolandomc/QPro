@@ -8,9 +8,8 @@ import SegmentedControl from '../../src/components/SegmentedControl';
 export default function ResultsScreen() {
   const [tabIndex, setTabIndex] = useState('En Juego');
 
-  // Datos simulados
   const partidosEnJuego = [
-    { id: 10, local: 'México 🇲🇽', visitante: '🇨🇦 Canadá', score: '1 - 0 (Min 65\')', pronostico: 'Local', isWin: true }, // Simulamos que va ganando
+    { id: 10, local: 'México 🇲🇽', visitante: '🇨🇦 Canadá', score: "1 - 0 (Min 65')", pronostico: 'Local', isWin: true },
   ];
 
   const historial = [
@@ -22,15 +21,15 @@ export default function ResultsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <Header />
-      
-      <SegmentedControl 
-        options={['En Juego', 'Historial']} 
-        selectedOption={tabIndex} 
-        onSelect={setTabIndex} 
+
+      <SegmentedControl
+        options={['En Juego', 'Historial']}
+        selectedOption={tabIndex}
+        onSelect={setTabIndex}
       />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        
+
         {tabIndex === 'En Juego' ? (
           <View>
             <View style={styles.liveIndicatorRow}>
@@ -59,9 +58,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0C10' },
   content: { paddingHorizontal: 15, paddingBottom: 40 },
   liveIndicatorRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
-  liveDot: { 
-    width: 10, height: 10, borderRadius: 5, backgroundColor: '#2ECC71', 
-    marginRight: 10, shadowColor: '#2ECC71', shadowOpacity: 0.8, shadowRadius: 5 
+  liveDot: {
+    width: 10, height: 10, borderRadius: 5, backgroundColor: '#2ECC71',
+    marginRight: 10,
+    boxShadow: '0 0 5px 2px rgba(46, 204, 113, 0.8)',
   },
   sectionTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
 });

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import QuickRechargeButton from '../../src/components/QuickRechargeButton';
@@ -23,29 +23,29 @@ export default function WalletScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Volver</Text>
-        </TouchableOpacity>
+        </Pressable>
         <Text style={styles.title}>Mi Billetera</Text>
         <View style={{ width: 60 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        
+
         {/* Balance Card */}
         <View style={[styles.balanceCard, styles.neonCardGreen]}>
           <Text style={styles.balanceLabel}>Saldo Disponible</Text>
           <Text style={styles.balanceValue}>
             ${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })} <Text style={styles.currency}>MXN</Text>
           </Text>
-          
+
           <View style={styles.actionRow}>
-            <TouchableOpacity style={styles.depositBtn}>
+            <Pressable style={styles.depositBtn}>
               <Text style={styles.depositText}>Ingresar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.withdrawBtn}>
+            </Pressable>
+            <Pressable style={styles.withdrawBtn}>
               <Text style={styles.withdrawText}>Retirar</Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </View>
 
@@ -74,7 +74,7 @@ export default function WalletScreen() {
         <Text style={styles.sectionTitle}>Últimos Movimientos</Text>
         <View style={styles.historyContainer}>
           {movimientos.map((mov) => (
-            <TransactionItem 
+            <TransactionItem
               key={mov.id}
               tipo={mov.tipo}
               monto={mov.monto}
@@ -95,28 +95,38 @@ const styles = StyleSheet.create({
   backText: { color: '#2ECC71', fontSize: 16 },
   title: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   content: { padding: 15, paddingBottom: 40 },
-  
+
   balanceCard: { backgroundColor: '#15181F', borderRadius: 16, padding: 25, alignItems: 'center', marginBottom: 20 },
-  neonCardGreen: { borderColor: '#2ECC71', borderWidth: 1.5, shadowColor: '#2ECC71', shadowOpacity: 0.6, shadowRadius: 15, elevation: 10 },
+  neonCardGreen: {
+    borderColor: '#2ECC71',
+    borderWidth: 1.5,
+    boxShadow: '0 0 15px 4px rgba(46, 204, 113, 0.6)',
+  },
   balanceLabel: { color: '#A0A0A0', fontSize: 14, marginBottom: 10 },
   balanceValue: { color: '#FFF', fontSize: 36, fontWeight: 'bold', marginBottom: 25, textShadowColor: 'rgba(255, 255, 255, 0.3)', textShadowRadius: 10 },
   currency: { fontSize: 16, color: '#2ECC71' },
-  
+
   actionRow: { flexDirection: 'row', gap: 15, width: '100%' },
   depositBtn: { flex: 1, backgroundColor: '#2ECC71', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
   depositText: { color: '#000', fontWeight: 'bold', fontSize: 16 },
   withdrawBtn: { flex: 1, backgroundColor: '#1C1F26', paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
   withdrawText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  
+
   quickRechargeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25, marginHorizontal: -4 },
   sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 15, paddingHorizontal: 5 },
-  
+
   chartContainer: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#15181F', borderRadius: 16, padding: 20, height: 150, marginBottom: 25, borderWidth: 1, borderColor: '#2A2D35' },
   chartBarContainer: { alignItems: 'center', justifyContent: 'flex-end' },
   chartBar: { width: 40, borderRadius: 6, marginBottom: 10 },
-  incomeBar: { backgroundColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.6, shadowRadius: 8 },
-  expenseBar: { backgroundColor: '#E91E63', shadowColor: '#E91E63', shadowOpacity: 0.6, shadowRadius: 8 },
+  incomeBar: {
+    backgroundColor: '#2ECC71',
+    boxShadow: '0 0 8px 2px rgba(46, 204, 113, 0.6)',
+  },
+  expenseBar: {
+    backgroundColor: '#E91E63',
+    boxShadow: '0 0 8px 2px rgba(233, 30, 99, 0.6)',
+  },
   chartLabel: { color: '#A0A0A0', fontSize: 12 },
-  
+
   historyContainer: { backgroundColor: '#15181F', borderRadius: 16, padding: 15, borderWidth: 1, borderColor: '#2A2D35' },
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 
 export default function Header() {
@@ -10,12 +10,12 @@ export default function Header() {
       <Text style={styles.headerTitle}>
         <Text style={styles.neonTextGreen}>STATZ</Text> Quinielas ▾
       </Text>
-      <TouchableOpacity 
+      <Pressable
         style={styles.balanceButton}
         onPress={() => router.push('/wallet')}
       >
         <Text style={styles.balanceText}>$1,250.00</Text>
-      </TouchableOpacity>
+      </Pressable>
     </View>
   );
 }
@@ -46,12 +46,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#2ECC71', // Borde verde para indicar que es dinero
-    shadowColor: '#2ECC71',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 5,
-    elevation: 4,
+    borderColor: '#2ECC71',
+    boxShadow: '0 0 5px 2px rgba(46, 204, 113, 0.4)',
   },
   balanceText: {
     color: '#2ECC71',

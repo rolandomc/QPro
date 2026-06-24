@@ -71,31 +71,42 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0C10' },
   content: { padding: 15, paddingBottom: 40 },
   userInfo: { alignItems: 'center', marginBottom: 25 },
-  avatar: { 
-    width: 80, height: 80, borderRadius: 40, backgroundColor: '#1C1F26', 
-    justifyContent: 'center', alignItems: 'center', marginBottom: 10, borderWidth: 2 
+  avatar: {
+    width: 80, height: 80, borderRadius: 40, backgroundColor: '#1C1F26',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 10, borderWidth: 2,
   },
   neonAvatarBlue: {
-    borderColor: '#3498DB', shadowColor: '#3498DB', shadowOpacity: 0.8, shadowRadius: 15, elevation: 8,
+    borderColor: '#3498DB',
+    boxShadow: '0 0 15px 4px rgba(52, 152, 219, 0.8)',
   },
   avatarText: { color: '#FFF', fontSize: 28, fontWeight: 'bold' },
   userName: { color: '#FFF', fontSize: 22, fontWeight: 'bold' },
   userHandle: { color: '#A0A0A0', fontSize: 14, marginBottom: 15 },
-  
+
   levelContainer: { width: '100%', backgroundColor: '#15181F', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#2A2D35' },
   levelTitle: { color: '#FFF', fontSize: 14, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
   neonTextOrange: { color: '#F39C12', textShadowColor: 'rgba(243, 156, 18, 0.8)', textShadowRadius: 8 },
   xpTrack: { height: 8, backgroundColor: '#1C1F26', borderRadius: 4, overflow: 'hidden', marginBottom: 8 },
-  xpFill: { height: '100%', backgroundColor: '#F39C12', shadowColor: '#F39C12', shadowOpacity: 1, shadowRadius: 5 },
+  xpFill: {
+    height: '100%',
+    backgroundColor: '#F39C12',
+    boxShadow: '0 0 5px 2px rgba(243, 156, 18, 1)',
+  },
   xpText: { color: '#707070', fontSize: 10, textAlign: 'right' },
 
   statsRow: { flexDirection: 'row', gap: 15, marginBottom: 30 },
   statCard: { flex: 1, backgroundColor: '#15181F', borderRadius: 12, padding: 15, alignItems: 'center', borderWidth: 1.5 },
-  neonCardPurple: { borderColor: '#9B59B6', shadowColor: '#9B59B6', shadowOpacity: 0.6, shadowRadius: 10, elevation: 5 },
-  neonCardGreen: { borderColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.6, shadowRadius: 10, elevation: 5 },
+  neonCardPurple: {
+    borderColor: '#9B59B6',
+    boxShadow: '0 0 10px 3px rgba(155, 89, 182, 0.6)',
+  },
+  neonCardGreen: {
+    borderColor: '#2ECC71',
+    boxShadow: '0 0 10px 3px rgba(46, 204, 113, 0.6)',
+  },
   statValue: { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
   statLabel: { color: '#A0A0A0', fontSize: 12, textTransform: 'uppercase' },
-  
+
   sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 15, paddingHorizontal: 5 },
   badgesContainer: { marginBottom: 30, paddingLeft: 5 },
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, Pressable } from 'react-native';
 
 interface Props {
   amount: number;
@@ -8,9 +8,12 @@ interface Props {
 
 export default function QuickRechargeButton({ amount, onPress }: Props) {
   return (
-    <TouchableOpacity style={styles.button} onPress={onPress}>
+    <Pressable
+      style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+      onPress={onPress}
+    >
       <Text style={styles.text}>+${amount}</Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -24,6 +27,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2ECC71',
     marginHorizontal: 4,
+  },
+  buttonPressed: {
+    backgroundColor: 'rgba(46, 204, 113, 0.25)',
   },
   text: {
     color: '#2ECC71',

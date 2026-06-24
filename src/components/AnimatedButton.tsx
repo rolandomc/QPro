@@ -17,7 +17,7 @@ export default function AnimatedButton({ title, onPress, style, textStyle, isNeo
         styles.button,
         isNeon && styles.neonBtn,
         style,
-        { transform: [{ scale: pressed ? 0.95 : 1 }] } // Aquí sucede la magia de la animación
+        { transform: [{ scale: pressed ? 0.95 : 1 }] },
       ]}
     >
       <Text style={[styles.text, textStyle]}>{title}</Text>
@@ -36,10 +36,7 @@ const styles = StyleSheet.create({
   },
   neonBtn: {
     backgroundColor: '#2ECC71',
-    shadowColor: '#2ECC71',
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 8,
+    boxShadow: '0 0 10px 3px rgba(46, 204, 113, 0.8)',
   },
   text: {
     color: '#FFF',

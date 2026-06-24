@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 
 export default function QuinielaMainCard() {
@@ -8,19 +8,19 @@ export default function QuinielaMainCard() {
   return (
     <View style={[styles.card, styles.neonCardGreen]}>
       <Text style={styles.cardSubtitle}>🏆 QUINIELA MUNDIAL 2026</Text>
-      
+
       <View style={styles.prizeContainer}>
         <Text style={styles.prizeLabel}>Bolsa Acumulada</Text>
         <Text style={styles.prizeValue}>$50,000 MXN</Text>
         <Text style={styles.matchCount}>10 Partidos • Cierre: Mañana 20:00</Text>
       </View>
 
-      <TouchableOpacity 
-        style={styles.actionButton}
+      <Pressable
+        style={({ pressed }) => [styles.actionButton, pressed && { opacity: 0.85 }]}
         onPress={() => router.push('/quiniela/details')}
       >
         <Text style={styles.actionButtonText}>Participar →</Text>
-      </TouchableOpacity>
+      </Pressable>
     </View>
   );
 }
@@ -35,11 +35,7 @@ const styles = StyleSheet.create({
   neonCardGreen: {
     borderColor: '#2ECC71',
     borderWidth: 1.5,
-    shadowColor: '#2ECC71',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 15,
-    elevation: 10,
+    boxShadow: '0 0 15px 4px rgba(46, 204, 113, 0.8)',
   },
   cardSubtitle: {
     color: '#A0A0A0',

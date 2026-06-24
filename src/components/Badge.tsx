@@ -9,8 +9,20 @@ interface Props {
 }
 
 export default function Badge({ icon, title, isUnlocked, neonColor = '#F39C12' }: Props) {
+  // boxShadow calculado dinámicamente con el neonColor recibido por prop
+  const neonShadow = isUnlocked
+    ? { boxShadow: `0 0 10px 3px ${neonColor}CC` } // CC = ~80% opacidad en hex
+    : undefined;
+
   return (
-    <View style={[styles.container, isUnlocked && { borderColor: neonColor, shadowColor: neonColor }, isUnlocked && styles.unlocked]}>
+    <View
+      style={[
+        styles.container,
+        isUnlocked && { borderColor: neonColor },
+        isUnlocked && styles.unlocked,
+        neonShadow,
+      ]}
+    >
       <Text style={[styles.icon, !isUnlocked && styles.lockedIcon]}>{icon}</Text>
       <Text style={[styles.title, !isUnlocked && styles.lockedText]}>{title}</Text>
     </View>
@@ -31,9 +43,6 @@ const styles = StyleSheet.create({
     borderColor: '#2A2D35',
   },
   unlocked: {
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   icon: {

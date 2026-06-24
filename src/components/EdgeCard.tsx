@@ -19,8 +19,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#15181F', borderRadius: 16, padding: 20, marginBottom: 20,
   },
   neonCardBlue: {
-    borderColor: '#3498DB', borderWidth: 1.5,
-    shadowColor: '#3498DB', shadowOpacity: 0.8, shadowRadius: 12, elevation: 8,
+    borderColor: '#3498DB',
+    borderWidth: 1.5,
+    boxShadow: '0 0 12px 3px rgba(52, 152, 219, 0.8)',
   },
   header: { color: '#707070', fontSize: 12, marginBottom: 15 },
   match: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },

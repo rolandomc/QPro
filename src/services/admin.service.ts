@@ -7,7 +7,6 @@ const FOOTBALL_API_BASE = 'https://api.football-data.org/v4';
 
 export class AdminService {
 
-  /** Verifica si el usuario autenticado tiene rol de admin */
   static async isAdmin(): Promise<boolean> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -24,21 +23,13 @@ export class AdminService {
     }
   }
 
-  /**
-   * Trae partidos de football-data.org
-   * Filtros disponibles (todos opcionales, se pueden combinar):
-   *   matchday  — jornada específica (ej: 15)
-   *   status    — SCHEDULED | FINISHED | LIVE | ALL
-   *   dateFrom  — fecha inicio YYYY-MM-DD
-   *   dateTo    — fecha fin   YYYY-MM-DD
-   */
   static async fetchMatches(
     competition: CompetitionCode,
     options?: {
       matchday?: number;
       status?: MatchStatus;
-      dateFrom?: string;   // YYYY-MM-DD
-      dateTo?: string;     // YYYY-MM-DD
+      dateFrom?: string;
+      dateTo?: string;
     }
   ) {
     const apiKey = process.env.EXPO_PUBLIC_FOOTBALL_API_KEY;
@@ -46,13 +37,25 @@ export class AdminService {
 
     const params = new URLSearchParams();
 
-    if (options?.matchday) params.set('matchday', String(options.matchday));
-    if (options?.dateFrom)  params.set('dateFrom', options.dateFrom);
-    if (options?.dateTo)    params.set('dateTo',   options.dateTo);
+    // matchday: solo si es entero válido entre 1 y 46
+    const md = options?.matchday;
+    if (md !== undefined && md !== null) {
+      const mdInt = Math.floor(md);
+      if (mdInt >= 1 && mdInt <= 46) {
+        params.set('matchday', String(mdInt));
+      }
+    }
 
-    // status solo si no hay rango de fechas (la API no admite ambos)
-    if (!options?.dateFrom && !options?.dateTo) {
-      params.set('status', options?.status ?? 'SCHEDULED');
+    const hasDateRange = !!(options?.dateFrom || options?.dateTo);
+
+    if (hasDateRange) {
+      // Con rango de fechas NO se puede enviar status (la API lo rechaza)
+      if (options?.dateFrom) params.set('dateFrom', options.dateFrom);
+      if (options?.dateTo)   params.set('dateTo',   options.dateTo);
+    } else {
+      // Sin rango, enviar status solo si no es 'ALL'
+      const st = options?.status ?? 'SCHEDULED';
+      if (st !== 'ALL') params.set('status', st);
     }
 
     const query = params.toString();
@@ -63,13 +66,14 @@ export class AdminService {
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Error de la API (${res.status}): ${text}`);
+      const json = await res.json().catch(() => null);
+      const msg = json?.message ?? await res.text();
+      throw new Error(`Error de la API (${res.status}): ${msg}`);
     }
 
     const data = await res.json();
     const matches = (data.matches ?? []).map((m: any) => ({
-      external_id: String(m.id),
+      external_id:      String(m.id),
       equipo_local:     m.homeTeam?.shortName ?? m.homeTeam?.name ?? '?',
       equipo_visitante: m.awayTeam?.shortName ?? m.awayTeam?.name ?? '?',
       fecha_partido:    m.utcDate,
@@ -79,7 +83,6 @@ export class AdminService {
     return { matches };
   }
 
-  /** Crea la quiniela + inserta los partidos seleccionados */
   static async createQuinielaConPartidos(
     titulo: string,
     descripcion: string,
@@ -107,12 +110,12 @@ export class AdminService {
     if (errQ) throw errQ;
 
     const rows = partidos.map((p, i) => ({
-      quiniela_id:       quiniela.id,
-      equipo_local:      p.equipo_local,
-      equipo_visitante:  p.equipo_visitante,
-      fecha_partido:     p.fecha_partido,
-      fixture_id:        parseInt(p.external_id) || null,
-      orden:             i + 1,
+      quiniela_id:      quiniela.id,
+      equipo_local:     p.equipo_local,
+      equipo_visitante: p.equipo_visitante,
+      fecha_partido:    p.fecha_partido,
+      fixture_id:       parseInt(p.external_id) || null,
+      orden:            i + 1,
     }));
 
     const { error: errP } = await supabase.from('partidos').insert(rows);

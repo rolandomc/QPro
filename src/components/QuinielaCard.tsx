@@ -1,79 +1,92 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
 import { supabase } from '../config/supabase';
 
 interface Props {
-  quiniela: {
-    id: string;
-    titulo: string;
-    descripcion?: string;
-    precio_entrada: number;
-    premio_total: number;
-    estado: string;
-    fecha_cierre?: string;
-    jugadores_minimos?: number;
-    porcentaje_admin?: number;
-  };
-  onPress: () => void;
+  id: string;
+  titulo: string;
+  descripcion?: string;
+  precioEntrada: number;
+  premioTotal: number;
+  estado: string;
+  totalPartidos?: number;
+  fechaCierre?: string;
+  jugadoresMinimos?: number;
+  porcentajeAdmin?: number;
 }
 
-export default function QuinielaCard({ quiniela, onPress }: Props) {
+function QuinielaCard({
+  id,
+  titulo,
+  descripcion,
+  precioEntrada,
+  premioTotal,
+  estado,
+  totalPartidos = 0,
+  fechaCierre,
+  jugadoresMinimos = 0,
+  porcentajeAdmin = 0,
+}: Props) {
+  const router = useRouter();
   const [jugadoresPagados, setJugadoresPagados] = useState(0);
 
-  const jugMin     = quiniela.jugadores_minimos ?? 0;
-  const pctAdmin   = quiniela.porcentaje_admin  ?? 0;
-  const precio     = quiniela.precio_entrada    ?? 0;
-
   useEffect(() => {
+    if (!id) return;
     let channel: any;
     const cargar = async () => {
       const { count } = await supabase
         .from('participaciones')
         .select('*', { count: 'exact', head: true })
-        .eq('quiniela_id', quiniela.id)
+        .eq('quiniela_id', id)
         .in('estado', ['pagado', 'ganador', 'perdedor']);
       setJugadoresPagados(count ?? 0);
     };
     cargar();
-    // Suscripción Realtime para actualizar el pozo en vivo
     channel = supabase
-      .channel(`pozo-${quiniela.id}`)
+      .channel(`pozo-${id}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'participaciones',
-        filter: `quiniela_id=eq.${quiniela.id}`,
+        filter: `quiniela_id=eq.${id}`,
       }, cargar)
       .subscribe();
     return () => { if (channel) supabase.removeChannel(channel); };
-  }, [quiniela.id]);
+  }, [id]);
 
-  const pozoActual       = jugadoresPagados * precio;
-  const premioActual     = pozoActual * (1 - pctAdmin / 100);
-  const minimoAlcanzado  = jugMin > 0 ? jugadoresPagados >= jugMin : true;
-  const faltanJugadores  = Math.max(0, jugMin - jugadoresPagados);
+  const pozoActual      = jugadoresPagados * precioEntrada;
+  const premioActual    = porcentajeAdmin > 0
+    ? pozoActual * (1 - porcentajeAdmin / 100)
+    : (premioTotal > 0 ? premioTotal : pozoActual);
+  const minimoAlcanzado = jugadoresMinimos > 0 ? jugadoresPagados >= jugadoresMinimos : true;
+  const faltanJugadores = Math.max(0, jugadoresMinimos - jugadoresPagados);
 
   const getEstadoColor = () => {
-    if (quiniela.estado === 'abierta')    return '#2ECC71';
-    if (quiniela.estado === 'cerrada')    return '#F39C12';
-    if (quiniela.estado === 'finalizada') return '#707070';
+    if (estado === 'abierta')    return '#2ECC71';
+    if (estado === 'cerrada')    return '#F39C12';
+    if (estado === 'finalizada') return '#707070';
     return '#A0A0A0';
   };
 
   const getEstadoLabel = () => {
-    if (quiniela.estado === 'abierta')    return '🟢 ABIERTA';
-    if (quiniela.estado === 'cerrada')    return '🟡 CERRADA';
-    if (quiniela.estado === 'finalizada') return '⚪ FINALIZADA';
-    return quiniela.estado.toUpperCase();
+    if (estado === 'abierta')    return '🟢 ABIERTA';
+    if (estado === 'cerrada')    return '🟡 CERRADA';
+    if (estado === 'finalizada') return '⚪ FINALIZADA';
+    return estado.toUpperCase();
   };
 
-  const fechaStr = quiniela.fecha_cierre
-    ? new Date(quiniela.fecha_cierre).toLocaleDateString('es-MX', { dateStyle: 'medium' })
+  const fechaStr = fechaCierre
+    ? new Date(fechaCierre).toLocaleDateString('es-MX', { dateStyle: 'medium' })
     : null;
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => router.push({ pathname: '/quiniela/[id]', params: { id } })}
+      activeOpacity={0.85}
+    >
       {/* Header */}
       <View style={styles.cardHeader}>
-        <Text style={styles.titulo} numberOfLines={2}>{quiniela.titulo}</Text>
+        <Text style={styles.titulo} numberOfLines={2}>{titulo}</Text>
         <View style={[styles.estadoBadge, { borderColor: getEstadoColor() }]}>
           <Text style={[styles.estadoText, { color: getEstadoColor() }]}>{getEstadoLabel()}</Text>
         </View>
@@ -84,27 +97,34 @@ export default function QuinielaCard({ quiniela, onPress }: Props) {
         {minimoAlcanzado ? (
           <>
             <Text style={styles.premioLabel}>Premio acumulado</Text>
-            <Text style={styles.premioValor}>${premioActual.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
+            <Text style={styles.premioValor}>
+              ${premioActual.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </Text>
           </>
         ) : (
           <>
             <Text style={styles.premioLabel}>Premio mínimo garantizado</Text>
-            <Text style={styles.premioValorGris}>${(jugMin * precio * (1 - pctAdmin / 100)).toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
+            <Text style={styles.premioValorGris}>
+              ${(jugadoresMinimos * precioEntrada * (1 - porcentajeAdmin / 100))
+                  .toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </Text>
             <View style={styles.faltanRow}>
-              <Text style={styles.faltanText}>⏳ Faltan {faltanJugadores} jugador{faltanJugadores !== 1 ? 'es' : ''} para activar el pozo</Text>
+              <Text style={styles.faltanText}>
+                ⏳ Faltan {faltanJugadores} jugador{faltanJugadores !== 1 ? 'es' : ''} para activar el pozo
+              </Text>
             </View>
           </>
         )}
-        {jugMin > 0 && (
+        {jugadoresMinimos > 0 && (
           <View style={styles.progressoRow}>
             <View style={styles.progressTrack}>
               <View style={[
                 styles.progressFill,
-                { width: `${Math.min((jugadoresPagados / jugMin) * 100, 100)}%` },
+                { width: `${Math.min((jugadoresPagados / jugadoresMinimos) * 100, 100)}%` },
                 minimoAlcanzado && styles.progressFillGreen,
               ]} />
             </View>
-            <Text style={styles.progressLabel}>{jugadoresPagados}/{jugMin}</Text>
+            <Text style={styles.progressLabel}>{jugadoresPagados}/{jugadoresMinimos}</Text>
           </View>
         )}
       </View>
@@ -113,12 +133,18 @@ export default function QuinielaCard({ quiniela, onPress }: Props) {
       <View style={styles.cardFooter}>
         <View style={styles.footerItem}>
           <Text style={styles.footerIcon}>💰</Text>
-          <Text style={styles.footerText}>${precio} entrada</Text>
+          <Text style={styles.footerText}>${precioEntrada} entrada</Text>
         </View>
-        {pctAdmin > 0 && (
+        {totalPartidos > 0 && (
+          <View style={styles.footerItem}>
+            <Text style={styles.footerIcon}>⚽</Text>
+            <Text style={styles.footerText}>{totalPartidos} partidos</Text>
+          </View>
+        )}
+        {porcentajeAdmin > 0 && (
           <View style={styles.footerItem}>
             <Text style={styles.footerIcon}>🏠</Text>
-            <Text style={styles.footerText}>{pctAdmin}% casa</Text>
+            <Text style={styles.footerText}>{porcentajeAdmin}% casa</Text>
           </View>
         )}
         {fechaStr && (
@@ -131,6 +157,9 @@ export default function QuinielaCard({ quiniela, onPress }: Props) {
     </TouchableOpacity>
   );
 }
+
+export { QuinielaCard };
+export default QuinielaCard;
 
 const styles = StyleSheet.create({
   card:              { backgroundColor: '#15181F', borderRadius: 16, padding: 16, marginBottom: 14, borderWidth: 1.5, borderColor: '#2A2D35' },

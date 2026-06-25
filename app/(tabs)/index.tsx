@@ -7,10 +7,10 @@ import { QuinielaCard } from '../../src/components/QuinielaCard';
 import { QuinielasService } from '../../src/services/quinielas.service';
 
 export default function QuinielasScreen() {
-  const [quinielas, setQuinielas] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [quinielas,  setQuinielas]  = useState<any[]>([]);
+  const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error,      setError]      = useState<string | null>(null);
 
   const loadQuinielas = useCallback(async () => {
     try {
@@ -25,25 +25,7 @@ export default function QuinielasScreen() {
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      setLoading(true);
-      loadQuinielas();
-    }, [])
-  );
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadQuinielas();
-  };
-
-  const renderEmpty = () => (
-    <View style={styles.emptyContainer}>
-      <Text style={styles.emptyIcon}>🏆</Text>
-      <Text style={styles.emptyTitle}>Sin quinielas activas</Text>
-      <Text style={styles.emptySubtitle}>El admin aún no ha publicado quinielas.{`\n`}Vuelve pronto.</Text>
-    </View>
-  );
+  useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
 
   if (loading) {
     return (
@@ -76,13 +58,17 @@ export default function QuinielasScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        ListEmptyComponent={renderEmpty}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>🏆</Text>
+            <Text style={styles.emptyTitle}>Sin quinielas activas</Text>
+            <Text style={styles.emptySubtitle}>El admin aún no ha publicado quinielas.{`\n`}Vuelve pronto.</Text>
+          </View>
+        }
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#2ECC71" colors={['#2ECC71']} />
+          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); }} tintColor="#2ECC71" colors={['#2ECC71']} />
         }
-        ListHeaderComponent={
-          <Text style={styles.sectionTitle}>🔥 Quinielas Disponibles</Text>
-        }
+        ListHeaderComponent={<Text style={styles.sectionTitle}>🔥 Quinielas Disponibles</Text>}
         renderItem={({ item }) => (
           <QuinielaCard
             id={item.id}
@@ -92,6 +78,9 @@ export default function QuinielasScreen() {
             premioTotal={item.premio_total}
             estado={item.estado}
             totalPartidos={item.partidos?.[0]?.count ?? 0}
+            fechaCierre={item.fecha_cierre}
+            jugadoresMinimos={item.jugadores_minimos ?? 0}
+            porcentajeAdmin={item.porcentaje_admin ?? 0}
           />
         )}
       />
@@ -100,16 +89,16 @@ export default function QuinielasScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A0C10' },
-  listContent: { paddingHorizontal: 15, paddingTop: 5, paddingBottom: 40 },
-  sectionTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 15, marginTop: 10 },
+  container:        { flex: 1, backgroundColor: '#0A0C10' },
+  listContent:      { paddingHorizontal: 15, paddingTop: 5, paddingBottom: 40 },
+  sectionTitle:     { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 15, marginTop: 10 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 15 },
-  loadingText: { color: '#A0A0A0', fontSize: 14 },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
-  emptyIcon: { fontSize: 60, marginBottom: 15 },
-  emptyTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
-  emptySubtitle: { color: '#A0A0A0', fontSize: 14, textAlign: 'center', lineHeight: 22 },
-  errorBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.1)', borderWidth: 1, borderColor: '#E74C3C', margin: 15, padding: 12, borderRadius: 10 },
-  errorText: { color: '#E74C3C', fontSize: 13, flex: 1 },
-  retryText: { color: '#2ECC71', fontWeight: 'bold', fontSize: 13, marginLeft: 10 },
+  loadingText:      { color: '#A0A0A0', fontSize: 14 },
+  emptyContainer:   { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
+  emptyIcon:        { fontSize: 60, marginBottom: 15 },
+  emptyTitle:       { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
+  emptySubtitle:    { color: '#A0A0A0', fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  errorBanner:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.1)', borderWidth: 1, borderColor: '#E74C3C', margin: 15, padding: 12, borderRadius: 10 },
+  errorText:        { color: '#E74C3C', fontSize: 13, flex: 1 },
+  retryText:        { color: '#2ECC71', fontWeight: 'bold', fontSize: 13, marginLeft: 10 },
 });

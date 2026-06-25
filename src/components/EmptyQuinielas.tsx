@@ -41,27 +41,25 @@ export default function EmptyQuinielas() {
     QuinielasService.getFinalizadas().then(d => setFinalizadas(d || [])).catch(() => {});
   }, []);
 
-  // TODO: implementar con expo-notifications cuando se agregue
   const handleNotificacion = () => {
     setNotifActiva(true);
-    Alert.alert('\uD83D\uDD14 Pr\u00F3ximamente', 'Las notificaciones push estar\u00E1n disponibles en la siguiente actualizaci\u00F3n.');
+    Alert.alert('Próximamente', 'Las notificaciones push estarán disponibles en la siguiente actualización.');
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
 
-      <Text style={styles.icon}>\uD83C\uDFC6</Text>
+      <Text style={styles.icon}>{String.fromCodePoint(0x1F3C6)}</Text>
       <Text style={styles.titulo}>Sin quinielas activas</Text>
-      <Text style={styles.subtitulo}>{`El admin a\u00FAn no ha publicado quinielas.\nVuelve pronto.`}</Text>
+      <Text style={styles.subtitulo}>{`El admin aún no ha publicado quinielas.\nVuelve pronto.`}</Text>
 
-      {/* Countdown */}
       {proximaFecha && !countdown.pasado && (
         <View style={styles.countdownBox}>
-          <Text style={styles.countdownLabel}>\u23F3 Pr\u00F3xima quiniela en</Text>
+          <Text style={styles.countdownLabel}>{String.fromCodePoint(0x23F3)} Próxima quiniela en</Text>
           <View style={styles.countdownRow}>
             <View style={styles.countdownUnit}>
               <Text style={styles.countdownNum}>{String(countdown.dias).padStart(2, '0')}</Text>
-              <Text style={styles.countdownUnitLabel}>d\u00EDas</Text>
+              <Text style={styles.countdownUnitLabel}>días</Text>
             </View>
             <Text style={styles.countdownSep}>:</Text>
             <View style={styles.countdownUnit}>
@@ -82,26 +80,26 @@ export default function EmptyQuinielas() {
         </View>
       )}
 
-      {/* Boton notificaciones */}
       <TouchableOpacity
         style={[styles.notifBtn, notifActiva && styles.notifBtnActiva]}
         onPress={handleNotificacion}
         disabled={notifActiva}
       >
         <Text style={[styles.notifBtnText, notifActiva && { color: '#2ECC71' }]}>
-          {notifActiva ? '\uD83D\uDD14 Te avisaremos cuando haya una nueva \u2705' : '\uD83D\uDD14 Av\u00EDsame cuando haya una nueva'}
+          {notifActiva
+            ? `${String.fromCodePoint(0x1F514)} Te avisaremos cuando haya una nueva ${String.fromCodePoint(0x2705)}`
+            : `${String.fromCodePoint(0x1F514)} Avísame cuando haya una nueva`}
         </Text>
       </TouchableOpacity>
 
-      {/* Historial quinielas finalizadas */}
       {finalizadas.length > 0 && (
         <View style={styles.historialBox}>
-          <Text style={styles.historialTitulo}>\uD83D\uDCDC \u00DAltimas Quinielas</Text>
+          <Text style={styles.historialTitulo}>{String.fromCodePoint(0x1F4DC)} Últimas Quinielas</Text>
           {finalizadas.map((q) => (
             <View key={q.id} style={styles.historialCard}>
               <View style={styles.historialHeader}>
                 <Text style={styles.historialNombre} numberOfLines={1}>{q.titulo}</Text>
-                <Text style={styles.historialEstado}>\u2705 Finalizada</Text>
+                <Text style={styles.historialEstado}>{String.fromCodePoint(0x2705)} Finalizada</Text>
               </View>
               <View style={styles.historialStats}>
                 <View style={styles.historialStat}>
@@ -121,7 +119,7 @@ export default function EmptyQuinielas() {
               </View>
               {q.ganador_username && (
                 <View style={styles.ganadorRow}>
-                  <Text style={styles.ganadorIcon}>\uD83E\uDD47</Text>
+                  <Text style={styles.ganadorIcon}>{String.fromCodePoint(0x1F947)}</Text>
                   <Text style={styles.ganadorText}>{q.ganador_username}</Text>
                 </View>
               )}

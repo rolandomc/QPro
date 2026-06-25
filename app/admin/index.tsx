@@ -24,11 +24,10 @@ export default function AdminDashboardScreen() {
   const [usuarios,             setUsuarios]             = useState<any[]>([]);
   const [loadingUsuarios,      setLoadingUsuarios]      = useState(false);
   const [quinielaSeleccionada, setQuinielaSeleccionada] = useState('');
-  // Config proxima quiniela
-  const [proximaFecha,   setProximaFecha]   = useState('');
-  const [savingFecha,    setSavingFecha]    = useState(false);
-  const [configExpanded, setConfigExpanded] = useState(false);
-  const [pickerVisible,  setPickerVisible]  = useState(false);
+  const [proximaFecha,         setProximaFecha]         = useState('');
+  const [savingFecha,          setSavingFecha]          = useState(false);
+  const [configExpanded,       setConfigExpanded]       = useState(false);
+  const [pickerVisible,        setPickerVisible]        = useState(false);
 
   const loadQuinielas = useCallback(async () => {
     try {
@@ -57,8 +56,8 @@ export default function AdminDashboardScreen() {
     setSavingFecha(true);
     try {
       await QuinielasService.setProximaFecha(proximaFecha || null);
-      Alert.alert('\u2705 Guardado', proximaFecha
-        ? 'Los usuarios ver\u00E1n el countdown en la pantalla principal.'
+      Alert.alert('Guardado', proximaFecha
+        ? 'Los usuarios verán el countdown en la pantalla principal.'
         : 'Countdown ocultado.');
     } catch (e: any) {
       Alert.alert('Error', e.message);
@@ -100,14 +99,14 @@ export default function AdminDashboardScreen() {
   };
 
   const handleCerrarApuestas = (quinielaId: string, titulo: string) => {
-    Alert.alert('\uD83D\uDD12 Cerrar Apuestas', `\u00BFCerrar "${titulo}"?\n\nYa nadie podr\u00E1 participar.`, [
+    Alert.alert('Cerrar Apuestas', `¿Cerrar "${titulo}"?\n\nYa nadie podrá participar.`, [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Cerrar', style: 'destructive', onPress: async () => {
         setActionLoading(quinielaId + '_cerrar');
         try {
           await AdminService.updateEstado(quinielaId, 'cerrada');
           setQuinielas(prev => prev.map(q => q.id === quinielaId ? { ...q, estado: 'cerrada' } : q));
-          Alert.alert('\u2705 Cerrada', `"${titulo}" ya no acepta participaciones.`);
+          Alert.alert('Cerrada', `"${titulo}" ya no acepta participaciones.`);
         } catch (e: any) { Alert.alert('Error', e.message); }
         finally { setActionLoading(null); }
       }},
@@ -115,9 +114,9 @@ export default function AdminDashboardScreen() {
   };
 
   const handleCancelar = (quinielaId: string, titulo: string) => {
-    Alert.alert('\u26A0\uFE0F Cancelar', `\u00BFCancelar "${titulo}" definitivamente?`, [
+    Alert.alert('Cancelar', `¿Cancelar "${titulo}" definitivamente?`, [
       { text: 'No', style: 'cancel' },
-      { text: 'S\u00ED, Cancelar', style: 'destructive', onPress: async () => {
+      { text: 'Sí, Cancelar', style: 'destructive', onPress: async () => {
         setActionLoading(quinielaId + '_cancelar');
         try {
           await AdminService.updateEstado(quinielaId, 'finalizada');
@@ -145,13 +144,14 @@ export default function AdminDashboardScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backText}>\u2190 Volver</Text>
+          <Text style={styles.backText}>← Volver</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Panel Admin</Text>
         <View style={{ width: 60 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}
+      <ScrollView
+        contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); }} tintColor="#9B59B6" />}
       >
         {/* Stats */}
@@ -168,22 +168,21 @@ export default function AdminDashboardScreen() {
 
         {/* Config proxima quiniela */}
         <TouchableOpacity style={styles.configHeader} onPress={() => setConfigExpanded(v => !v)}>
-          <Text style={styles.configHeaderText}>\u23F0 Configurar Pr\u00F3xima Quiniela</Text>
-          <Text style={styles.configChevron}>{configExpanded ? '\u25B2' : '\u25BC'}</Text>
+          <Text style={styles.configHeaderText}>⏰ Configurar Próxima Quiniela</Text>
+          <Text style={styles.configChevron}>{configExpanded ? '▲' : '▼'}</Text>
         </TouchableOpacity>
 
         {configExpanded && (
           <View style={styles.configBox}>
-            {/* Boton para abrir el picker */}
             <TouchableOpacity style={styles.datePickerBtn} onPress={() => setPickerVisible(true)}>
-              <Text style={styles.datePickerIcon}>\uD83D\uDCC5</Text>
+              <Text style={styles.datePickerIcon}>📅</Text>
               <View style={{ flex: 1 }}>
                 <Text style={styles.datePickerLabel}>Seleccionar fecha y hora</Text>
                 <Text style={styles.datePickerValue}>
                   {proximaFecha ? formatDisplay(proximaFecha) : 'Sin fecha configurada'}
                 </Text>
               </View>
-              <Text style={styles.datePickerArrow}>\u203A</Text>
+              <Text style={styles.datePickerArrow}>›</Text>
             </TouchableOpacity>
 
             <View style={styles.configBtns}>
@@ -194,24 +193,28 @@ export default function AdminDashboardScreen() {
               >
                 {savingFecha
                   ? <ActivityIndicator size="small" color="#000" />
-                  : <Text style={styles.configBtnSaveText}>\uD83D\uDCBE Guardar</Text>}
+                  : <Text style={styles.configBtnSaveText}>Guardar</Text>}
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.configBtn, styles.configBtnClear]}
                 onPress={handleLimpiar}
               >
-                <Text style={styles.configBtnClearText}>\uD83D\uDDD1 Limpiar</Text>
+                <Text style={styles.configBtnClearText}>Limpiar</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
         <TouchableOpacity style={[styles.createBtn, styles.neonBorderPurple]} onPress={() => router.push('/admin/create')}>
-          <Text style={styles.createBtnText}>+ Dise\u00F1ar Nueva Quiniela</Text>
+          <Text style={styles.createBtnText}>+ Diseñar Nueva Quiniela</Text>
         </TouchableOpacity>
 
         <Text style={styles.sectionTitle}>Quinielas</Text>
-        {quinielas.length === 0 && <View style={styles.emptyBox}><Text style={styles.emptyText}>No hay quinielas creadas a\u00FAn.</Text></View>}
+        {quinielas.length === 0 && (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyText}>No hay quinielas creadas aún.</Text>
+          </View>
+        )}
 
         {quinielas.map((q) => (
           <TouchableOpacity key={q.id} style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
@@ -220,19 +223,19 @@ export default function AdminDashboardScreen() {
               <View style={[styles.badge, { borderColor: getEstadoColor(q.estado) }]}>
                 <Text style={[styles.badgeText, { color: getEstadoColor(q.estado) }]}>{q.estado.toUpperCase()}</Text>
               </View>
-              <Text style={styles.cardArrow}>\u203A</Text>
+              <Text style={styles.cardArrow}>›</Text>
             </View>
             <View style={styles.cardInfo}>
-              <Text style={styles.infoText}>\uD83C\uDFAA Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
-              <Text style={styles.infoText}>\uD83D\uDCB0 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada}</Text></Text>
+              <Text style={styles.infoText}>🎪 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
+              <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada}</Text></Text>
             </View>
             <View style={styles.cardInfo}>
-              <Text style={styles.infoText}>\uD83D\uDC65 M\u00EDn: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0}</Text></Text>
-              <Text style={styles.infoText}>\uD83C\uDFE0 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
+              <Text style={styles.infoText}>👥 Mín: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0}</Text></Text>
+              <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
             </View>
             <View style={styles.cardActions}>
               <TouchableOpacity style={styles.actionBtn} onPress={(e) => { e.stopPropagation?.(); handleVerUsuarios(q.id, q.titulo); }}>
-                <Text style={styles.actionText}>\uD83D\uDC65 Usuarios</Text>
+                <Text style={styles.actionText}>👥 Usuarios</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionBtn, q.estado !== 'abierta' && styles.disabledBtn]}
@@ -241,7 +244,7 @@ export default function AdminDashboardScreen() {
               >
                 {actionLoading === q.id + '_cerrar'
                   ? <ActivityIndicator size="small" color="#3498DB" />
-                  : <Text style={[styles.actionText, q.estado !== 'abierta' && { color: '#505050' }]}>\uD83D\uDD12 Cerrar</Text>}
+                  : <Text style={[styles.actionText, q.estado !== 'abierta' && { color: '#505050' }]}>🔒 Cerrar</Text>}
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionBtn, styles.dangerBtn, q.estado === 'finalizada' && styles.disabledBtn]}
@@ -250,14 +253,13 @@ export default function AdminDashboardScreen() {
               >
                 {actionLoading === q.id + '_cancelar'
                   ? <ActivityIndicator size="small" color="#E91E63" />
-                  : <Text style={[styles.dangerText, q.estado === 'finalizada' && { color: '#505050' }]}>\u274C Cancelar</Text>}
+                  : <Text style={[styles.dangerText, q.estado === 'finalizada' && { color: '#505050' }]}>❌ Cancelar</Text>}
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
         ))}
       </ScrollView>
 
-      {/* DateTimePicker modal */}
       <DateTimePicker
         visible={pickerVisible}
         initialDate={proximaFecha ? new Date(proximaFecha) : new Date()}
@@ -270,16 +272,16 @@ export default function AdminDashboardScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>\uD83D\uDC65 Participantes</Text>
+              <Text style={styles.modalTitle}>👥 Participantes</Text>
               <Text style={styles.modalSubtitle} numberOfLines={1}>{quinielaSeleccionada}</Text>
               <TouchableOpacity onPress={() => setUsuariosModal(false)} style={styles.modalClose}>
-                <Text style={styles.modalCloseText}>\u2715</Text>
+                <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
             {loadingUsuarios ? (
               <ActivityIndicator size="large" color="#2ECC71" style={{ marginVertical: 30 }} />
             ) : usuarios.length === 0 ? (
-              <Text style={styles.emptyText}>Nadie ha participado a\u00FAn.</Text>
+              <Text style={styles.emptyText}>Nadie ha participado aún.</Text>
             ) : (
               <FlatList
                 data={usuarios}
@@ -321,7 +323,6 @@ const styles = StyleSheet.create({
   configHeaderText:   { color: '#F39C12', fontWeight: 'bold', fontSize: 14 },
   configChevron:      { color: '#F39C12', fontSize: 12 },
   configBox:          { backgroundColor: '#15181F', borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
-  // Date picker button
   datePickerBtn:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1F26', borderRadius: 10, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#F39C12', gap: 10 },
   datePickerIcon:     { fontSize: 24 },
   datePickerLabel:    { color: '#A0A0A0', fontSize: 11, marginBottom: 2 },

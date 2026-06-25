@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { QuinielasService } from '../services/quinielas.service';
 
 function useCountdown(targetDate: string | null) {
@@ -41,31 +41,10 @@ export default function EmptyQuinielas() {
     QuinielasService.getFinalizadas().then(d => setFinalizadas(d || [])).catch(() => {});
   }, []);
 
-  const handleNotificacion = async () => {
-    // TODO: cuando instales expo-notifications, reemplaza esto por el flujo real de push tokens
-    try {
-      // Intentamos importar dinamicamente (si el paquete ya esta instalado lo usa, si no muestra aviso)
-      const Notifications = await import('expo-notifications').catch(() => null);
-      if (!Notifications) {
-        Alert.alert(
-          '\uD83D\uDD14 Notificaciones',
-          'Para activar notificaciones ejecuta en tu proyecto:\n\nnpx expo install expo-notifications\n\ny luego reinicia la app.',
-          [{ text: 'Entendido' }]
-        );
-        return;
-      }
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permisos denegados', 'Activa las notificaciones en Ajustes.');
-        return;
-      }
-      const token = await Notifications.getExpoPushTokenAsync();
-      await QuinielasService.guardarPushToken(token.data);
-      setNotifActiva(true);
-      Alert.alert('\u2705 Listo', 'Te avisaremos cuando haya una nueva quiniela.');
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    }
+  // TODO: implementar con expo-notifications cuando se agregue
+  const handleNotificacion = () => {
+    setNotifActiva(true);
+    Alert.alert('\uD83D\uDD14 Pr\u00F3ximamente', 'Las notificaciones push estar\u00E1n disponibles en la siguiente actualizaci\u00F3n.');
   };
 
   return (
@@ -73,7 +52,7 @@ export default function EmptyQuinielas() {
 
       <Text style={styles.icon}>\uD83C\uDFC6</Text>
       <Text style={styles.titulo}>Sin quinielas activas</Text>
-      <Text style={styles.subtitulo}>El admin a\u00fan no ha publicado quinielas.{`\n`}Vuelve pronto.</Text>
+      <Text style={styles.subtitulo}>{`El admin a\u00FAn no ha publicado quinielas.\nVuelve pronto.`}</Text>
 
       {/* Countdown */}
       {proximaFecha && !countdown.pasado && (
@@ -110,7 +89,7 @@ export default function EmptyQuinielas() {
         disabled={notifActiva}
       >
         <Text style={[styles.notifBtnText, notifActiva && { color: '#2ECC71' }]}>
-          {notifActiva ? '\uD83D\uDD14 Notificaci\u00F3n activada \u2705' : '\uD83D\uDD14 Av\u00EDsame cuando haya una nueva'}
+          {notifActiva ? '\uD83D\uDD14 Te avisaremos cuando haya una nueva \u2705' : '\uD83D\uDD14 Av\u00EDsame cuando haya una nueva'}
         </Text>
       </TouchableOpacity>
 

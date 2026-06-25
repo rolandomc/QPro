@@ -36,30 +36,23 @@ export default function GanadoresScreen() {
           .order('aciertos', { ascending: false, nullsFirst: false }),
         supabase.from('partidos').select('*', { count: 'exact', head: true }).eq('quiniela_id', id),
       ]);
-
       if (errQ) throw errQ;
       if (errP) throw errP;
 
-      // Traer usernames por separado para evitar problemas de FK
       const userIds = (parts || []).map(p => p.user_id).filter(Boolean);
       let usernameMap: Record<string, string> = {};
       if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, username')
-          .in('id', userIds);
+        const { data: profiles } = await supabase.from('profiles').select('id, username').in('id', userIds);
         usernameMap = Object.fromEntries((profiles || []).map(pr => [pr.id, pr.username]));
       }
 
-      const partsConUsername = (parts || []).map(p => ({
-        ...p,
-        aciertos:    p.aciertos ?? 0,
-        premio_ganado: p.premio_ganado ?? 0,
-        username:    usernameMap[p.user_id] ?? 'Usuario',
-      }));
-
       setQuiniela(q);
-      setParticipantes(partsConUsername);
+      setParticipantes((parts || []).map(p => ({
+        ...p,
+        aciertos:     p.aciertos ?? 0,
+        premio_ganado: p.premio_ganado ?? 0,
+        username:     usernameMap[p.user_id] ?? 'Usuario',
+      })));
       setTotalPartidos(count || 0);
     } catch (e: any) {
       Alert.alert('Error', e.message);
@@ -68,33 +61,14 @@ export default function GanadoresScreen() {
     }
   };
 
-  // ── Recalcular aciertos manualmente ───────────────────────────────────
+  // ── Recalcular via RPC ─────────────────────────────────────────────────
   const handleRecalcular = async () => {
     setRecalculando(true);
     try {
-      // Traer partidos con resultado
-      const { data: partidos } = await supabase
-        .from('partidos')
-        .select('id, resultado')
-        .eq('quiniela_id', id)
-        .not('resultado', 'is', null);
-
-      const resultadoMap = Object.fromEntries((partidos || []).map(p => [p.id, p.resultado]));
-
-      for (const part of participantes) {
-        const { data: sels } = await supabase
-          .from('selecciones')
-          .select('partido_id, prediccion')
-          .eq('participacion_id', part.id);
-
-        const aciertos = (sels || []).filter(
-          s => resultadoMap[s.partido_id] && resultadoMap[s.partido_id] === s.prediccion
-        ).length;
-
-        await supabase.from('participaciones').update({ aciertos }).eq('id', part.id);
-      }
+      const { error } = await supabase.rpc('recalcular_aciertos', { p_quiniela_id: id });
+      if (error) throw error;
       await cargarDatos();
-      Alert.alert('✅ Aciertos recalculados', 'Los aciertos fueron actualizados.');
+      Alert.alert('✅ Aciertos actualizados');
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -102,25 +76,17 @@ export default function GanadoresScreen() {
     }
   };
 
-  // ── Distribuir premios ───────────────────────────────────────────────
+  // ── Distribuir + notificar ───────────────────────────────────────────────
   const handleDistribuirPremios = async () => {
     if (!quiniela) return;
-
     const topAciertos = participantes[0]?.aciertos ?? 0;
     if (topAciertos === 0) {
-      Alert.alert(
-        '⚠️ Sin aciertos',
-        'El primer lugar tiene 0 aciertos.\n\nSi los partidos ya tienen resultado, presiona “Recalcular aciertos” primero.'
-      );
+      Alert.alert('⚠️ Sin aciertos', 'Presiona “Recalcular Aciertos” primero.');
       return;
     }
-
     const premioTotal = quiniela.premio_total ?? 0;
     if (premioTotal <= 0) {
-      Alert.alert(
-        '⚠️ Pozo vacío',
-        'premio_total es 0.\nActualiza el campo manualmente en Supabase o asegúrate de que monto_pagado esté registrado.'
-      );
+      Alert.alert('⚠️ Pozo vacío', 'El premio_total es 0. Actualiza la quiniela con el monto del pozo.');
       return;
     }
 
@@ -147,23 +113,49 @@ export default function GanadoresScreen() {
             setDistribuyendo(true);
             try {
               const ganadoresIds: string[] = [];
+              const notificaciones: any[] = [];
+
               for (let i = 0; i < nivelesOrdenados.length; i++) {
                 const aciertos = nivelesOrdenados[i];
                 const grupo    = porAciertos[aciertos];
-                const monto    = (premioTotal * DIST[i]) / grupo.length;
+                const monto    = Math.round((premioTotal * DIST[i]) / grupo.length);
+
                 for (const part of grupo) {
                   await supabase.from('participaciones')
-                    .update({ premio_ganado: Math.round(monto), estado: 'ganador' })
+                    .update({ premio_ganado: monto, estado: 'ganador' })
                     .eq('id', part.id);
                   ganadoresIds.push(part.id);
+
+                  notificaciones.push({
+                    user_id: part.user_id,
+                    tipo:    'ganador',
+                    titulo:  `🏆 ¡Ganaste en ${quiniela.titulo}!`,
+                    mensaje: `Quedaste en el lugar ${i + 1} con ${aciertos} aciertos. Tu premio: $${monto.toLocaleString()}.`,
+                    leida:   false,
+                  });
                 }
               }
+
+              // Perdedores
               const perdedores = participantes.filter(p => !ganadoresIds.includes(p.id));
               for (const p of perdedores) {
                 await supabase.from('participaciones').update({ estado: 'perdedor' }).eq('id', p.id);
+                notificaciones.push({
+                  user_id: p.user_id,
+                  tipo:    'perdedor',
+                  titulo:  `Resultado en ${quiniela.titulo}`,
+                  mensaje: `Terminaste con ${p.aciertos} acierto${p.aciertos !== 1 ? 's' : ''}. ¡Suerte en la próxima!`,
+                  leida:   false,
+                });
               }
+
+              // Insertar todas las notificaciones
+              if (notificaciones.length > 0) {
+                await supabase.from('notificaciones').insert(notificaciones);
+              }
+
               await cargarDatos();
-              Alert.alert('🎉 ¡Premios distribuidos!', 'Los ganadores han sido asignados.');
+              Alert.alert('🎉 ¡Premios distribuidos!', 'Los participantes recibieron una notificación en su app.');
             } catch (e: any) {
               Alert.alert('Error', e.message);
             } finally {
@@ -195,8 +187,6 @@ export default function GanadoresScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-
-        {/* Resumen */}
         <View style={styles.resumenRow}>
           <View style={styles.resumenBox}>
             <Text style={styles.resumenVal}>{participantes.length}</Text>
@@ -212,27 +202,15 @@ export default function GanadoresScreen() {
           </View>
         </View>
 
-        {/* Recalcular aciertos */}
-        <TouchableOpacity
-          style={[styles.recalcularBtn, recalculando && { opacity: 0.6 }]}
-          onPress={handleRecalcular}
-          disabled={recalculando}
-        >
-          {recalculando
-            ? <ActivityIndicator color="#3498DB" />
-            : <Text style={styles.recalcularBtnText}>🔄 Recalcular Aciertos</Text>}
+        <TouchableOpacity style={[styles.recalcularBtn, recalculando && { opacity: 0.6 }]}
+          onPress={handleRecalcular} disabled={recalculando}>
+          {recalculando ? <ActivityIndicator color="#3498DB" /> : <Text style={styles.recalcularBtnText}>🔄 Recalcular Aciertos</Text>}
         </TouchableOpacity>
 
-        {/* Distribuir premios */}
         {!premioYaDistribuido ? (
-          <TouchableOpacity
-            style={[styles.distribuirBtn, distribuyendo && { opacity: 0.6 }]}
-            onPress={handleDistribuirPremios}
-            disabled={distribuyendo}
-          >
-            {distribuyendo
-              ? <ActivityIndicator color="#000" />
-              : <Text style={styles.distribuirBtnText}>💰 Distribuir Premios Ahora</Text>}
+          <TouchableOpacity style={[styles.distribuirBtn, distribuyendo && { opacity: 0.6 }]}
+            onPress={handleDistribuirPremios} disabled={distribuyendo}>
+            {distribuyendo ? <ActivityIndicator color="#000" /> : <Text style={styles.distribuirBtnText}>💰 Distribuir Premios Ahora</Text>}
           </TouchableOpacity>
         ) : (
           <View style={styles.yaDistribuidoBadge}>
@@ -240,7 +218,6 @@ export default function GanadoresScreen() {
           </View>
         )}
 
-        {/* Regla */}
         <View style={styles.reglaBox}>
           <Text style={styles.reglaTitle}>Regla de distribución</Text>
           <Text style={styles.reglaItem}>🥇 1er lugar — 60% del pozo</Text>
@@ -249,7 +226,6 @@ export default function GanadoresScreen() {
           <Text style={styles.reglaNote}>Empates comparten el monto del lugar</Text>
         </View>
 
-        {/* Ranking */}
         <Text style={styles.sectionTitle}>Tabla de Posiciones</Text>
 
         {participantes.map((part, index) => {
@@ -257,13 +233,12 @@ export default function GanadoresScreen() {
           const porcentaje = totalPartidos > 0 ? Math.round((aciertos / totalPartidos) * 100) : 0;
           const esGanador  = part.estado === 'ganador';
           const esPerdedor = part.estado === 'perdedor';
-
           return (
             <View key={part.id} style={[
               styles.rankCard,
-              index === 0        && styles.rankCardPrimero,
-              esGanador          && styles.rankCardGanador,
-              esPerdedor         && styles.rankCardPerdedor,
+              index === 0 && styles.rankCardPrimero,
+              esGanador   && styles.rankCardGanador,
+              esPerdedor  && styles.rankCardPerdedor,
             ]}>
               <View style={styles.rankLeft}>
                 <Text style={styles.rankPos}>{MEDALS[index] ?? `#${index + 1}`}</Text>

@@ -40,13 +40,10 @@ export class AdminService {
     const md = options?.matchday;
     if (md !== undefined && md !== null) {
       const mdInt = Math.floor(md);
-      if (mdInt >= 1 && mdInt <= 46) {
-        params.set('matchday', String(mdInt));
-      }
+      if (mdInt >= 1 && mdInt <= 46) params.set('matchday', String(mdInt));
     }
 
     const hasDateRange = !!(options?.dateFrom || options?.dateTo);
-
     if (hasDateRange) {
       if (options?.dateFrom) params.set('dateFrom', options.dateFrom);
       if (options?.dateTo)   params.set('dateTo',   options.dateTo);
@@ -58,10 +55,7 @@ export class AdminService {
     const query = params.toString();
     const url = `${FOOTBALL_API_BASE}/competitions/${competition}/matches${query ? '?' + query : ''}`;
 
-    const res = await fetch(url, {
-      headers: { 'X-Auth-Token': apiKey },
-    });
-
+    const res = await fetch(url, { headers: { 'X-Auth-Token': apiKey } });
     if (!res.ok) {
       const json = await res.json().catch(() => null);
       const msg = json?.message ?? await res.text();
@@ -90,17 +84,21 @@ export class AdminService {
       equipo_local: string;
       equipo_visitante: string;
       fecha_partido: string;
-    }>
+    }>,
+    jugadoresMinimos: number = 5,
+    porcentajeAdmin: number = 10,
   ) {
     const { data: quiniela, error: errQ } = await supabase
       .from('quinielas')
       .insert({
         titulo,
         descripcion,
-        precio_entrada: precioEntrada,
-        premio_total: 0,
-        estado: 'abierta',
-        fecha_cierre: fechaCierre,
+        precio_entrada:    precioEntrada,
+        premio_total:      0,
+        estado:            'abierta',
+        fecha_cierre:      fechaCierre,
+        jugadores_minimos: jugadoresMinimos,
+        porcentaje_admin:  porcentajeAdmin,
       })
       .select('id')
       .single();
@@ -123,7 +121,7 @@ export class AdminService {
   static async getQuinielas() {
     const { data, error } = await supabase
       .from('quinielas')
-      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, auto_resultados, created_at, partidos(count)')
+      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, auto_resultados, jugadores_minimos, porcentaje_admin, created_at, partidos(count)')
       .order('created_at', { ascending: false });
     if (error) throw error;
     return data;
@@ -155,11 +153,8 @@ export class AdminService {
     if (error) throw error;
   }
 
-  // ── Un solo query SQL vía RPC — nunca falla silenciosamente ──────────────
   static async recalcularAciertos(quinielaId: string) {
-    const { error } = await supabase.rpc('recalcular_aciertos', {
-      p_quiniela_id: quinielaId,
-    });
+    const { error } = await supabase.rpc('recalcular_aciertos', { p_quiniela_id: quinielaId });
     if (error) throw error;
   }
 
@@ -171,5 +166,15 @@ export class AdminService {
       .order('aciertos', { ascending: false });
     if (error) throw error;
     return data;
+  }
+
+  /** Cuenta jugadores con pago confirmado */
+  static async getJugadoresPagados(quinielaId: string): Promise<number> {
+    const { count } = await supabase
+      .from('participaciones')
+      .select('*', { count: 'exact', head: true })
+      .eq('quiniela_id', quinielaId)
+      .in('estado', ['pagado', 'ganador', 'perdedor']);
+    return count ?? 0;
   }
 }

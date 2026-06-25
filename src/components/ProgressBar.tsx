@@ -7,32 +7,54 @@ interface Props {
 }
 
 export default function ProgressBar({ current, total }: Props) {
-  const percentage = Math.min((current / total) * 100, 100);
+  const pct = total > 0 ? (current / total) * 100 : 0;
+  const isComplete = current === total && total > 0;
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.label}>Pronósticos listos:</Text>
-        <Text style={styles.neonText}>{current} / {total}</Text>
+      <View style={styles.row}>
+        <Text style={styles.label}>
+          {isComplete ? '✅ Todos los partidos seleccionados' : `Seleccionados: ${current} de ${total}`}
+        </Text>
+        <Text style={[styles.pct, isComplete && styles.pctComplete]}>{Math.round(pct)}%</Text>
       </View>
       <View style={styles.track}>
-        <View style={[styles.fill, { width: `${percentage}%` }]} />
+        <View
+          style={[
+            styles.fill,
+            { width: `${pct}%` },
+            isComplete && styles.fillComplete,
+          ]}
+        />
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 20, marginBottom: 15 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  label: { color: '#A0A0A0', fontSize: 12, fontWeight: '600' },
-  neonText: { 
-    color: '#2ECC71', fontSize: 14, fontWeight: 'bold',
-    textShadowColor: 'rgba(46, 204, 113, 0.8)', textShadowRadius: 8
+  container: {
+    marginHorizontal: 15,
+    marginBottom: 12,
+    backgroundColor: '#15181F',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#2A2D35',
   },
-  track: { height: 8, backgroundColor: '#1C1F26', borderRadius: 4, overflow: 'hidden' },
-  fill: { 
-    height: '100%', backgroundColor: '#2ECC71', borderRadius: 4,
-    shadowColor: '#2ECC71', shadowOpacity: 1, shadowRadius: 10, elevation: 5
-  }
+  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  label: { color: '#A0A0A0', fontSize: 12 },
+  pct: { color: '#A0A0A0', fontSize: 12, fontWeight: 'bold' },
+  pctComplete: { color: '#2ECC71' },
+  track: {
+    height: 6,
+    backgroundColor: '#1C1F26',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  fill: {
+    height: '100%',
+    backgroundColor: '#3498DB',
+    borderRadius: 3,
+  },
+  fillComplete: { backgroundColor: '#2ECC71' },
 });

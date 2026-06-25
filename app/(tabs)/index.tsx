@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import Header from '../../src/components/Header';
 import { QuinielaCard } from '../../src/components/QuinielaCard';
+import EmptyQuinielas from '../../src/components/EmptyQuinielas';
 import { QuinielasService } from '../../src/services/quinielas.service';
 
 export default function QuinielasScreen() {
@@ -56,15 +57,10 @@ export default function QuinielasScreen() {
       <FlatList
         data={quinielas}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, quinielas.length === 0 && { flex: 1 }]}
         showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>🏆</Text>
-            <Text style={styles.emptyTitle}>Sin quinielas activas</Text>
-            <Text style={styles.emptySubtitle}>El admin aún no ha publicado quinielas.{`\n`}Vuelve pronto.</Text>
-          </View>
-        }
+        // Cuando no hay quinielas muestra la pantalla enriquecida
+        ListEmptyComponent={<EmptyQuinielas />}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -73,7 +69,11 @@ export default function QuinielasScreen() {
             colors={['#2ECC71']}
           />
         }
-        ListHeaderComponent={<Text style={styles.sectionTitle}>🔥 Quinielas Disponibles</Text>}
+        ListHeaderComponent={
+          quinielas.length > 0
+            ? <Text style={styles.sectionTitle}>🔥 Quinielas Disponibles</Text>
+            : null
+        }
         renderItem={({ item }) => (
           <QuinielaCard
             id={item.id}
@@ -84,7 +84,7 @@ export default function QuinielasScreen() {
             estado={item.estado}
             totalPartidos={item.partidos?.[0]?.count ?? 0}
             fechaCierre={item.fecha_cierre}
-            jugadoresMinimos={item.jugadores_minimos ?? 0}  // directo de BD, sin default 5
+            jugadoresMinimos={item.jugadores_minimos ?? 0}
             porcentajeAdmin={item.porcentaje_admin ?? 0}
           />
         )}
@@ -99,10 +99,6 @@ const styles = StyleSheet.create({
   sectionTitle:     { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 15, marginTop: 10 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 15 },
   loadingText:      { color: '#A0A0A0', fontSize: 14 },
-  emptyContainer:   { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
-  emptyIcon:        { fontSize: 60, marginBottom: 15 },
-  emptyTitle:       { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
-  emptySubtitle:    { color: '#A0A0A0', fontSize: 14, textAlign: 'center', lineHeight: 22 },
   errorBanner:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.1)', borderWidth: 1, borderColor: '#E74C3C', margin: 15, padding: 12, borderRadius: 10 },
   errorText:        { color: '#E74C3C', fontSize: 13, flex: 1 },
   retryText:        { color: '#2ECC71', fontWeight: 'bold', fontSize: 13, marginLeft: 10 },

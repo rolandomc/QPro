@@ -66,7 +66,12 @@ export default function QuinielasScreen() {
           </View>
         }
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); }} tintColor="#2ECC71" colors={['#2ECC71']} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); loadQuinielas(); }}
+            tintColor="#2ECC71"
+            colors={['#2ECC71']}
+          />
         }
         ListHeaderComponent={<Text style={styles.sectionTitle}>🔥 Quinielas Disponibles</Text>}
         renderItem={({ item }) => (
@@ -79,7 +84,7 @@ export default function QuinielasScreen() {
             estado={item.estado}
             totalPartidos={item.partidos?.[0]?.count ?? 0}
             fechaCierre={item.fecha_cierre}
-            jugadoresMinimos={item.jugadores_minimos ?? 0}
+            jugadoresMinimos={item.jugadores_minimos ?? 0}  // directo de BD, sin default 5
             porcentajeAdmin={item.porcentaje_admin ?? 0}
           />
         )}

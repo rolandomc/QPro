@@ -25,8 +25,6 @@ export default function QuinielasScreen() {
     }
   }, []);
 
-  // Se ejecuta cada vez que la pantalla entra en foco
-  // Asi cuando vuelves del admin ya ve el estado actualizado
   useFocusEffect(
     useCallback(() => {
       setLoading(true);

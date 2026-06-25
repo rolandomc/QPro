@@ -21,7 +21,6 @@ export default function ResultsScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Traer participaciones del usuario con quiniela + selecciones + partidos
       const { data, error } = await supabase
         .from('participaciones')
         .select(`
@@ -65,16 +64,12 @@ export default function ResultsScreen() {
     }, [])
   );
 
-  // En Juego: quiniela abierta o cerrada (aun no finalizada)
   const enJuego = participaciones.filter(
     p => p.quinielas?.estado === 'abierta' || p.quinielas?.estado === 'cerrada'
   );
-
-  // Historial: quiniela finalizada
   const historial = participaciones.filter(
     p => p.quinielas?.estado === 'finalizada'
   );
-
   const listaActual = tab === 'En Juego' ? enJuego : historial;
 
   const renderEmpty = () => (
@@ -161,17 +156,9 @@ const styles = StyleSheet.create({
   loadingText: { color: '#A0A0A0', fontSize: 14 },
   headerSection: { paddingTop: 5, paddingBottom: 15 },
   liveRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  liveDot: {
-    width: 10, height: 10, borderRadius: 5,
-    backgroundColor: '#2ECC71',
-    shadowColor: '#2ECC71', shadowOpacity: 0.9, shadowRadius: 6, elevation: 4,
-  },
+  liveDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.9, shadowRadius: 6, elevation: 4 },
   sectionTitle: { color: '#FFF', fontSize: 17, fontWeight: 'bold', flex: 1 },
-  countBadge: {
-    backgroundColor: 'rgba(46,204,113,0.15)',
-    borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2,
-    borderWidth: 1, borderColor: '#2ECC71',
-  },
+  countBadge: { backgroundColor: 'rgba(46,204,113,0.15)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: '#2ECC71' },
   countText: { color: '#2ECC71', fontWeight: 'bold', fontSize: 12 },
   emptyBox: { alignItems: 'center', paddingTop: 60, gap: 10 },
   emptyIcon: { fontSize: 50 },

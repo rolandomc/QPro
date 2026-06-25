@@ -21,29 +21,32 @@ export default function QuinielaDetailsScreen() {
   const [saving, setSaving] = useState(false);
   const [yaParticipo, setYaParticipo] = useState(false);
 
-  const loadData = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
-    try {
-      const [partidosData, yaParticipoData, { data: quinielaData }] = await Promise.all([
-        QuinielasService.getPartidos(id),
-        QuinielasService.yaParticipo(id),
-        supabase.from('quinielas').select('*').eq('id', id).single(),
-      ]);
-      setQuiniela(quinielaData);
-      setPartidos(partidosData || []);
-      setYaParticipo(yaParticipoData);
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
-  useFocusEffect(loadData);
+  useFocusEffect(
+    useCallback(() => {
+      async function loadData() {
+        if (!id) return;
+        setLoading(true);
+        try {
+          const [partidosData, yaParticipoData, { data: quinielaData }] = await Promise.all([
+            QuinielasService.getPartidos(id),
+            QuinielasService.yaParticipo(id),
+            supabase.from('quinielas').select('*').eq('id', id).single(),
+          ]);
+          setQuiniela(quinielaData);
+          setPartidos(partidosData || []);
+          setYaParticipo(yaParticipoData);
+        } catch (e: any) {
+          Alert.alert('Error', e.message);
+        } finally {
+          setLoading(false);
+        }
+      }
+      loadData();
+    }, [id])
+  );
 
   const handleSelect = (partidoId: string, opcion: 'local' | 'empate' | 'visitante') => {
-    if (yaParticipo) return; // no permitir cambios si ya participó
+    if (yaParticipo) return;
     setSelecciones(prev => ({ ...prev, [partidoId]: opcion }));
   };
 
@@ -51,10 +54,7 @@ export default function QuinielaDetailsScreen() {
     if (yaParticipo) return;
     const sinSeleccionar = partidos.filter(p => !selecciones[p.id]);
     if (sinSeleccionar.length > 0) {
-      Alert.alert(
-        'Faltan selecciones',
-        `Aún te faltan ${sinSeleccionar.length} partido(s) por seleccionar.`
-      );
+      Alert.alert('Faltan selecciones', `Aún te faltan ${sinSeleccionar.length} partido(s) por seleccionar.`);
       return;
     }
 
@@ -101,7 +101,6 @@ export default function QuinielaDetailsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backText}>← Volver</Text>
@@ -110,14 +109,12 @@ export default function QuinielaDetailsScreen() {
         <View style={styles.spacer} />
       </View>
 
-      {/* Banner ya participó */}
       {yaParticipo && (
         <View style={styles.yaParticipoBar}>
           <Text style={styles.yaParticipoText}>✅ Ya registraste tus selecciones — ¡Buena suerte!</Text>
         </View>
       )}
 
-      {/* Info de la quiniela */}
       <View style={styles.infoRow}>
         <View style={styles.infoPill}>
           <Text style={styles.infoPillText}>🏀 {partidos.length} partidos</Text>
@@ -130,10 +127,8 @@ export default function QuinielaDetailsScreen() {
         </View>
       </View>
 
-      {/* Barra de progreso */}
       <ProgressBar current={totalSeleccionados} total={partidos.length} />
 
-      {/* Lista de partidos */}
       <FlatList
         data={partidos}
         keyExtractor={(item) => item.id}
@@ -154,14 +149,10 @@ export default function QuinielaDetailsScreen() {
         )}
       />
 
-      {/* Botón flotante — solo si no ha participado */}
       {!yaParticipo && (
         <View style={styles.fab}>
           <TouchableOpacity
-            style={[
-              styles.fabBtn,
-              isComplete ? styles.fabBtnActive : styles.fabBtnDisabled,
-            ]}
+            style={[styles.fabBtn, isComplete ? styles.fabBtnActive : styles.fabBtnDisabled]}
             onPress={handleConfirmar}
             disabled={saving}
           >
@@ -171,8 +162,7 @@ export default function QuinielaDetailsScreen() {
               <Text style={[styles.fabText, !isComplete && { color: '#505050' }]}>
                 {isComplete
                   ? `🚀 Confirmar y Participar — $${quiniela?.precio_entrada ?? 50} MXN`
-                  : `Selecciona todos los partidos (${totalSeleccionados}/${partidos.length})`
-                }
+                  : `Selecciona todos los partidos (${totalSeleccionados}/${partidos.length})`}
               </Text>
             )}
           </TouchableOpacity>
@@ -187,55 +177,22 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   loadingText: { color: '#A0A0A0', marginTop: 12, fontSize: 14 },
   emptyText: { color: '#A0A0A0', fontSize: 14, textAlign: 'center' },
-
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 15, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#2A2D35',
-  },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
   backBtn: { width: 60 },
   backText: { color: '#2ECC71', fontSize: 15 },
   title: { flex: 1, color: '#FFF', fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
   spacer: { width: 60 },
-
-  yaParticipoBar: {
-    backgroundColor: 'rgba(46,204,113,0.1)',
-    borderBottomWidth: 1, borderBottomColor: '#2ECC71',
-    padding: 10, alignItems: 'center',
-  },
+  yaParticipoBar: { backgroundColor: 'rgba(46,204,113,0.1)', borderBottomWidth: 1, borderBottomColor: '#2ECC71', padding: 10, alignItems: 'center' },
   yaParticipoText: { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
-
-  infoRow: {
-    flexDirection: 'row', gap: 8,
-    paddingHorizontal: 15, paddingVertical: 10,
-  },
-  infoPill: {
-    flex: 1, backgroundColor: '#15181F',
-    borderRadius: 8, padding: 8,
-    alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35',
-  },
+  infoRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 15, paddingVertical: 10 },
+  infoPill: { flex: 1, backgroundColor: '#15181F', borderRadius: 8, padding: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
   infoPillGreen: { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
   infoPillOrange: { borderColor: '#F39C12', backgroundColor: 'rgba(243,156,18,0.05)' },
   infoPillText: { color: '#A0A0A0', fontSize: 11, fontWeight: '600', textAlign: 'center' },
-
   list: { paddingHorizontal: 15, paddingTop: 5, paddingBottom: 120 },
-
-  fab: {
-    position: 'absolute', bottom: 25,
-    left: 15, right: 15, zIndex: 100,
-  },
-  fabBtn: {
-    padding: 16, borderRadius: 14, alignItems: 'center',
-    borderWidth: 1,
-  },
-  fabBtnActive: {
-    backgroundColor: '#2ECC71',
-    borderColor: '#2ECC71',
-    shadowColor: '#2ECC71', shadowOpacity: 0.7, shadowRadius: 12, elevation: 8,
-  },
-  fabBtnDisabled: {
-    backgroundColor: '#15181F',
-    borderColor: '#2A2D35',
-  },
+  fab: { position: 'absolute', bottom: 25, left: 15, right: 15, zIndex: 100 },
+  fabBtn: { padding: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1 },
+  fabBtnActive: { backgroundColor: '#2ECC71', borderColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.7, shadowRadius: 12, elevation: 8 },
+  fabBtnDisabled: { backgroundColor: '#15181F', borderColor: '#2A2D35' },
   fabText: { color: '#000', fontWeight: 'bold', fontSize: 15 },
 });

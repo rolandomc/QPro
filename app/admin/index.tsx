@@ -11,7 +11,6 @@ export default function AdminDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-
   const [usuariosModal, setUsuariosModal] = useState(false);
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [loadingUsuarios, setLoadingUsuarios] = useState(false);
@@ -29,7 +28,6 @@ export default function AdminDashboardScreen() {
     }
   }, []);
 
-  // Recarga cada vez que se vuelve al admin (ej: al regresar de /admin/create)
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
@@ -70,7 +68,6 @@ export default function AdminDashboardScreen() {
             setActionLoading(quinielaId + '_cerrar');
             try {
               await AdminService.updateEstado(quinielaId, 'cerrada');
-              // Actualizar localmente sin recargar toda la lista
               setQuinielas(prev => prev.map(q => q.id === quinielaId ? { ...q, estado: 'cerrada' } : q));
               Alert.alert('✅ Apuestas cerradas', `"${titulo}" ya no acepta nuevas participaciones.`);
             } catch (e: any) {
@@ -97,7 +94,6 @@ export default function AdminDashboardScreen() {
             setActionLoading(quinielaId + '_cancelar');
             try {
               await AdminService.updateEstado(quinielaId, 'finalizada');
-              // Quitar de la lista inmediatamente
               setQuinielas(prev => prev.map(q => q.id === quinielaId ? { ...q, estado: 'finalizada' } : q));
               Alert.alert('Quiniela cancelada', `"${titulo}" fue marcada como finalizada.`);
             } catch (e: any) {
@@ -176,17 +172,14 @@ export default function AdminDashboardScreen() {
                 <Text style={[styles.badgeText, { color: getEstadoColor(q.estado) }]}>{q.estado.toUpperCase()}</Text>
               </View>
             </View>
-
             <View style={styles.cardInfo}>
               <Text style={styles.infoText}>🏀 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
               <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada} MXN</Text></Text>
             </View>
-
             <View style={styles.cardActions}>
               <TouchableOpacity style={styles.actionBtn} onPress={() => handleVerUsuarios(q.id, q.titulo)}>
                 <Text style={styles.actionText}>👥 Usuarios</Text>
               </TouchableOpacity>
-
               <TouchableOpacity
                 style={[styles.actionBtn, q.estado !== 'abierta' && styles.disabledBtn]}
                 disabled={q.estado !== 'abierta' || actionLoading === q.id + '_cerrar'}
@@ -197,7 +190,6 @@ export default function AdminDashboardScreen() {
                   : <Text style={[styles.actionText, q.estado !== 'abierta' && { color: '#505050' }]}>🔒 Cerrar</Text>
                 }
               </TouchableOpacity>
-
               <TouchableOpacity
                 style={[styles.actionBtn, styles.dangerBtn, q.estado === 'finalizada' && styles.disabledBtn]}
                 disabled={q.estado === 'finalizada' || actionLoading === q.id + '_cancelar'}
@@ -213,7 +205,6 @@ export default function AdminDashboardScreen() {
         ))}
       </ScrollView>
 
-      {/* Modal Usuarios */}
       <Modal visible={usuariosModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>

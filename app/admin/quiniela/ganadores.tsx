@@ -8,7 +8,6 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../../src/config/supabase';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
-const DIST   = [0.60, 0.30, 0.10];
 
 export default function GanadoresScreen() {
   const router = useRouter();
@@ -29,8 +28,7 @@ export default function GanadoresScreen() {
     try {
       const [{ data: q, error: errQ }, { data: parts, error: errP }, { count }] = await Promise.all([
         supabase.from('quinielas').select('*').eq('id', id).single(),
-        supabase
-          .from('participaciones')
+        supabase.from('participaciones')
           .select('id, aciertos, monto_pagado, estado, premio_ganado, user_id')
           .eq('quiniela_id', id)
           .order('aciertos', { ascending: false, nullsFirst: false }),
@@ -49,9 +47,9 @@ export default function GanadoresScreen() {
       setQuiniela(q);
       setParticipantes((parts || []).map(p => ({
         ...p,
-        aciertos:     p.aciertos ?? 0,
+        aciertos:      p.aciertos ?? 0,
         premio_ganado: p.premio_ganado ?? 0,
-        username:     usernameMap[p.user_id] ?? 'Usuario',
+        username:      usernameMap[p.user_id] ?? 'Usuario',
       })));
       setTotalPartidos(count || 0);
     } catch (e: any) {
@@ -61,7 +59,6 @@ export default function GanadoresScreen() {
     }
   };
 
-  // ── Recalcular via RPC ─────────────────────────────────────────────────
   const handleRecalcular = async () => {
     setRecalculando(true);
     try {
@@ -76,9 +73,10 @@ export default function GanadoresScreen() {
     }
   };
 
-  // ── Distribuir + notificar ───────────────────────────────────────────────
+  // ── 1 solo ganador — el de más aciertos se lleva el 100% ─────────────────
   const handleDistribuirPremios = async () => {
     if (!quiniela) return;
+
     const topAciertos = participantes[0]?.aciertos ?? 0;
     if (topAciertos === 0) {
       Alert.alert('⚠️ Sin aciertos', 'Presiona “Recalcular Aciertos” primero.');
@@ -90,81 +88,67 @@ export default function GanadoresScreen() {
       return;
     }
 
-    const porAciertos: Record<number, any[]> = {};
-    for (const p of participantes) {
-      if (!porAciertos[p.aciertos]) porAciertos[p.aciertos] = [];
-      porAciertos[p.aciertos].push(p);
-    }
-    const nivelesOrdenados = Object.keys(porAciertos).map(Number).sort((a, b) => b - a).slice(0, 3);
+    // Ganadores: los que tienen el máximo de aciertos
+    const maxAciertos = participantes[0].aciertos;
+    const ganadores   = participantes.filter(p => p.aciertos === maxAciertos);
+    // Si empatan varios, el premio se divide
+    const montoPorGanador = Math.round(premioTotal / ganadores.length);
 
-    Alert.alert(
-      '💰 Distribuir Premios',
-      `Premio total: $${premioTotal.toLocaleString()}\n\n` +
-      nivelesOrdenados.map((aciertos, i) => {
-        const grupo = porAciertos[aciertos];
-        const monto = (premioTotal * DIST[i]) / grupo.length;
-        return `${MEDALS[i]} ${aciertos} aciertos (${grupo.length}) — $${monto.toFixed(0)} c/u`;
-      }).join('\n') + '\n\n¿Confirmar?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Distribuir',
-          onPress: async () => {
-            setDistribuyendo(true);
-            try {
-              const ganadoresIds: string[] = [];
-              const notificaciones: any[] = [];
+    const msg = ganadores.length === 1
+      ? `🏆 ${ganadores[0].username} — ${maxAciertos} aciertos\nPremio: $${montoPorGanador.toLocaleString()} (100% del pozo)`
+      : `🥇 Empate entre ${ganadores.length} jugadores con ${maxAciertos} aciertos\nPremio: $${montoPorGanador.toLocaleString()} c/u`;
 
-              for (let i = 0; i < nivelesOrdenados.length; i++) {
-                const aciertos = nivelesOrdenados[i];
-                const grupo    = porAciertos[aciertos];
-                const monto    = Math.round((premioTotal * DIST[i]) / grupo.length);
+    Alert.alert('💰 Distribuir Premio', `Premio total: $${premioTotal.toLocaleString()}\n\n${msg}\n\n¿Confirmar?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Distribuir',
+        onPress: async () => {
+          setDistribuyendo(true);
+          try {
+            const notificaciones: any[] = [];
+            const ganadoresIds: string[] = [];
 
-                for (const part of grupo) {
-                  await supabase.from('participaciones')
-                    .update({ premio_ganado: monto, estado: 'ganador' })
-                    .eq('id', part.id);
-                  ganadoresIds.push(part.id);
-
-                  notificaciones.push({
-                    user_id: part.user_id,
-                    tipo:    'ganador',
-                    titulo:  `🏆 ¡Ganaste en ${quiniela.titulo}!`,
-                    mensaje: `Quedaste en el lugar ${i + 1} con ${aciertos} aciertos. Tu premio: $${monto.toLocaleString()}.`,
-                    leida:   false,
-                  });
-                }
-              }
-
-              // Perdedores
-              const perdedores = participantes.filter(p => !ganadoresIds.includes(p.id));
-              for (const p of perdedores) {
-                await supabase.from('participaciones').update({ estado: 'perdedor' }).eq('id', p.id);
-                notificaciones.push({
-                  user_id: p.user_id,
-                  tipo:    'perdedor',
-                  titulo:  `Resultado en ${quiniela.titulo}`,
-                  mensaje: `Terminaste con ${p.aciertos} acierto${p.aciertos !== 1 ? 's' : ''}. ¡Suerte en la próxima!`,
-                  leida:   false,
-                });
-              }
-
-              // Insertar todas las notificaciones
-              if (notificaciones.length > 0) {
-                await supabase.from('notificaciones').insert(notificaciones);
-              }
-
-              await cargarDatos();
-              Alert.alert('🎉 ¡Premios distribuidos!', 'Los participantes recibieron una notificación en su app.');
-            } catch (e: any) {
-              Alert.alert('Error', e.message);
-            } finally {
-              setDistribuyendo(false);
+            for (const g of ganadores) {
+              await supabase.from('participaciones')
+                .update({ premio_ganado: montoPorGanador, estado: 'ganador' })
+                .eq('id', g.id);
+              ganadoresIds.push(g.id);
+              notificaciones.push({
+                user_id: g.user_id,
+                tipo:    'ganador',
+                titulo:  `🏆 ¡Ganaste en ${quiniela.titulo}!`,
+                mensaje: `Tuviste ${maxAciertos} aciertos y ganaste $${montoPorGanador.toLocaleString()}.`,
+                leida:   false,
+              });
             }
-          },
+
+            // Perdedores
+            const perdedores = participantes.filter(p => !ganadoresIds.includes(p.id));
+            for (const p of perdedores) {
+              await supabase.from('participaciones').update({ estado: 'perdedor' }).eq('id', p.id);
+              notificaciones.push({
+                user_id: p.user_id,
+                tipo:    'perdedor',
+                titulo:  `Resultado en ${quiniela.titulo}`,
+                mensaje: `Terminaste con ${p.aciertos} acierto${p.aciertos !== 1 ? 's' : ''}. ¡Suerte en la próxima!`,
+                leida:   false,
+              });
+            }
+
+            if (notificaciones.length > 0) {
+              await supabase.from('notificaciones').insert(notificaciones);
+            }
+
+            await cargarDatos();
+            Alert.alert('🎉 ¡Premio distribuido!', `${ganadores[0].username} recibe $${montoPorGanador.toLocaleString()}.`);
+          } catch (e: any) {
+            Alert.alert('Error', e.message);
+          } finally {
+            setDistribuyendo(false);
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const premioYaDistribuido = participantes.some(p => (p.premio_ganado ?? 0) > 0);
@@ -187,6 +171,7 @@ export default function GanadoresScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Resumen */}
         <View style={styles.resumenRow}>
           <View style={styles.resumenBox}>
             <Text style={styles.resumenVal}>{participantes.length}</Text>
@@ -210,24 +195,23 @@ export default function GanadoresScreen() {
         {!premioYaDistribuido ? (
           <TouchableOpacity style={[styles.distribuirBtn, distribuyendo && { opacity: 0.6 }]}
             onPress={handleDistribuirPremios} disabled={distribuyendo}>
-            {distribuyendo ? <ActivityIndicator color="#000" /> : <Text style={styles.distribuirBtnText}>💰 Distribuir Premios Ahora</Text>}
+            {distribuyendo ? <ActivityIndicator color="#000" /> : <Text style={styles.distribuirBtnText}>💰 Distribuir Premio Ahora</Text>}
           </TouchableOpacity>
         ) : (
           <View style={styles.yaDistribuidoBadge}>
-            <Text style={styles.yaDistribuidoText}>✅ Premios ya distribuidos</Text>
+            <Text style={styles.yaDistribuidoText}>✅ Premio ya distribuido</Text>
           </View>
         )}
 
+        {/* Regla */}
         <View style={styles.reglaBox}>
-          <Text style={styles.reglaTitle}>Regla de distribución</Text>
-          <Text style={styles.reglaItem}>🥇 1er lugar — 60% del pozo</Text>
-          <Text style={styles.reglaItem}>🥈 2do lugar — 30% del pozo</Text>
-          <Text style={styles.reglaItem}>🥉 3er lugar — 10% del pozo</Text>
-          <Text style={styles.reglaNote}>Empates comparten el monto del lugar</Text>
+          <Text style={styles.reglaTitle}>Regla</Text>
+          <Text style={styles.reglaItem}>🏆 El jugador con más aciertos gana el 100% del pozo</Text>
+          <Text style={styles.reglaNote}>En caso de empate, el pozo se divide entre los empatados</Text>
         </View>
 
+        {/* Ranking */}
         <Text style={styles.sectionTitle}>Tabla de Posiciones</Text>
-
         {participantes.map((part, index) => {
           const aciertos   = part.aciertos ?? 0;
           const porcentaje = totalPartidos > 0 ? Math.round((aciertos / totalPartidos) * 100) : 0;
@@ -251,18 +235,15 @@ export default function GanadoresScreen() {
                 {(part.premio_ganado ?? 0) > 0 && (
                   <Text style={styles.rankPremio}>${part.premio_ganado.toLocaleString()}</Text>
                 )}
-                {esGanador  && <Text style={styles.rankBadgeGanador}>GANADOR</Text>}
+                {esGanador  && <Text style={styles.rankBadgeGanador}>🏆 GANADOR</Text>}
                 {esPerdedor && <Text style={styles.rankBadgePerdedor}>PERDEDOR</Text>}
                 {!esGanador && !esPerdedor && <Text style={styles.rankBadgePendiente}>PENDIENTE</Text>}
               </View>
             </View>
           );
         })}
-
         {participantes.length === 0 && (
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>😕 Nadie participó en esta quiniela</Text>
-          </View>
+          <View style={styles.emptyBox}><Text style={styles.emptyText}>😕 Nadie participó</Text></View>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -303,7 +284,7 @@ const styles = StyleSheet.create({
   rankSub:            { color: '#707070', fontSize: 12, marginTop: 2 },
   rankRight:          { alignItems: 'flex-end', gap: 4 },
   rankPremio:         { color: '#F39C12', fontWeight: 'bold', fontSize: 16 },
-  rankBadgeGanador:   { color: '#2ECC71', fontSize: 10, fontWeight: 'bold', borderWidth: 1, borderColor: '#2ECC71', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  rankBadgeGanador:   { color: '#2ECC71', fontSize: 11, fontWeight: 'bold' },
   rankBadgePerdedor:  { color: '#505050', fontSize: 10, fontWeight: 'bold', borderWidth: 1, borderColor: '#505050', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   rankBadgePendiente: { color: '#F39C12', fontSize: 10, fontWeight: 'bold', borderWidth: 1, borderColor: '#F39C12', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   emptyBox:           { alignItems: 'center', paddingVertical: 40 },

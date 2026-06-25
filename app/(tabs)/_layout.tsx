@@ -5,20 +5,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '../../src/theme/colors';
 import { supabase } from '../../src/config/supabase';
 
-function BadgeIcon({ name, color, count }: { name: any; color: string; count: number }) {
-  return (
-    <View>
-      <Ionicons name={name} size={24} color={color} />
-      {count > 0 && (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{count > 99 ? '99+' : count}</Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
-export default function TabLayout() {
+function NotifIcon({ color }: { color: string }) {
   const [noLeidas, setNoLeidas] = useState(0);
 
   useEffect(() => {
@@ -26,24 +13,15 @@ export default function TabLayout() {
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
-      // Conteo inicial
       const { count } = await supabase
         .from('notificaciones')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id)
         .eq('leida', false);
       setNoLeidas(count ?? 0);
-
-      // Escuchar nuevas en tiempo real
       channel = supabase
         .channel('notif-badge')
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'notificaciones',
-          filter: `user_id=eq.${user.id}`,
-        }, async () => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'notificaciones' }, async () => {
           const { count: c } = await supabase
             .from('notificaciones')
             .select('*', { count: 'exact', head: true })
@@ -58,42 +36,29 @@ export default function TabLayout() {
   }, []);
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Quinielas',
-          tabBarIcon: ({ color }) => <Ionicons name="football" size={24} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="results"
-        options={{
-          title: 'Resultados',
-          tabBarIcon: ({ color }) => <Ionicons name="stats-chart" size={24} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="notificaciones"
-        options={{
-          title: 'Notificaciones',
-          tabBarIcon: ({ color }) => <BadgeIcon name="notifications" color={color} count={noLeidas} />,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Perfil',
-          tabBarIcon: ({ color }) => <Ionicons name="person" size={24} color={color} />,
-        }}
-      />
+    <View>
+      <Ionicons name="person" size={24} color={color} />
+      {noLeidas > 0 && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{noLeidas > 99 ? '99+' : noLeidas}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+export default function TabLayout() {
+  return (
+    <Tabs screenOptions={{
+      headerShown: false,
+      tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
+      tabBarActiveTintColor: colors.primary,
+      tabBarInactiveTintColor: colors.textMuted,
+    }}>
+      <Tabs.Screen name="index" options={{ title: 'Quinielas', tabBarIcon: ({ color }) => <Ionicons name="football" size={24} color={color} /> }} />
+      <Tabs.Screen name="results" options={{ title: 'Resultados', tabBarIcon: ({ color }) => <Ionicons name="stats-chart" size={24} color={color} /> }} />
+      <Tabs.Screen name="profile" options={{ title: 'Perfil', tabBarIcon: ({ color }) => <NotifIcon color={color} /> }} />
+      <Tabs.Screen name="notificaciones" options={{ href: null }} />
     </Tabs>
   );
 }

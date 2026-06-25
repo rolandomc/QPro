@@ -1,6 +1,29 @@
 import { supabase } from '../config/supabase';
 
 export class AdminService {
+
+  /**
+   * Verifica si el usuario autenticado tiene rol de admin
+   * en la tabla profiles.
+   */
+  static async isAdmin(): Promise<boolean> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return false;
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (error || !data) return false;
+      return data.role === 'admin';
+    } catch {
+      return false;
+    }
+  }
+
   static async getQuinielas() {
     const { data, error } = await supabase
       .from('quinielas')
@@ -39,12 +62,7 @@ export class AdminService {
     if (error) throw error;
   }
 
-  /**
-   * Recalcula aciertos de todas las participaciones de una quiniela.
-   * Cuenta cuántas selecciones coinciden con el resultado del partido.
-   */
   static async recalcularAciertos(quinielaId: string) {
-    // Traer todas las participaciones de la quiniela
     const { data: participaciones, error: errPart } = await supabase
       .from('participaciones')
       .select('id')
@@ -52,7 +70,6 @@ export class AdminService {
     if (errPart) throw errPart;
     if (!participaciones || participaciones.length === 0) return;
 
-    // Traer resultados de partidos
     const { data: partidos, error: errPart2 } = await supabase
       .from('partidos')
       .select('id, resultado')

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../config/supabase';
+import { colors } from '../theme/colors';
 
 interface Props {
   id: string;
@@ -9,21 +10,21 @@ interface Props {
   descripcion?: string;
   precioEntrada: number;
   premioTotal: number;
-  estado: string;
-  totalPartidos?: number;
+  estado: 'abierta' | 'cerrada' | 'finalizada';
+  totalPartidos: number;
   fechaCierre?: string;
   jugadoresMinimos?: number;
   porcentajeAdmin?: number;
 }
 
-function QuinielaCard({
+export function QuinielaCard({
   id,
   titulo,
   descripcion,
   precioEntrada,
   premioTotal,
   estado,
-  totalPartidos = 0,
+  totalPartidos,
   fechaCierre,
   jugadoresMinimos = 0,
   porcentajeAdmin = 0,
@@ -53,70 +54,67 @@ function QuinielaCard({
     return () => { if (channel) supabase.removeChannel(channel); };
   }, [id]);
 
-  const pozoActual      = jugadoresPagados * precioEntrada;
-  const premioActual    = porcentajeAdmin > 0
+  const tieneConfigPozo   = jugadoresMinimos > 0;
+  const pozoActual        = jugadoresPagados * precioEntrada;
+  const premioCalculado   = tieneConfigPozo
     ? pozoActual * (1 - porcentajeAdmin / 100)
-    : (premioTotal > 0 ? premioTotal : pozoActual);
-  const minimoAlcanzado = jugadoresMinimos > 0 ? jugadoresPagados >= jugadoresMinimos : true;
-  const faltanJugadores = Math.max(0, jugadoresMinimos - jugadoresPagados);
+    : premioTotal;
+  const minimoAlcanzado   = tieneConfigPozo ? jugadoresPagados >= jugadoresMinimos : true;
+  const faltanJugadores   = Math.max(0, jugadoresMinimos - jugadoresPagados);
+  const premioVisible     = !tieneConfigPozo || minimoAlcanzado;
 
-  const getEstadoColor = () => {
-    if (estado === 'abierta')    return '#2ECC71';
-    if (estado === 'cerrada')    return '#F39C12';
-    if (estado === 'finalizada') return '#707070';
-    return '#A0A0A0';
-  };
-
-  const getEstadoLabel = () => {
-    if (estado === 'abierta')    return '🟢 ABIERTA';
-    if (estado === 'cerrada')    return '🟡 CERRADA';
-    if (estado === 'finalizada') return '⚪ FINALIZADA';
-    return estado.toUpperCase();
-  };
-
-  const fechaStr = fechaCierre
-    ? new Date(fechaCierre).toLocaleDateString('es-MX', { dateStyle: 'medium' })
-    : null;
+  const estadoColor = estado === 'abierta' ? '#2ECC71' : estado === 'cerrada' ? '#E74C3C' : '#A0A0A0';
+  const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🔴 Cerrada' : '✅ Finalizada';
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => router.push({ pathname: '/quiniela/[id]', params: { id } })}
-      activeOpacity={0.85}
-    >
-      {/* Header */}
+    <View style={styles.card}>
+
+      {/* Header — igual al original */}
       <View style={styles.cardHeader}>
-        <Text style={styles.titulo} numberOfLines={2}>{titulo}</Text>
-        <View style={[styles.estadoBadge, { borderColor: getEstadoColor() }]}>
-          <Text style={[styles.estadoText, { color: getEstadoColor() }]}>{getEstadoLabel()}</Text>
+        <Text style={styles.title}>🏆 {titulo}</Text>
+        <View style={[styles.estadoBadge, { borderColor: estadoColor }]}>
+          <Text style={[styles.estadoText, { color: estadoColor }]}>{estadoLabel}</Text>
         </View>
       </View>
 
-      {/* Premio */}
-      <View style={styles.premioSection}>
-        {minimoAlcanzado ? (
-          <>
-            <Text style={styles.premioLabel}>Premio acumulado</Text>
-            <Text style={styles.premioValor}>
-              ${premioActual.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+      {/* Descripcion — igual al original */}
+      {descripcion ? <Text style={styles.descripcion}>{descripcion}</Text> : null}
+
+      {/* Stats row — igual al original */}
+      <View style={styles.statsRow}>
+        <View style={styles.stat}>
+          <Text style={styles.statValue}>{totalPartidos}</Text>
+          <Text style={styles.statLabel}>Partidos</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.stat}>
+          <Text style={styles.statValue}>${precioEntrada}</Text>
+          <Text style={styles.statLabel}>Entrada</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.stat}>
+          {premioVisible ? (
+            <Text style={[styles.statValue, { color: '#2ECC71' }]}>
+              ${premioCalculado > 0 ? premioCalculado.toFixed(0) : '---'}
             </Text>
-          </>
-        ) : (
-          <>
-            <Text style={styles.premioLabel}>Premio mínimo garantizado</Text>
-            <Text style={styles.premioValorGris}>
-              ${(jugadoresMinimos * precioEntrada * (1 - porcentajeAdmin / 100))
-                  .toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+          ) : (
+            <Text style={[styles.statValue, { color: '#505050' }]}>🔒 Oculto</Text>
+          )}
+          <Text style={styles.statLabel}>Premio</Text>
+        </View>
+      </View>
+
+      {/* Barra de progreso — solo si hay minimo configurado */}
+      {tieneConfigPozo && (
+        <View style={styles.pozoBox}>
+          {!minimoAlcanzado ? (
+            <Text style={styles.faltanText}>
+              ⏳ Faltan {faltanJugadores} jugador{faltanJugadores !== 1 ? 'es' : ''} para activar el pozo
             </Text>
-            <View style={styles.faltanRow}>
-              <Text style={styles.faltanText}>
-                ⏳ Faltan {faltanJugadores} jugador{faltanJugadores !== 1 ? 'es' : ''} para activar el pozo
-              </Text>
-            </View>
-          </>
-        )}
-        {jugadoresMinimos > 0 && (
-          <View style={styles.progressoRow}>
+          ) : (
+            <Text style={styles.pozoActivoText}>✅ Pozo activo — creciendo en tiempo real</Text>
+          )}
+          <View style={styles.progressRow}>
             <View style={styles.progressTrack}>
               <View style={[
                 styles.progressFill,
@@ -126,60 +124,56 @@ function QuinielaCard({
             </View>
             <Text style={styles.progressLabel}>{jugadoresPagados}/{jugadoresMinimos}</Text>
           </View>
-        )}
-      </View>
-
-      {/* Footer */}
-      <View style={styles.cardFooter}>
-        <View style={styles.footerItem}>
-          <Text style={styles.footerIcon}>💰</Text>
-          <Text style={styles.footerText}>${precioEntrada} entrada</Text>
         </View>
-        {totalPartidos > 0 && (
-          <View style={styles.footerItem}>
-            <Text style={styles.footerIcon}>⚽</Text>
-            <Text style={styles.footerText}>{totalPartidos} partidos</Text>
-          </View>
-        )}
-        {porcentajeAdmin > 0 && (
-          <View style={styles.footerItem}>
-            <Text style={styles.footerIcon}>🏠</Text>
-            <Text style={styles.footerText}>{porcentajeAdmin}% casa</Text>
-          </View>
-        )}
-        {fechaStr && (
-          <View style={styles.footerItem}>
-            <Text style={styles.footerIcon}>📅</Text>
-            <Text style={styles.footerText}>{fechaStr}</Text>
-          </View>
-        )}
-      </View>
-    </TouchableOpacity>
+      )}
+
+      {/* Boton Participar — igual al original */}
+      <TouchableOpacity
+        style={[styles.button, estado !== 'abierta' && styles.buttonDisabled]}
+        disabled={estado !== 'abierta'}
+        onPress={() => router.push({ pathname: '/quiniela/details', params: { id } })}
+      >
+        <Text style={[styles.buttonText, estado !== 'abierta' && { color: '#707070' }]}>
+          {estado === 'abierta' ? 'Participar →' : 'No disponible'}
+        </Text>
+      </TouchableOpacity>
+
+    </View>
   );
 }
 
-export { QuinielaCard };
 export default QuinielaCard;
 
 const styles = StyleSheet.create({
-  card:              { backgroundColor: '#15181F', borderRadius: 16, padding: 16, marginBottom: 14, borderWidth: 1.5, borderColor: '#2A2D35' },
-  cardHeader:        { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12, gap: 10 },
-  titulo:            { color: '#FFF', fontSize: 16, fontWeight: 'bold', flex: 1 },
-  estadoBadge:       { borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
-  estadoText:        { fontSize: 10, fontWeight: 'bold' },
-  premioSection:     { backgroundColor: '#0A0C10', borderRadius: 10, padding: 12, marginBottom: 12 },
-  premioLabel:       { color: '#A0A0A0', fontSize: 11, marginBottom: 4 },
-  premioValor:       { color: '#F39C12', fontSize: 26, fontWeight: 'bold' },
-  premioValorGris:   { color: '#505050', fontSize: 22, fontWeight: 'bold' },
-  faltanRow:         { marginTop: 6 },
-  faltanText:        { color: '#F39C12', fontSize: 11 },
-  progressoRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
-  progressTrack:     { flex: 1, height: 5, backgroundColor: '#1C1F26', borderRadius: 3, overflow: 'hidden' },
-  progressFill:      { height: '100%', backgroundColor: '#F39C12', borderRadius: 3 },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  cardHeader:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  title:           { color: colors.text, fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 10 },
+  estadoBadge:     { borderWidth: 1, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
+  estadoText:      { fontSize: 11, fontWeight: 'bold' },
+  descripcion:     { color: colors.textMuted, fontSize: 13, marginBottom: 15 },
+  statsRow:        { flexDirection: 'row', backgroundColor: '#1C1F26', borderRadius: 12, padding: 12, marginBottom: 12, alignItems: 'center' },
+  stat:            { flex: 1, alignItems: 'center' },
+  statValue:       { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  statLabel:       { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  statDivider:     { width: 1, height: 30, backgroundColor: '#2A2D35' },
+  // Pozo
+  pozoBox:         { backgroundColor: '#1C1F26', borderRadius: 10, padding: 10, marginBottom: 12 },
+  faltanText:      { color: '#F39C12', fontSize: 11, marginBottom: 6 },
+  pozoActivoText:  { color: '#2ECC71', fontSize: 11, marginBottom: 6 },
+  progressRow:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  progressTrack:   { flex: 1, height: 5, backgroundColor: '#2A2D35', borderRadius: 3, overflow: 'hidden' },
+  progressFill:    { height: '100%', backgroundColor: '#F39C12', borderRadius: 3 },
   progressFillGreen: { backgroundColor: '#2ECC71' },
-  progressLabel:     { color: '#707070', fontSize: 10, minWidth: 30, textAlign: 'right' },
-  cardFooter:        { flexDirection: 'row', gap: 14, flexWrap: 'wrap' },
-  footerItem:        { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  footerIcon:        { fontSize: 12 },
-  footerText:        { color: '#707070', fontSize: 11 },
+  progressLabel:   { color: '#707070', fontSize: 10, minWidth: 30, textAlign: 'right' },
+  // Boton
+  button:          { backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  buttonDisabled:  { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
+  buttonText:      { color: '#000', fontWeight: 'bold', fontSize: 16 },
 });

@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, LayoutAnimation } from 'react-native';
 
+interface Partido {
+  equipo_local: string;
+  equipo_visitante: string;
+  fecha_partido: string;
+  resultado: 'local' | 'empate' | 'visitante' | null;
+}
+
 interface Seleccion {
   partido_id: string;
   prediccion: 'local' | 'empate' | 'visitante';
-  partido: {
-    equipo_local: string;
-    equipo_visitante: string;
-    fecha_partido: string;
-    resultado: 'local' | 'empate' | 'visitante' | null;
-  };
+  partidos: Partido | null; // Supabase devuelve el join con el nombre de la tabla (plural)
 }
 
 interface Props {
@@ -37,9 +39,11 @@ const LABEL: Record<string, string> = {
 export default function ResultCard({ quiniela, participacion, selecciones, modo }: Props) {
   const [expandido, setExpandido] = useState(false);
 
-  const total = selecciones.length;
-  const conResultado = selecciones.filter(s => s.partido.resultado !== null);
-  const aciertos = conResultado.filter(s => s.prediccion === s.partido.resultado).length;
+  // Filtramos defensivamente por si partidos viene null
+  const seleccionesValidas = selecciones.filter(s => s.partidos != null);
+  const total = seleccionesValidas.length;
+  const conResultado = seleccionesValidas.filter(s => s.partidos!.resultado !== null);
+  const aciertos = conResultado.filter(s => s.prediccion === s.partidos!.resultado).length;
   const pendientes = total - conResultado.length;
 
   const toggle = () => {
@@ -51,11 +55,10 @@ export default function ResultCard({ quiniela, participacion, selecciones, modo 
 
   return (
     <View style={[styles.card, modo === 'historial' ? styles.cardHistorial : styles.cardEnJuego]}>
-      {/* Cabecera */}
       <TouchableOpacity onPress={toggle} activeOpacity={0.8}>
         <View style={styles.cardHeader}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.quinielaTitulo} numberOfLines={1}>{quiniela.titulo}</Text>
+            <Text style={styles.quinielaTitulo} numberOfLines={1}>{quiniela?.titulo ?? '—'}</Text>
             <Text style={styles.fechaText}>Participaste el {fecha}</Text>
           </View>
           <View style={styles.statsBox}>
@@ -74,7 +77,6 @@ export default function ResultCard({ quiniela, participacion, selecciones, modo 
           <Text style={styles.chevron}>{expandido ? '▲' : '▼'}</Text>
         </View>
 
-        {/* Barra de progreso de aciertos */}
         {modo === 'historial' && (
           <View style={styles.progressTrack}>
             <View style={[
@@ -86,20 +88,20 @@ export default function ResultCard({ quiniela, participacion, selecciones, modo 
         )}
       </TouchableOpacity>
 
-      {/* Detalle expandible */}
       {expandido && (
         <View style={styles.detalleContainer}>
-          {selecciones.map((s, i) => {
-            const tieneResultado = s.partido.resultado !== null;
-            const esAcierto = tieneResultado && s.prediccion === s.partido.resultado;
-            const esFallo = tieneResultado && s.prediccion !== s.partido.resultado;
+          {seleccionesValidas.map((s, i) => {
+            const partido = s.partidos!;
+            const tieneResultado = partido.resultado !== null;
+            const esAcierto = tieneResultado && s.prediccion === partido.resultado;
+            const esFallo = tieneResultado && s.prediccion !== partido.resultado;
 
             return (
               <View key={s.partido_id} style={styles.seleccionRow}>
                 <Text style={styles.seleccionNum}>{i + 1}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.seleccionEquipos} numberOfLines={1}>
-                    {s.partido.equipo_local} vs {s.partido.equipo_visitante}
+                    {partido.equipo_local} vs {partido.equipo_visitante}
                   </Text>
                 </View>
                 <View style={[
@@ -116,12 +118,9 @@ export default function ResultCard({ quiniela, participacion, selecciones, modo 
                     {LABEL[s.prediccion] ?? s.prediccion}
                   </Text>
                 </View>
-                {tieneResultado && (
-                  <Text style={styles.resultadoIcon}>{esAcierto ? '✅' : '❌'}</Text>
-                )}
-                {!tieneResultado && (
-                  <Text style={styles.pendienteIcon}>⏳</Text>
-                )}
+                <Text style={styles.resultadoIcon}>
+                  {tieneResultado ? (esAcierto ? '✅' : '❌') : '⏳'}
+                </Text>
               </View>
             );
           })}
@@ -138,49 +137,30 @@ const styles = StyleSheet.create({
   },
   cardEnJuego: { borderColor: '#3498DB' },
   cardHistorial: { borderColor: '#2A2D35' },
-
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   quinielaTitulo: { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
   fechaText: { color: '#707070', fontSize: 11, marginTop: 2 },
-
   statsBox: { alignItems: 'center' },
   aciertosBox: { flexDirection: 'row', alignItems: 'baseline' },
   aciertosNum: { color: '#2ECC71', fontSize: 22, fontWeight: 'bold' },
   aciertosLabel: { color: '#A0A0A0', fontSize: 13 },
-
   pendienteBox: { alignItems: 'center' },
   pendienteNum: { color: '#3498DB', fontSize: 22, fontWeight: 'bold' },
   pendienteLabel: { color: '#A0A0A0', fontSize: 10 },
-
   chevron: { color: '#505050', fontSize: 12, marginLeft: 4 },
-
-  progressTrack: {
-    height: 4, backgroundColor: '#1C1F26',
-    borderRadius: 2, marginTop: 10, overflow: 'hidden',
-  },
+  progressTrack: { height: 4, backgroundColor: '#1C1F26', borderRadius: 2, marginTop: 10, overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: 2 },
   fillVerde: { backgroundColor: '#2ECC71' },
   fillAmarillo: { backgroundColor: '#F39C12' },
   fillRojo: { backgroundColor: '#E91E63' },
-
-  detalleContainer: {
-    marginTop: 12, borderTopWidth: 1,
-    borderTopColor: '#2A2D35', paddingTop: 12, gap: 10,
-  },
+  detalleContainer: { marginTop: 12, borderTopWidth: 1, borderTopColor: '#2A2D35', paddingTop: 12, gap: 10 },
   seleccionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   seleccionNum: { color: '#505050', fontSize: 11, width: 18, textAlign: 'right' },
   seleccionEquipos: { color: '#A0A0A0', fontSize: 12 },
-
-  pronosticoBadge: {
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: 6, borderWidth: 1, borderColor: '#2A2D35',
-    minWidth: 32, alignItems: 'center',
-  },
+  pronosticoBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#2A2D35', minWidth: 32, alignItems: 'center' },
   badgeVerde: { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.1)' },
   badgeRojo: { borderColor: '#E91E63', backgroundColor: 'rgba(233,30,99,0.1)' },
   badgePendiente: { borderColor: '#3498DB', backgroundColor: 'rgba(52,152,219,0.1)' },
   pronosticoText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
-
   resultadoIcon: { fontSize: 14 },
-  pendienteIcon: { fontSize: 14 },
 });

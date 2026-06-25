@@ -165,25 +165,35 @@ export default function AdminDashboardScreen() {
         )}
 
         {quinielas.map((q) => (
-          <View key={q.id} style={styles.card}>
+          // ── Tocar el card navega al detalle de la quiniela ──
+          <TouchableOpacity
+            key={q.id}
+            style={styles.card}
+            onPress={() => router.push(`/admin/quiniela/${q.id}`)}
+            activeOpacity={0.75}
+          >
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
               <View style={[styles.badge, { borderColor: getEstadoColor(q.estado) }]}>
                 <Text style={[styles.badgeText, { color: getEstadoColor(q.estado) }]}>{q.estado.toUpperCase()}</Text>
               </View>
+              <Text style={styles.cardArrow}>›</Text>
             </View>
             <View style={styles.cardInfo}>
               <Text style={styles.infoText}>🏀 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
               <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada} MXN</Text></Text>
             </View>
             <View style={styles.cardActions}>
-              <TouchableOpacity style={styles.actionBtn} onPress={() => handleVerUsuarios(q.id, q.titulo)}>
+              <TouchableOpacity
+                style={styles.actionBtn}
+                onPress={(e) => { e.stopPropagation?.(); handleVerUsuarios(q.id, q.titulo); }}
+              >
                 <Text style={styles.actionText}>👥 Usuarios</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionBtn, q.estado !== 'abierta' && styles.disabledBtn]}
                 disabled={q.estado !== 'abierta' || actionLoading === q.id + '_cerrar'}
-                onPress={() => handleCerrarApuestas(q.id, q.titulo)}
+                onPress={(e) => { e.stopPropagation?.(); handleCerrarApuestas(q.id, q.titulo); }}
               >
                 {actionLoading === q.id + '_cerrar'
                   ? <ActivityIndicator size="small" color="#3498DB" />
@@ -193,7 +203,7 @@ export default function AdminDashboardScreen() {
               <TouchableOpacity
                 style={[styles.actionBtn, styles.dangerBtn, q.estado === 'finalizada' && styles.disabledBtn]}
                 disabled={q.estado === 'finalizada' || actionLoading === q.id + '_cancelar'}
-                onPress={() => handleCancelar(q.id, q.titulo)}
+                onPress={(e) => { e.stopPropagation?.(); handleCancelar(q.id, q.titulo); }}
               >
                 {actionLoading === q.id + '_cancelar'
                   ? <ActivityIndicator size="small" color="#E91E63" />
@@ -201,7 +211,7 @@ export default function AdminDashboardScreen() {
                 }
               </TouchableOpacity>
             </View>
-          </View>
+          </TouchableOpacity>
         ))}
       </ScrollView>
 
@@ -262,6 +272,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: '#2A2D35' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   cardTitle: { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1, marginRight: 8 },
+  cardArrow: { color: '#9B59B6', fontSize: 22, marginLeft: 4 },
   badge: { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   badgeText: { fontSize: 10, fontWeight: 'bold' },
   cardInfo: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#1C1F26', padding: 10, borderRadius: 8, marginBottom: 12 },

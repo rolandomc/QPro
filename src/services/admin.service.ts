@@ -14,31 +14,38 @@ export const COMPETITIONS: Record<CompetitionCode, string> = {
 };
 
 export const AdminService = {
+
   /**
-   * Llama a la Edge Function para importar partidos de football-data.org
-   * y guardarlos en la tabla `partidos` de la quiniela indicada.
+   * PASO 1: Solo CONSULTA partidos desde la Edge Function.
+   * NO los guarda en DB todavía — los regresa para que el admin elija.
    */
-  async syncMatches(quinielaId: string, competitionCode: CompetitionCode, matchday?: number) {
+  async fetchMatches(competitionCode: CompetitionCode, matchday?: number) {
     const { data, error } = await supabase.functions.invoke('sync-matches', {
       body: {
-        quiniela_id: quinielaId,
         competition_code: competitionCode,
         matchday: matchday ?? undefined,
+        preview_only: true, // <-- flag para que la EF no inserte nada
       },
     });
-
     if (error) throw error;
-    return data as { success: boolean; inserted: number; competition: string; matches: any[] };
+    return data as { success: boolean; competition: string; matches: any[] };
   },
 
   /**
-   * Crear una nueva quiniela
+   * PASO 2: Crear quiniela y guardar SOLO los partidos seleccionados por el admin.
    */
-  async createQuiniela(titulo: string, descripcion: string, precioEntrada: number, fechaCierre: string) {
+  async createQuinielaConPartidos(
+    titulo: string,
+    descripcion: string,
+    precioEntrada: number,
+    fechaCierre: string,
+    partidosSeleccionados: any[],  // array de objetos partido de la API
+  ) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No autenticado');
 
-    const { data, error } = await supabase
+    // 1. Crear la quiniela
+    const { data: quiniela, error: qError } = await supabase
       .from('quinielas')
       .insert({
         titulo,
@@ -46,52 +53,55 @@ export const AdminService = {
         precio_entrada: precioEntrada,
         fecha_cierre: fechaCierre,
         created_by: user.id,
+        estado: 'abierta',
       })
       .select()
       .single();
+    if (qError) throw qError;
 
-    if (error) throw error;
-    return data;
+    // 2. Insertar solo los partidos que el admin seleccionó
+    const rows = partidosSeleccionados.map((p) => ({
+      quiniela_id: quiniela.id,
+      external_id: String(p.external_id ?? p.id),
+      equipo_local: p.equipo_local ?? p.homeTeam?.name ?? p.homeTeam,
+      equipo_visitante: p.equipo_visitante ?? p.awayTeam?.name ?? p.awayTeam,
+      fecha_partido: p.fecha_partido ?? p.utcDate,
+    }));
+
+    const { error: pError } = await supabase.from('partidos').insert(rows);
+    if (pError) throw pError;
+
+    return quiniela;
   },
 
-  /**
-   * Obtener todas las quinielas (vista admin)
-   */
+  /** Obtener todas las quinielas (vista admin) */
   async getQuinielas() {
     const { data, error } = await supabase
       .from('quinielas')
       .select('*, partidos(count)')
       .order('created_at', { ascending: false });
-
     if (error) throw error;
     return data;
   },
 
-  /**
-   * Cambiar estado de una quiniela
-   */
+  /** Cambiar estado de una quiniela */
   async updateEstado(quinielaId: string, estado: 'abierta' | 'cerrada' | 'finalizada') {
     const { error } = await supabase
       .from('quinielas')
       .update({ estado })
       .eq('id', quinielaId);
-
     if (error) throw error;
   },
 
-  /**
-   * Verificar si el usuario tiene rol admin
-   */
+  /** Verificar si el usuario tiene rol admin */
   async isAdmin(): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
-
     const { data } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .single();
-
     return data?.role === 'admin';
   },
 };

@@ -13,42 +13,41 @@ export const QuinielasService = {
   },
 
   async getFinalizadas() {
-    // Trae las últimas 5 quinielas finalizadas con conteo de jugadores y ganador
     const { data, error } = await supabase
       .from('quinielas')
-      .select(`
-        id, titulo, precio_entrada, premio_total, created_at,
-        participaciones(count)
-      `)
+      .select(`id, titulo, precio_entrada, premio_total, created_at, participaciones(count)`)
       .eq('estado', 'finalizada')
       .order('created_at', { ascending: false })
       .limit(5);
     if (error) throw error;
 
-    // Para cada quiniela buscar el ganador (estado = ganador)
     const resultado = await Promise.all((data || []).map(async (q: any) => {
-      const { data: ganadores } = await supabase
+      // Top 3 por aciertos (ganadores primero, luego resto)
+      const { data: tops } = await supabase
         .from('participaciones')
-        .select('user_id, aciertos')
+        .select('user_id, aciertos, estado, monto_pagado')
         .eq('quiniela_id', q.id)
-        .eq('estado', 'ganador')
         .order('aciertos', { ascending: false })
-        .limit(1);
+        .limit(3);
 
-      let ganador_username: string | null = null;
-      if (ganadores && ganadores.length > 0) {
+      const top3 = await Promise.all((tops || []).map(async (p: any) => {
         const { data: perfil } = await supabase
           .from('profiles')
           .select('username')
-          .eq('id', ganadores[0].user_id)
+          .eq('id', p.user_id)
           .single();
-        ganador_username = perfil?.username ?? null;
-      }
+        return {
+          username: perfil?.username ?? 'Usuario',
+          aciertos: p.aciertos ?? 0,
+          estado: p.estado,
+          monto_pagado: p.monto_pagado ?? 0,
+        };
+      }));
 
       return {
         ...q,
         total_jugadores: q.participaciones?.[0]?.count ?? 0,
-        ganador_username,
+        top3,
       };
     }));
 

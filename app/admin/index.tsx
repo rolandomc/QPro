@@ -7,13 +7,13 @@ import { supabase } from '../../src/config/supabase';
 
 export default function AdminDashboardScreen() {
   const router = useRouter();
-  const [quinielas,          setQuinielas]          = useState<any[]>([]);
-  const [loading,            setLoading]            = useState(true);
-  const [refreshing,         setRefreshing]         = useState(false);
-  const [actionLoading,      setActionLoading]      = useState<string | null>(null);
-  const [usuariosModal,      setUsuariosModal]      = useState(false);
-  const [usuarios,           setUsuarios]           = useState<any[]>([]);
-  const [loadingUsuarios,    setLoadingUsuarios]    = useState(false);
+  const [quinielas,            setQuinielas]            = useState<any[]>([]);
+  const [loading,              setLoading]              = useState(true);
+  const [refreshing,           setRefreshing]           = useState(false);
+  const [actionLoading,        setActionLoading]        = useState<string | null>(null);
+  const [usuariosModal,        setUsuariosModal]        = useState(false);
+  const [usuarios,             setUsuarios]             = useState<any[]>([]);
+  const [loadingUsuarios,      setLoadingUsuarios]      = useState(false);
   const [quinielaSeleccionada, setQuinielaSeleccionada] = useState('');
 
   const loadQuinielas = useCallback(async () => {
@@ -30,19 +30,35 @@ export default function AdminDashboardScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
 
-  // ── Ver participantes: todos los estados, no solo pagados ──
   const handleVerUsuarios = async (quinielaId: string, titulo: string) => {
     setQuinielaSeleccionada(titulo);
     setUsuariosModal(true);
     setLoadingUsuarios(true);
     try {
-      const { data, error } = await supabase
+      // Paso 1: traer participaciones
+      const { data: parts, error: partsError } = await supabase
         .from('participaciones')
-        .select('id, estado, monto_pagado, aciertos, created_at, profiles(username)')
+        .select('id, user_id, estado, monto_pagado, aciertos, created_at')
         .eq('quiniela_id', quinielaId)
-        .order('created_at', { ascending: false }); // todos los estados, orden por fecha
-      if (error) throw error;
-      setUsuarios(data || []);
+        .order('created_at', { ascending: false });
+      if (partsError) throw partsError;
+
+      // Paso 2: traer profiles de esos user_ids
+      const userIds = (parts || []).map((p: any) => p.user_id);
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .in('id', userIds);
+
+      const profsMap: Record<string, string> = {};
+      (profs || []).forEach((p: any) => { profsMap[p.id] = p.username; });
+
+      // Combinar
+      const combined = (parts || []).map((p: any) => ({
+        ...p,
+        username: profsMap[p.user_id] ?? p.user_id,
+      }));
+      setUsuarios(combined);
     } catch (e: any) {
       Alert.alert('Error', e.message);
       setUsuariosModal(false);
@@ -96,12 +112,11 @@ export default function AdminDashboardScreen() {
   };
 
   const getEstadoColor = (estado: string) => {
-    if (estado === 'abierta')  return '#2ECC71';
-    if (estado === 'cerrada')  return '#3498DB';
+    if (estado === 'abierta') return '#2ECC71';
+    if (estado === 'cerrada') return '#3498DB';
     return '#A0A0A0';
   };
 
-  // Color por estado de participacion
   const getEstadoPartColor = (estado: string) => {
     if (estado === 'pagado')    return '#2ECC71';
     if (estado === 'pendiente') return '#F39C12';
@@ -138,7 +153,6 @@ export default function AdminDashboardScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); }} tintColor="#9B59B6" />
         }
       >
-        {/* Stats */}
         <View style={styles.statsContainer}>
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{quinielas.length}</Text>
@@ -176,18 +190,14 @@ export default function AdminDashboardScreen() {
               </View>
               <Text style={styles.cardArrow}>›</Text>
             </View>
-
             <View style={styles.cardInfo}>
               <Text style={styles.infoText}>🎪 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
               <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada} MXN</Text></Text>
             </View>
-
-            {/* Fila extra: mínimo jugadores y % admin */}
             <View style={styles.cardInfo}>
-              <Text style={styles.infoText}>👥 Mínimo: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 5} jugadores</Text></Text>
-              <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 10}%</Text></Text>
+              <Text style={styles.infoText}>👥 Mínimo: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0} jugadores</Text></Text>
+              <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
             </View>
-
             <View style={styles.cardActions}>
               <TouchableOpacity
                 style={styles.actionBtn}
@@ -220,7 +230,6 @@ export default function AdminDashboardScreen() {
         ))}
       </ScrollView>
 
-      {/* Modal participantes */}
       <Modal visible={usuariosModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
@@ -231,7 +240,6 @@ export default function AdminDashboardScreen() {
                 <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
-
             {loadingUsuarios ? (
               <ActivityIndicator size="large" color="#2ECC71" style={{ marginVertical: 30 }} />
             ) : usuarios.length === 0 ? (
@@ -244,10 +252,9 @@ export default function AdminDashboardScreen() {
                   <View style={styles.userRow}>
                     <Text style={styles.userRank}>#{index + 1}</Text>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.userEmail}>{item.profiles?.username ?? 'Usuario'}</Text>
+                      <Text style={styles.userEmail}>{item.username}</Text>
                       <Text style={styles.userMeta}>Aciertos: {item.aciertos ?? 0}</Text>
                     </View>
-                    {/* Estado con color */}
                     <View style={[styles.estadoBadge, { borderColor: getEstadoPartColor(item.estado) }]}>
                       <Text style={[styles.estadoBadgeText, { color: getEstadoPartColor(item.estado) }]}>
                         {item.estado?.toUpperCase()}
@@ -296,7 +303,6 @@ const styles = StyleSheet.create({
   dangerBtn:       { borderColor: '#E91E63', backgroundColor: 'rgba(233,30,99,0.1)' },
   dangerText:      { color: '#E91E63', fontSize: 12, fontWeight: 'bold' },
   disabledBtn:     { opacity: 0.35 },
-  // Modal
   modalOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalBox:        { backgroundColor: '#15181F', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '75%' },
   modalHeader:     { marginBottom: 15 },

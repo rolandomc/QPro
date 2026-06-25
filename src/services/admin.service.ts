@@ -1,6 +1,7 @@
 import { supabase } from '../config/supabase';
 
 export type CompetitionCode = 'PD' | 'PL' | 'MX1' | 'CL' | 'WC' | 'BL1' | 'SA' | 'FL1';
+export type MatchStatus = 'SCHEDULED' | 'FINISHED' | 'LIVE' | 'ALL';
 
 const FOOTBALL_API_BASE = 'https://api.football-data.org/v4';
 
@@ -23,14 +24,39 @@ export class AdminService {
     }
   }
 
-  /** Trae partidos de football-data.org sin guardar nada en Supabase */
-  static async fetchMatches(competition: CompetitionCode, matchday?: number) {
+  /**
+   * Trae partidos de football-data.org
+   * Filtros disponibles (todos opcionales, se pueden combinar):
+   *   matchday  — jornada específica (ej: 15)
+   *   status    — SCHEDULED | FINISHED | LIVE | ALL
+   *   dateFrom  — fecha inicio YYYY-MM-DD
+   *   dateTo    — fecha fin   YYYY-MM-DD
+   */
+  static async fetchMatches(
+    competition: CompetitionCode,
+    options?: {
+      matchday?: number;
+      status?: MatchStatus;
+      dateFrom?: string;   // YYYY-MM-DD
+      dateTo?: string;     // YYYY-MM-DD
+    }
+  ) {
     const apiKey = process.env.EXPO_PUBLIC_FOOTBALL_API_KEY;
     if (!apiKey) throw new Error('EXPO_PUBLIC_FOOTBALL_API_KEY no configurada en .env');
 
-    const url = matchday
-      ? `${FOOTBALL_API_BASE}/competitions/${competition}/matches?matchday=${matchday}`
-      : `${FOOTBALL_API_BASE}/competitions/${competition}/matches?status=SCHEDULED`;
+    const params = new URLSearchParams();
+
+    if (options?.matchday) params.set('matchday', String(options.matchday));
+    if (options?.dateFrom)  params.set('dateFrom', options.dateFrom);
+    if (options?.dateTo)    params.set('dateTo',   options.dateTo);
+
+    // status solo si no hay rango de fechas (la API no admite ambos)
+    if (!options?.dateFrom && !options?.dateTo) {
+      params.set('status', options?.status ?? 'SCHEDULED');
+    }
+
+    const query = params.toString();
+    const url = `${FOOTBALL_API_BASE}/competitions/${competition}/matches${query ? '?' + query : ''}`;
 
     const res = await fetch(url, {
       headers: { 'X-Auth-Token': apiKey },
@@ -42,17 +68,18 @@ export class AdminService {
     }
 
     const data = await res.json();
-    // Normalizar respuesta para que create.tsx la consuma igual
     const matches = (data.matches ?? []).map((m: any) => ({
       external_id: String(m.id),
-      equipo_local: m.homeTeam?.shortName ?? m.homeTeam?.name ?? '?',
+      equipo_local:     m.homeTeam?.shortName ?? m.homeTeam?.name ?? '?',
       equipo_visitante: m.awayTeam?.shortName ?? m.awayTeam?.name ?? '?',
-      fecha_partido: m.utcDate,
+      fecha_partido:    m.utcDate,
+      status:           m.status,
+      marcador:         m.score?.fullTime ?? null,
     }));
     return { matches };
   }
 
-  /** Crea la quiniela + inserta los partidos seleccionados en una sola operación */
+  /** Crea la quiniela + inserta los partidos seleccionados */
   static async createQuinielaConPartidos(
     titulo: string,
     descripcion: string,
@@ -65,7 +92,6 @@ export class AdminService {
       fecha_partido: string;
     }>
   ) {
-    // 1. Crear quiniela
     const { data: quiniela, error: errQ } = await supabase
       .from('quinielas')
       .insert({
@@ -80,19 +106,17 @@ export class AdminService {
       .single();
     if (errQ) throw errQ;
 
-    // 2. Insertar partidos vinculados
     const rows = partidos.map((p, i) => ({
-      quiniela_id: quiniela.id,
-      equipo_local: p.equipo_local,
-      equipo_visitante: p.equipo_visitante,
-      fecha_partido: p.fecha_partido,
-      fixture_id: parseInt(p.external_id) || null,
-      orden: i + 1,
+      quiniela_id:       quiniela.id,
+      equipo_local:      p.equipo_local,
+      equipo_visitante:  p.equipo_visitante,
+      fecha_partido:     p.fecha_partido,
+      fixture_id:        parseInt(p.external_id) || null,
+      orden:             i + 1,
     }));
 
     const { error: errP } = await supabase.from('partidos').insert(rows);
     if (errP) throw errP;
-
     return quiniela;
   }
 

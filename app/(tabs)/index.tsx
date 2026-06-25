@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { StyleSheet, FlatList, StatusBar, View, Text, ActivityIndicator, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
 import Header from '../../src/components/Header';
 import { QuinielaCard } from '../../src/components/QuinielaCard';
 import { QuinielasService } from '../../src/services/quinielas.service';
@@ -24,7 +25,14 @@ export default function QuinielasScreen() {
     }
   }, []);
 
-  useEffect(() => { loadQuinielas(); }, []);
+  // Se ejecuta cada vez que la pantalla entra en foco
+  // Asi cuando vuelves del admin ya ve el estado actualizado
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      loadQuinielas();
+    }, [])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -72,12 +80,7 @@ export default function QuinielasScreen() {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={renderEmpty}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#2ECC71"
-            colors={['#2ECC71']}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#2ECC71" colors={['#2ECC71']} />
         }
         ListHeaderComponent={
           <Text style={styles.sectionTitle}>🔥 Quinielas Disponibles</Text>
@@ -102,15 +105,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0C10' },
   listContent: { paddingHorizontal: 15, paddingTop: 5, paddingBottom: 40 },
   sectionTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 15, marginTop: 10 },
-
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 15 },
   loadingText: { color: '#A0A0A0', fontSize: 14 },
-
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
   emptyIcon: { fontSize: 60, marginBottom: 15 },
   emptyTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
   emptySubtitle: { color: '#A0A0A0', fontSize: 14, textAlign: 'center', lineHeight: 22 },
-
   errorBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.1)', borderWidth: 1, borderColor: '#E74C3C', margin: 15, padding: 12, borderRadius: 10 },
   errorText: { color: '#E74C3C', fontSize: 13, flex: 1 },
   retryText: { color: '#2ECC71', fontWeight: 'bold', fontSize: 13, marginLeft: 10 },

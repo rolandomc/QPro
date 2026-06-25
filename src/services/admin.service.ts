@@ -37,7 +37,6 @@ export class AdminService {
 
     const params = new URLSearchParams();
 
-    // matchday: solo si es entero válido entre 1 y 46
     const md = options?.matchday;
     if (md !== undefined && md !== null) {
       const mdInt = Math.floor(md);
@@ -49,11 +48,9 @@ export class AdminService {
     const hasDateRange = !!(options?.dateFrom || options?.dateTo);
 
     if (hasDateRange) {
-      // Con rango de fechas NO se puede enviar status (la API lo rechaza)
       if (options?.dateFrom) params.set('dateFrom', options.dateFrom);
       if (options?.dateTo)   params.set('dateTo',   options.dateTo);
     } else {
-      // Sin rango, enviar status solo si no es 'ALL'
       const st = options?.status ?? 'SCHEDULED';
       if (st !== 'ALL') params.set('status', st);
     }
@@ -158,40 +155,12 @@ export class AdminService {
     if (error) throw error;
   }
 
+  // ── Un solo query SQL vía RPC — nunca falla silenciosamente ──────────────
   static async recalcularAciertos(quinielaId: string) {
-    const { data: participaciones, error: errPart } = await supabase
-      .from('participaciones')
-      .select('id')
-      .eq('quiniela_id', quinielaId);
-    if (errPart) throw errPart;
-    if (!participaciones || participaciones.length === 0) return;
-
-    const { data: partidos, error: errPart2 } = await supabase
-      .from('partidos')
-      .select('id, resultado')
-      .eq('quiniela_id', quinielaId)
-      .not('resultado', 'is', null);
-    if (errPart2) throw errPart2;
-
-    const resultadoMap = Object.fromEntries(
-      (partidos ?? []).map(p => [p.id, p.resultado])
-    );
-
-    for (const part of participaciones) {
-      const { data: sels } = await supabase
-        .from('selecciones')
-        .select('partido_id, prediccion')
-        .eq('participacion_id', part.id);
-
-      const aciertos = (sels ?? []).filter(
-        s => resultadoMap[s.partido_id] && resultadoMap[s.partido_id] === s.prediccion
-      ).length;
-
-      await supabase
-        .from('participaciones')
-        .update({ aciertos })
-        .eq('id', part.id);
-    }
+    const { error } = await supabase.rpc('recalcular_aciertos', {
+      p_quiniela_id: quinielaId,
+    });
+    if (error) throw error;
   }
 
   static async getParticipantes(quinielaId: string) {

@@ -34,31 +34,27 @@ const hace30 = () => { const d = new Date(); d.setDate(d.getDate() - 30); return
 export default function CreateQuinielaScreen() {
   const router = useRouter();
 
-  // ── Detalles quiniela ───────────────────────────────────────────────────
-  const [titulo,          setTitulo]         = useState('');
-  const [liga,            setLiga]           = useState(LIGAS_DISPONIBLES[0]);
-  const [precio,          setPrecio]         = useState('50');
-  const [fechaCierre,     setFechaCierre]    = useState('');
-  const [jugMinimos,      setJugMinimos]     = useState('5');
-  const [pctAdmin,        setPctAdmin]       = useState('10');
+  const [titulo,         setTitulo]        = useState('');
+  const [liga,           setLiga]          = useState(LIGAS_DISPONIBLES[0]);
+  const [precio,         setPrecio]        = useState('50');
+  const [fechaCierre,    setFechaCierre]   = useState('');
+  const [jugMinimos,     setJugMinimos]    = useState('5');
+  const [pctAdmin,       setPctAdmin]      = useState('10');
 
-  // ── Filtros búsqueda ────────────────────────────────────────────────────
-  const [statusLabel,  setStatusLabel]  = useState(STATUS_LABELS[0]);
-  const [jornada,      setJornada]      = useState('');
-  const [dateFrom,     setDateFrom]     = useState('');
-  const [dateTo,       setDateTo]       = useState('');
-  const [modoFiltro,   setModoFiltro]   = useState<'status' | 'fecha'>('status');
+  const [statusLabel,    setStatusLabel]   = useState(STATUS_LABELS[0]);
+  const [jornada,        setJornada]       = useState('');
+  const [dateFrom,       setDateFrom]      = useState('');
+  const [dateTo,         setDateTo]        = useState('');
+  const [modoFiltro,     setModoFiltro]    = useState<'status' | 'fecha'>('status');
 
-  // ── API / partidos ──────────────────────────────────────────────────────
-  const [partidosApi,    setPartidosApi]    = useState<any[]>([]);
-  const [seleccionados,  setSeleccionados]  = useState<Set<string>>(new Set());
-  const [loadingApi,     setLoadingApi]     = useState(false);
-  const [loadingPublish, setLoadingPublish] = useState(false);
+  const [partidosApi,    setPartidosApi]   = useState<any[]>([]);
+  const [seleccionados,  setSeleccionados] = useState<Set<string>>(new Set());
+  const [loadingApi,     setLoadingApi]    = useState(false);
+  const [loadingPublish, setLoadingPublish]= useState(false);
 
-  // ── Preview premio en tiempo real ───────────────────────────────────────
-  const precioNum   = parseFloat(precio)  || 0;
-  const pctAdminNum = parseFloat(pctAdmin) || 0;
-  const jugMinNum   = parseInt(jugMinimos) || 0;
+  const precioNum   = parseFloat(precio)   || 0;
+  const pctAdminNum = parseFloat(pctAdmin)  || 0;
+  const jugMinNum   = parseInt(jugMinimos)  || 0;
 
   const previsualizacion = useMemo(() => {
     const pozoMinimo  = precioNum * jugMinNum;
@@ -67,7 +63,6 @@ export default function CreateQuinielaScreen() {
     return { pozoMinimo, comisionMin, premioMin };
   }, [precioNum, pctAdminNum, jugMinNum]);
 
-  // ── Buscar partidos ─────────────────────────────────────────────────────
   const handleBuscarPartidos = async () => {
     setLoadingApi(true);
     setPartidosApi([]);
@@ -112,11 +107,10 @@ export default function CreateQuinielaScreen() {
     );
   };
 
-  // ── Publicar ─────────────────────────────────────────────────────────────
   const handlePublicar = async () => {
-    if (!titulo.trim()) { Alert.alert('Falta el título', 'Escribe un título.'); return; }
-    if (seleccionados.size === 0) { Alert.alert('Sin partidos', 'Selecciona al menos uno.'); return; }
-    if (jugMinNum < 2) { Alert.alert('J. mínimos inválido', 'Mínimo 2 jugadores.'); return; }
+    if (!titulo.trim())             { Alert.alert('Falta el título',      'Escribe un título.'); return; }
+    if (seleccionados.size === 0)   { Alert.alert('Sin partidos',         'Selecciona al menos uno.'); return; }
+    if (jugMinNum < 2)              { Alert.alert('J. mínimos inválido',  'Mínimo 2 jugadores.'); return; }
     if (pctAdminNum < 0 || pctAdminNum > 50) { Alert.alert('% Admin inválido', 'Debe estar entre 0 y 50%.'); return; }
 
     setLoadingPublish(true);
@@ -149,8 +143,12 @@ export default function CreateQuinielaScreen() {
     return '#A0A0A0';
   };
 
+  // El botón flotante aparece cuando hay partidos cargados (aunque sean 0 seleccionados)
+  const showFloating = partidosApi.length > 0;
+
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Volver</Text>
@@ -159,9 +157,12 @@ export default function CreateQuinielaScreen() {
         <View style={{ width: 60 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-
-        {/* ── 1. Detalles básicos ── */}
+      {/* Scroll — con paddingBottom extra cuando hay botón flotante */}
+      <ScrollView
+        contentContainerStyle={[styles.content, showFloating && { paddingBottom: 110 }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* 1. Detalles */}
         <Text style={styles.sectionTitle}>1. Detalles</Text>
         <View style={styles.inputContainer}>
           <Text style={styles.label}>Título</Text>
@@ -185,36 +186,21 @@ export default function CreateQuinielaScreen() {
           </View>
         </View>
 
-        {/* ── 2. Configuración del pozo ── */}
+        {/* 2. Pozo */}
         <Text style={styles.sectionTitle}>2. Configuración del Pozo</Text>
         <View style={styles.formRow}>
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Jugadores mínimos 👥</Text>
-            <TextInput
-              style={styles.input}
-              value={jugMinimos}
-              onChangeText={setJugMinimos}
-              keyboardType="numeric"
-              placeholder="5"
-              placeholderTextColor="#707070"
-            />
+            <TextInput style={styles.input} value={jugMinimos} onChangeText={setJugMinimos} keyboardType="numeric" placeholder="5" placeholderTextColor="#707070" />
             <Text style={styles.hint}>Mínimo para que sea válida</Text>
           </View>
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Comisión admin %</Text>
-            <TextInput
-              style={styles.input}
-              value={pctAdmin}
-              onChangeText={setPctAdmin}
-              keyboardType="numeric"
-              placeholder="10"
-              placeholderTextColor="#707070"
-            />
+            <TextInput style={styles.input} value={pctAdmin} onChangeText={setPctAdmin} keyboardType="numeric" placeholder="10" placeholderTextColor="#707070" />
             <Text style={styles.hint}>% que retiene la casa</Text>
           </View>
         </View>
 
-        {/* Preview del pozo */}
         {precioNum > 0 && jugMinNum > 0 && (
           <View style={styles.previewBox}>
             <Text style={styles.previewTitle}>📊 Preview del Pozo Mínimo</Text>
@@ -234,9 +220,8 @@ export default function CreateQuinielaScreen() {
           </View>
         )}
 
-        {/* ── 3. Buscar partidos ── */}
+        {/* 3. Buscar */}
         <Text style={styles.sectionTitle}>3. Buscar Partidos</Text>
-
         <View style={[styles.formRow, { zIndex: 20 }]}>
           <CustomDropdown label="Liga" options={LIGAS_DISPONIBLES} selectedValue={liga} onSelect={setLiga} />
         </View>
@@ -281,7 +266,7 @@ export default function CreateQuinielaScreen() {
             : <Text style={styles.fetchBtnText}>🔍 Buscar Partidos</Text>}
         </TouchableOpacity>
 
-        {/* ── Lista de partidos ── */}
+        {/* 4. Lista de partidos */}
         {partidosApi.length > 0 && (
           <View style={{ marginTop: 20 }}>
             <View style={styles.listHeader}>
@@ -326,74 +311,124 @@ export default function CreateQuinielaScreen() {
                 </TouchableOpacity>
               );
             })}
-
-            <TouchableOpacity
-              style={[styles.publishBtn, seleccionados.size > 0 ? styles.neonBgGreen : styles.disabledBtn]}
-              disabled={seleccionados.size === 0 || loadingPublish}
-              onPress={handlePublicar}
-            >
-              {loadingPublish
-                ? <ActivityIndicator color="#000" />
-                : <Text style={styles.publishBtnText}>
-                    🚀 Publicar con {seleccionados.size} partido{seleccionados.size !== 1 ? 's' : ''}
-                  </Text>}
-            </TouchableOpacity>
           </View>
         )}
-
       </ScrollView>
+
+      {/* ── BOTÓN FLOTANTE ── */}
+      {showFloating && (
+        <View style={styles.floatingWrap}>
+          <TouchableOpacity
+            style={[
+              styles.floatingBtn,
+              seleccionados.size > 0 ? styles.floatingBtnActive : styles.floatingBtnDisabled,
+            ]}
+            onPress={handlePublicar}
+            disabled={seleccionados.size === 0 || loadingPublish}
+            activeOpacity={0.85}
+          >
+            {loadingPublish ? (
+              <ActivityIndicator color="#000" />
+            ) : (
+              <>
+                <Text style={[
+                  styles.floatingBtnText,
+                  seleccionados.size === 0 && { color: '#505050' },
+                ]}>
+                  🚀 Publicar
+                </Text>
+                <View style={[
+                  styles.floatingBadge,
+                  seleccionados.size > 0 ? styles.floatingBadgeActive : styles.floatingBadgeDisabled,
+                ]}>
+                  <Text style={[
+                    styles.floatingBadgeText,
+                    seleccionados.size === 0 && { color: '#505050' },
+                  ]}>
+                    {seleccionados.size} partido{seleccionados.size !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#0A0C10' },
-  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35', zIndex: 20 },
-  backButton:       { width: 60 },
-  backText:         { color: '#9B59B6', fontSize: 16 },
-  title:            { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  content:          { padding: 15, paddingBottom: 40 },
-  sectionTitle:     { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginTop: 20, marginBottom: 10 },
-  formRow:          { flexDirection: 'row', gap: 15, marginBottom: 15 },
-  inputContainer:   { flex: 1, marginBottom: 15 },
-  label:            { color: '#A0A0A0', fontSize: 12, marginBottom: 5 },
-  hint:             { color: '#505050', fontSize: 10, marginTop: 4 },
-  input:            { backgroundColor: '#15181F', color: '#FFF', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#2A2D35', fontSize: 15, height: 48 },
-  toggleRow:        { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  toggleBtn:        { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2A2D35', alignItems: 'center', backgroundColor: '#15181F' },
-  toggleBtnActive:  { borderColor: '#3498DB', backgroundColor: 'rgba(52,152,219,0.12)' },
-  toggleText:       { color: '#707070', fontSize: 13, fontWeight: '600' },
-  toggleTextActive: { color: '#3498DB' },
-  // Preview pozo
-  previewBox:       { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 10, borderWidth: 1.5, borderColor: '#F39C12' },
-  previewTitle:     { color: '#F39C12', fontWeight: 'bold', fontSize: 13, marginBottom: 12 },
-  previewRow:       { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  previewRowTotal:  { borderTopWidth: 1, borderTopColor: '#2A2D35', paddingTop: 8, marginTop: 4 },
-  previewLabel:     { color: '#A0A0A0', fontSize: 13 },
-  previewVal:       { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
-  previewLabelTotal:{ color: '#FFF', fontSize: 14, fontWeight: 'bold' },
-  previewValTotal:  { color: '#F39C12', fontSize: 18, fontWeight: 'bold' },
-  previewNote:      { color: '#505050', fontSize: 10, marginTop: 8, textAlign: 'center' },
-  // Fetch btn
-  fetchBtn:         { backgroundColor: '#15181F', padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 10, borderWidth: 1.5 },
-  neonBorderBlue:   { borderColor: '#3498DB', shadowColor: '#3498DB', shadowOpacity: 0.5, shadowRadius: 8, elevation: 5 },
-  fetchBtnText:     { color: '#3498DB', fontWeight: 'bold', fontSize: 16 },
-  listHeader:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  selectAllBtn:     { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#3498DB', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  selectAllText:    { color: '#3498DB', fontSize: 12, fontWeight: 'bold' },
-  matchCard:        { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15181F', padding: 14, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#2A2D35' },
-  matchCardSelected:{ borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
-  checkbox:         { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#707070', marginRight: 14, alignItems: 'center', justifyContent: 'center' },
-  checkboxSelected: { backgroundColor: '#2ECC71', borderColor: '#2ECC71' },
-  checkmark:        { color: '#000', fontWeight: 'bold', fontSize: 14 },
-  matchRow:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  matchTeams:       { color: '#FFF', fontSize: 14, fontWeight: 'bold', flex: 1 },
-  marcadorText:     { color: '#2ECC71', fontWeight: 'bold', fontSize: 14, marginLeft: 8 },
-  matchMeta:        { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  matchDate:        { color: '#707070', fontSize: 11 },
-  statusBadge:      { fontSize: 11, fontWeight: '600' },
-  publishBtn:       { padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 20 },
-  neonBgGreen:      { backgroundColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.8, shadowRadius: 10, elevation: 8 },
-  disabledBtn:      { backgroundColor: '#1C1F26', borderColor: '#2A2D35', borderWidth: 1 },
-  publishBtnText:   { color: '#000', fontWeight: 'bold', fontSize: 16 },
+  container:          { flex: 1, backgroundColor: '#0A0C10' },
+  header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                        padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35', zIndex: 20 },
+  backButton:         { width: 60 },
+  backText:           { color: '#9B59B6', fontSize: 16 },
+  title:              { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  content:            { padding: 15, paddingBottom: 40 },
+  sectionTitle:       { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginTop: 20, marginBottom: 10 },
+  formRow:            { flexDirection: 'row', gap: 15, marginBottom: 15 },
+  inputContainer:     { flex: 1, marginBottom: 15 },
+  label:              { color: '#A0A0A0', fontSize: 12, marginBottom: 5 },
+  hint:               { color: '#505050', fontSize: 10, marginTop: 4 },
+  input:              { backgroundColor: '#15181F', color: '#FFF', padding: 12, borderRadius: 8,
+                        borderWidth: 1, borderColor: '#2A2D35', fontSize: 15, height: 48 },
+  toggleRow:          { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  toggleBtn:          { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1,
+                        borderColor: '#2A2D35', alignItems: 'center', backgroundColor: '#15181F' },
+  toggleBtnActive:    { borderColor: '#3498DB', backgroundColor: 'rgba(52,152,219,0.12)' },
+  toggleText:         { color: '#707070', fontSize: 13, fontWeight: '600' },
+  toggleTextActive:   { color: '#3498DB' },
+  previewBox:         { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 10,
+                        borderWidth: 1.5, borderColor: '#F39C12' },
+  previewTitle:       { color: '#F39C12', fontWeight: 'bold', fontSize: 13, marginBottom: 12 },
+  previewRow:         { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  previewRowTotal:    { borderTopWidth: 1, borderTopColor: '#2A2D35', paddingTop: 8, marginTop: 4 },
+  previewLabel:       { color: '#A0A0A0', fontSize: 13 },
+  previewVal:         { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
+  previewLabelTotal:  { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  previewValTotal:    { color: '#F39C12', fontSize: 18, fontWeight: 'bold' },
+  previewNote:        { color: '#505050', fontSize: 10, marginTop: 8, textAlign: 'center' },
+  fetchBtn:           { backgroundColor: '#15181F', padding: 15, borderRadius: 12,
+                        alignItems: 'center', marginTop: 10, borderWidth: 1.5 },
+  neonBorderBlue:     { borderColor: '#3498DB', shadowColor: '#3498DB', shadowOpacity: 0.5, shadowRadius: 8, elevation: 5 },
+  fetchBtnText:       { color: '#3498DB', fontWeight: 'bold', fontSize: 16 },
+  listHeader:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  selectAllBtn:       { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#3498DB',
+                        borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  selectAllText:      { color: '#3498DB', fontSize: 12, fontWeight: 'bold' },
+  matchCard:          { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15181F',
+                        padding: 14, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#2A2D35' },
+  matchCardSelected:  { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
+  checkbox:           { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#707070',
+                        marginRight: 14, alignItems: 'center', justifyContent: 'center' },
+  checkboxSelected:   { backgroundColor: '#2ECC71', borderColor: '#2ECC71' },
+  checkmark:          { color: '#000', fontWeight: 'bold', fontSize: 14 },
+  matchRow:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  matchTeams:         { color: '#FFF', fontSize: 14, fontWeight: 'bold', flex: 1 },
+  marcadorText:       { color: '#2ECC71', fontWeight: 'bold', fontSize: 14, marginLeft: 8 },
+  matchMeta:          { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  matchDate:          { color: '#707070', fontSize: 11 },
+  statusBadge:        { fontSize: 11, fontWeight: '600' },
+
+  // ── Floating button ──────────────────────────────────────────────────────
+  floatingWrap:       {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    paddingHorizontal: 16, paddingBottom: 24, paddingTop: 10,
+    backgroundColor: 'rgba(10,12,16,0.92)',
+    borderTopWidth: 1, borderTopColor: '#1E2330',
+  },
+  floatingBtn:        {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 15, borderRadius: 14, gap: 10,
+  },
+  floatingBtnActive:  {
+    backgroundColor: '#2ECC71',
+    shadowColor: '#2ECC71', shadowOpacity: 0.7, shadowRadius: 14, elevation: 10,
+  },
+  floatingBtnDisabled:{ backgroundColor: '#15181F', borderWidth: 1, borderColor: '#2A2D35' },
+  floatingBtnText:    { color: '#000', fontWeight: 'bold', fontSize: 17 },
+  floatingBadge:      { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
+  floatingBadgeActive:  { backgroundColor: 'rgba(0,0,0,0.2)' },
+  floatingBadgeDisabled:{ backgroundColor: '#1C1F26' },
+  floatingBadgeText:  { color: '#000', fontWeight: 'bold', fontSize: 13 },
 });

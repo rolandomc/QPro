@@ -56,26 +56,26 @@ export default function RootLayout() {
     else if (session && inAuthGroup) router.replace('/(tabs)');
   }, [session, isInitialized, segments]);
 
-  if (!isInitialized) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#0A0C10', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#2ECC71" />
-      </View>
-    );
-  }
-
+  // IMPORTANTE: AlertProvider SIEMPRE envuelve todo, incluso el spinner
+  // para que el Context nunca se rompa por el early return
   return (
     <AlertProvider>
       <StatusBar barStyle="light-content" backgroundColor="#0A0C10" />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="auth/login" />
-        <Stack.Screen name="auth/register" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="quiniela/details" />
-        <Stack.Screen name="admin/index" />
-        <Stack.Screen name="admin/create" />
-        <Stack.Screen name="wallet/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      </Stack>
+      {!isInitialized ? (
+        <View style={{ flex: 1, backgroundColor: '#0A0C10', justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#2ECC71" />
+        </View>
+      ) : (
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="auth/login" />
+          <Stack.Screen name="auth/register" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="quiniela/details" />
+          <Stack.Screen name="admin/index" />
+          <Stack.Screen name="admin/create" />
+          <Stack.Screen name="wallet/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        </Stack>
+      )}
     </AlertProvider>
   );
 }

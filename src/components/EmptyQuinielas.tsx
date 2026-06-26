@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { QuinielasService } from '../services/quinielas.service';
 
 function useCountdown(targetDate: string | null) {
@@ -24,97 +24,105 @@ function useCountdown(targetDate: string | null) {
   return tiempo;
 }
 
+// Neon colors por posicion
+const NEON = ['#FFD700', '#00E5FF', '#FF6B35'];
+const NEON_BG = ['rgba(255,215,0,0.07)', 'rgba(0,229,255,0.06)', 'rgba(255,107,53,0.06)'];
+const NEON_BORDER = ['rgba(255,215,0,0.4)', 'rgba(0,229,255,0.3)', 'rgba(255,107,53,0.3)'];
 const MEDALLAS = ['🥇', '🥈', '🥉'];
-const COLORS_PODIO = ['#FFD700', '#C0C0C0', '#CD7F32'];
-const LABELS_PODIO = ['1er lugar', '2do lugar', '3er lugar'];
+const LABELS = ['CAMPEÓN', '2º LUGAR', '3º LUGAR'];
 
 function QuinielaCard({ q }: { q: any }) {
   const [expanded, setExpanded] = useState(false);
-
   const fecha = new Date(q.created_at);
   const fechaStr = `${fecha.getDate()}/${fecha.getMonth() + 1}/${fecha.getFullYear()}`;
+  const bolsa = Number(q.premio_total || 0);
 
   return (
-    <View style={card.container}>
-      {/* Header siempre visible */}
-      <TouchableOpacity style={card.header} onPress={() => setExpanded(v => !v)} activeOpacity={0.8}>
-        <View style={card.headerLeft}>
+    <View style={card.wrap}>
+      {/* Borde neon superior */}
+      <View style={card.neonLine} />
+
+      {/* Header */}
+      <TouchableOpacity style={card.header} onPress={() => setExpanded(v => !v)} activeOpacity={0.75}>
+        <View style={{ flex: 1 }}>
           <Text style={card.titulo} numberOfLines={1}>{q.titulo}</Text>
-          <Text style={card.fecha}>{fechaStr} • {q.total_jugadores} jugadores</Text>
+          <Text style={card.meta}>{fechaStr} • {q.total_jugadores} jugadores</Text>
         </View>
-        <View style={card.headerRight}>
-          <Text style={card.premio}>${Number(q.premio_total || 0).toLocaleString()}</Text>
-          <Text style={card.premioLabel}>bolsa</Text>
+        <View style={card.bolsaBox}>
+          <Text style={card.bolsaVal}>${bolsa.toLocaleString()}</Text>
+          <Text style={card.bolsaLbl}>BOLSA</Text>
         </View>
-        <Text style={[card.chevron, expanded && { transform: [{ rotate: '180deg' }] }]}>▼</Text>
       </TouchableOpacity>
 
-      {/* Stats row */}
+      {/* Stats */}
       <View style={card.statsRow}>
-        <View style={card.stat}>
-          <Text style={card.statVal}>${q.precio_entrada}</Text>
+        <View style={card.statItem}>
+          <Text style={card.statNum}>${q.precio_entrada}</Text>
           <Text style={card.statLbl}>Entrada</Text>
         </View>
-        <View style={card.statDiv} />
-        <View style={card.stat}>
-          <Text style={card.statVal}>{q.total_jugadores}</Text>
+        <View style={card.statSep} />
+        <View style={card.statItem}>
+          <Text style={card.statNum}>{q.total_jugadores}</Text>
           <Text style={card.statLbl}>Jugadores</Text>
         </View>
-        <View style={card.statDiv} />
-        <View style={card.stat}>
-          <Text style={[card.statVal, { color: '#2ECC71' }]}>${Number(q.premio_total || 0).toLocaleString()}</Text>
+        <View style={card.statSep} />
+        <View style={card.statItem}>
+          <Text style={[card.statNum, { color: '#2ECC71' }]}>${bolsa.toLocaleString()}</Text>
           <Text style={card.statLbl}>Premio</Text>
         </View>
       </View>
 
       {/* Podio desplegable */}
       {expanded && (
-        <View style={card.podioContainer}>
-          <View style={card.podioTitleRow}>
-            <Text style={card.podioTitle}>🏆 Tabla Final</Text>
-          </View>
+        <View style={card.podio}>
+          <Text style={card.podioTitle}>🏆 TABLA DE HONOR</Text>
 
-          {q.top3 && q.top3.length > 0 ? (
-            q.top3.map((jugador: any, i: number) => (
-              <View key={i} style={[
-                card.jugadorRow,
-                i === 0 && card.jugadorRowGold,
-              ]}>
-                {/* Medalla */}
-                <Text style={card.medalla}>{MEDALLAS[i]}</Text>
-
-                {/* Info */}
-                <View style={card.jugadorInfo}>
-                  <Text style={[card.jugadorNombre, { color: COLORS_PODIO[i] }]}>
-                    {jugador.username}
-                  </Text>
-                  <Text style={card.jugadorLabel}>{LABELS_PODIO[i]}</Text>
-                </View>
-
-                {/* Aciertos */}
-                <View style={card.aciertosBox}>
-                  <Text style={[card.aciertosNum, { color: COLORS_PODIO[i] }]}>{jugador.aciertos}</Text>
-                  <Text style={card.aciertosLabel}>aciertos</Text>
-                </View>
-
-                {/* Premio si es ganador */}
-                {jugador.estado === 'ganador' && (
-                  <View style={card.premioBox}>
-                    <Text style={card.premioBoxVal}>${Number(jugador.monto_pagado || q.premio_total || 0).toLocaleString()}</Text>
-                    <Text style={card.premioBoxLabel}>💰 premio</Text>
-                  </View>
-                )}
+          {q.top3 && q.top3.length > 0 ? q.top3.map((j: any, i: number) => (
+            <View key={i} style={[
+              card.jugRow,
+              { backgroundColor: NEON_BG[i], borderColor: NEON_BORDER[i] },
+              i === 0 && card.jugRowFirst,
+            ]}>
+              {/* Rank badge */}
+              <View style={[card.rankBadge, { borderColor: NEON[i] }]}>
+                <Text style={card.rankEmoji}>{MEDALLAS[i]}</Text>
               </View>
-            ))
-          ) : (
-            <Text style={card.sinGanador}>Sin resultados registrados</Text>
+
+              {/* Nombre + label */}
+              <View style={{ flex: 1 }}>
+                <Text style={[card.jugNombre, { color: NEON[i], textShadowColor: NEON[i], textShadowRadius: 8 }]}>
+                  {j.username}
+                </Text>
+                <Text style={[card.jugLabel, { color: NEON[i], opacity: 0.7 }]}>{LABELS[i]}</Text>
+              </View>
+
+              {/* Aciertos */}
+              <View style={[card.aciBox, { borderColor: NEON[i] + '55' }]}>
+                <Text style={[card.aciNum, { color: NEON[i] }]}>{j.aciertos}</Text>
+                <Text style={[card.aciLbl, { color: NEON[i], opacity: 0.6 }]}>aciertos</Text>
+              </View>
+
+              {/* Premio ganador */}
+              {j.estado === 'ganador' && (
+                <View style={card.premioNeon}>
+                  <Text style={card.premioNeonVal}>
+                    ${Number(j.monto_pagado || bolsa).toLocaleString()}
+                  </Text>
+                  <Text style={card.premioNeonLbl}>💰 COBRADO</Text>
+                </View>
+              )}
+            </View>
+          )) : (
+            <Text style={card.sinData}>Sin resultados registrados</Text>
           )}
         </View>
       )}
 
-      {/* Tap para ver */}
-      <TouchableOpacity style={card.verBtn} onPress={() => setExpanded(v => !v)}>
-        <Text style={card.verBtnText}>{expanded ? 'Ocultar resultados ▲' : 'Ver resultados ▼'}</Text>
+      {/* Toggle btn */}
+      <TouchableOpacity style={card.toggleBtn} onPress={() => setExpanded(v => !v)}>
+        <Text style={card.toggleTxt}>
+          {expanded ? 'OCULTAR PODIO  ▲' : 'VER PODIO  ▼'}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -141,19 +149,19 @@ export default function EmptyQuinielas() {
 
       <Text style={styles.icon}>🏆</Text>
       <Text style={styles.titulo}>Sin quinielas activas</Text>
-      <Text style={styles.subtitulo}>{`El admin aún no ha publicado quinielas.\nVuelve pronto.`}</Text>
+      <Text style={styles.sub}>{`El admin aún no ha publicado quinielas.\nVuelve pronto.`}</Text>
 
       {/* Countdown */}
       {proximaFecha && !countdown.pasado && (
-        <View style={styles.countdownBox}>
-          <Text style={styles.countdownLabel}>⏳ Próxima quiniela en</Text>
-          <View style={styles.countdownRow}>
-            {[{ v: countdown.dias, l: 'días' }, { v: countdown.horas, l: 'horas' }, { v: countdown.minutos, l: 'min' }, { v: countdown.segundos, l: 'seg' }].map((u, i) => (
+        <View style={styles.cdBox}>
+          <Text style={styles.cdLabel}>⏳ PRÓXIMA QUINIELA EN</Text>
+          <View style={styles.cdRow}>
+            {[{ v: countdown.dias, l: 'DÍAS' }, { v: countdown.horas, l: 'HORAS' }, { v: countdown.minutos, l: 'MIN' }, { v: countdown.segundos, l: 'SEG' }].map((u, i) => (
               <React.Fragment key={i}>
-                {i > 0 && <Text style={styles.countdownSep}>:</Text>}
-                <View style={styles.countdownUnit}>
-                  <Text style={styles.countdownNum}>{String(u.v).padStart(2, '0')}</Text>
-                  <Text style={styles.countdownUnitLabel}>{u.l}</Text>
+                {i > 0 && <Text style={styles.cdSep}>:</Text>}
+                <View style={styles.cdUnit}>
+                  <Text style={styles.cdNum}>{String(u.v).padStart(2, '0')}</Text>
+                  <Text style={styles.cdLbl}>{u.l}</Text>
                 </View>
               </React.Fragment>
             ))}
@@ -161,23 +169,24 @@ export default function EmptyQuinielas() {
         </View>
       )}
 
-      {/* Boton notificaciones */}
+      {/* Notif btn */}
       <TouchableOpacity
-        style={[styles.notifBtn, notifActiva && styles.notifBtnActiva]}
+        style={[styles.notifBtn, notifActiva && styles.notifOn]}
         onPress={handleNotificacion}
         disabled={notifActiva}
       >
-        <Text style={[styles.notifBtnText, notifActiva && { color: '#2ECC71' }]}>
+        <Text style={[styles.notifTxt, notifActiva && { color: '#2ECC71' }]}>
           {notifActiva ? '🔔 Te avisaremos pronto ✅' : '🔔 Avísame cuando haya una nueva'}
         </Text>
       </TouchableOpacity>
 
       {/* Historial */}
       {finalizadas.length > 0 && (
-        <View style={styles.historialBox}>
-          <View style={styles.historialTituloRow}>
-            <Text style={styles.historialTitulo}>📜 Últimas Quinielas</Text>
-            <Text style={styles.historialSub}>Toca para ver el podio</Text>
+        <View style={{ width: '100%' }}>
+          <View style={styles.histHead}>
+            <View style={styles.histLine} />
+            <Text style={styles.histTitulo}>ÚLTIMAS QUINIELAS</Text>
+            <View style={styles.histLine} />
           </View>
           {finalizadas.map((q) => <QuinielaCard key={q.id} q={q} />)}
         </View>
@@ -188,57 +197,90 @@ export default function EmptyQuinielas() {
 }
 
 const styles = StyleSheet.create({
-  container:          { alignItems: 'center', paddingTop: 50, paddingBottom: 40, paddingHorizontal: 20 },
-  icon:               { fontSize: 70, marginBottom: 16 },
-  titulo:             { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 8 },
-  subtitulo:          { color: '#A0A0A0', fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 30 },
-  countdownBox:       { backgroundColor: '#15181F', borderRadius: 16, padding: 20, marginBottom: 24, borderWidth: 1.5, borderColor: '#F39C12', width: '100%', alignItems: 'center' },
-  countdownLabel:     { color: '#F39C12', fontSize: 12, fontWeight: 'bold', marginBottom: 14, letterSpacing: 1 },
-  countdownRow:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  countdownUnit:      { alignItems: 'center', minWidth: 52 },
-  countdownNum:       { color: '#FFF', fontSize: 36, fontWeight: 'bold' },
-  countdownUnitLabel: { color: '#A0A0A0', fontSize: 10, marginTop: 2 },
-  countdownSep:       { color: '#F39C12', fontSize: 30, fontWeight: 'bold', marginBottom: 14 },
-  notifBtn:           { backgroundColor: '#15181F', borderWidth: 1.5, borderColor: '#9B59B6', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 24, marginBottom: 32, width: '100%', alignItems: 'center' },
-  notifBtnActiva:     { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.08)' },
-  notifBtnText:       { color: '#9B59B6', fontWeight: 'bold', fontSize: 15 },
-  historialBox:       { width: '100%' },
-  historialTituloRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  historialTitulo:    { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  historialSub:       { color: '#505050', fontSize: 11 },
+  container: { alignItems: 'center', paddingTop: 50, paddingBottom: 40, paddingHorizontal: 18 },
+  icon:      { fontSize: 72, marginBottom: 14 },
+  titulo:    { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 6 },
+  sub:       { color: '#606060', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 28 },
+
+  // Countdown
+  cdBox:  { width: '100%', backgroundColor: '#0D1117', borderRadius: 18, padding: 20, marginBottom: 20,
+             borderWidth: 1.5, borderColor: '#F39C12',
+             shadowColor: '#F39C12', shadowOpacity: 0.35, shadowRadius: 14, elevation: 8 },
+  cdLabel:{ color: '#F39C12', fontSize: 10, fontWeight: 'bold', letterSpacing: 2, textAlign: 'center', marginBottom: 14 },
+  cdRow:  { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  cdUnit: { alignItems: 'center', minWidth: 58 },
+  cdNum:  { color: '#FFF', fontSize: 38, fontWeight: 'bold',
+             textShadowColor: '#F39C12', textShadowRadius: 10 },
+  cdLbl:  { color: '#F39C12', fontSize: 9, letterSpacing: 1, marginTop: 2 },
+  cdSep:  { color: '#F39C12', fontSize: 30, fontWeight: 'bold', marginBottom: 16, opacity: 0.6 },
+
+  // Notif
+  notifBtn: { width: '100%', backgroundColor: '#0D1117', borderWidth: 1.5, borderColor: '#9B59B6',
+              borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 32,
+              shadowColor: '#9B59B6', shadowOpacity: 0.3, shadowRadius: 10, elevation: 5 },
+  notifOn:  { borderColor: '#2ECC71', shadowColor: '#2ECC71' },
+  notifTxt: { color: '#9B59B6', fontWeight: 'bold', fontSize: 14, letterSpacing: 0.5 },
+
+  // Historial header
+  histHead:   { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
+  histLine:   { flex: 1, height: 1, backgroundColor: '#2A2D35' },
+  histTitulo: { color: '#606060', fontSize: 10, fontWeight: 'bold', letterSpacing: 2 },
 });
 
 const card = StyleSheet.create({
-  container:      { backgroundColor: '#15181F', borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35', overflow: 'hidden' },
-  header:         { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 10 },
-  headerLeft:     { flex: 1 },
-  titulo:         { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
-  fecha:          { color: '#505050', fontSize: 11, marginTop: 2 },
-  headerRight:    { alignItems: 'flex-end', marginRight: 6 },
-  premio:         { color: '#2ECC71', fontSize: 16, fontWeight: 'bold' },
-  premioLabel:    { color: '#505050', fontSize: 10 },
-  chevron:        { color: '#F39C12', fontSize: 12 },
-  statsRow:       { flexDirection: 'row', backgroundColor: '#1C1F26', paddingVertical: 10, paddingHorizontal: 16, alignItems: 'center' },
-  stat:           { flex: 1, alignItems: 'center' },
-  statVal:        { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
-  statLbl:        { color: '#505050', fontSize: 10, marginTop: 1 },
-  statDiv:        { width: 1, height: 24, backgroundColor: '#2A2D35' },
-  podioContainer: { padding: 16, borderTopWidth: 1, borderTopColor: '#2A2D35' },
-  podioTitleRow:  { marginBottom: 12 },
-  podioTitle:     { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
-  jugadorRow:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1F26', borderRadius: 12, padding: 12, marginBottom: 8, gap: 10, borderWidth: 1, borderColor: '#2A2D35' },
-  jugadorRowGold: { borderColor: '#FFD70044', backgroundColor: '#1a1a0f' },
-  medalla:        { fontSize: 28, width: 36, textAlign: 'center' },
-  jugadorInfo:    { flex: 1 },
-  jugadorNombre:  { fontSize: 14, fontWeight: 'bold' },
-  jugadorLabel:   { color: '#505050', fontSize: 10, marginTop: 1 },
-  aciertosBox:    { alignItems: 'center', marginRight: 4 },
-  aciertosNum:    { fontSize: 20, fontWeight: 'bold' },
-  aciertosLabel:  { color: '#505050', fontSize: 9 },
-  premioBox:      { alignItems: 'center', backgroundColor: 'rgba(46,204,113,0.1)', borderRadius: 8, padding: 6, borderWidth: 1, borderColor: '#2ECC7144' },
-  premioBoxVal:   { color: '#2ECC71', fontSize: 13, fontWeight: 'bold' },
-  premioBoxLabel: { color: '#2ECC71', fontSize: 9 },
-  sinGanador:     { color: '#505050', textAlign: 'center', padding: 16, fontSize: 13 },
-  verBtn:         { paddingVertical: 10, alignItems: 'center', borderTopWidth: 1, borderTopColor: '#2A2D35' },
-  verBtnText:     { color: '#F39C12', fontSize: 12, fontWeight: 'bold' },
+  wrap:       { width: '100%', backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 18,
+                borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
+                shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 12, elevation: 4 },
+  neonLine:   { height: 2, backgroundColor: '#9B59B6',
+                shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+
+  header:    { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
+  titulo:    { color: '#FFF', fontSize: 15, fontWeight: 'bold', marginBottom: 3 },
+  meta:      { color: '#404040', fontSize: 11 },
+  bolsaBox:  { alignItems: 'flex-end' },
+  bolsaVal:  { color: '#2ECC71', fontSize: 18, fontWeight: 'bold',
+               textShadowColor: '#2ECC71', textShadowRadius: 8 },
+  bolsaLbl:  { color: '#2ECC71', fontSize: 8, letterSpacing: 2, opacity: 0.7 },
+
+  statsRow:  { flexDirection: 'row', backgroundColor: '#111520', paddingVertical: 10, paddingHorizontal: 16 },
+  statItem:  { flex: 1, alignItems: 'center' },
+  statNum:   { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  statLbl:   { color: '#404040', fontSize: 9, letterSpacing: 1, marginTop: 2 },
+  statSep:   { width: 1, backgroundColor: '#1E2330' },
+
+  podio:      { padding: 16, borderTopWidth: 1, borderTopColor: '#1E2330' },
+  podioTitle: { color: '#FFF', fontSize: 11, fontWeight: 'bold', letterSpacing: 2,
+                textAlign: 'center', marginBottom: 14, opacity: 0.6 },
+
+  jugRow:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14,
+                 padding: 12, marginBottom: 8, gap: 10, borderWidth: 1 },
+  jugRowFirst: { shadowColor: '#FFD700', shadowOpacity: 0.25, shadowRadius: 12, elevation: 5 },
+
+  rankBadge: { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5,
+               justifyContent: 'center', alignItems: 'center',
+               backgroundColor: 'rgba(0,0,0,0.4)' },
+  rankEmoji: { fontSize: 22 },
+
+  jugNombre: { fontSize: 14, fontWeight: 'bold' },
+  jugLabel:  { fontSize: 9, letterSpacing: 1.5, marginTop: 2 },
+
+  aciBox:  { alignItems: 'center', borderWidth: 1, borderRadius: 10,
+             paddingHorizontal: 10, paddingVertical: 6, minWidth: 52 },
+  aciNum:  { fontSize: 22, fontWeight: 'bold' },
+  aciLbl:  { fontSize: 8, letterSpacing: 1, marginTop: 1 },
+
+  premioNeon:    { alignItems: 'center', backgroundColor: 'rgba(46,204,113,0.08)',
+                   borderRadius: 10, paddingHorizontal: 8, paddingVertical: 6,
+                   borderWidth: 1, borderColor: 'rgba(46,204,113,0.35)',
+                   shadowColor: '#2ECC71', shadowOpacity: 0.4, shadowRadius: 8 },
+  premioNeonVal: { color: '#2ECC71', fontSize: 12, fontWeight: 'bold',
+                  textShadowColor: '#2ECC71', textShadowRadius: 6 },
+  premioNeonLbl: { color: '#2ECC71', fontSize: 8, letterSpacing: 1, opacity: 0.7 },
+
+  sinData:   { color: '#404040', textAlign: 'center', padding: 20, fontSize: 12, letterSpacing: 1 },
+
+  toggleBtn: { paddingVertical: 11, alignItems: 'center',
+               borderTopWidth: 1, borderTopColor: '#1E2330', backgroundColor: '#0A0D14' },
+  toggleTxt: { color: '#9B59B6', fontSize: 11, fontWeight: 'bold', letterSpacing: 2,
+               textShadowColor: '#9B59B6', textShadowRadius: 6 },
 });

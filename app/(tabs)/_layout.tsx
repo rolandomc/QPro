@@ -54,17 +54,21 @@ export default function TabLayout() {
       tabBarStyle: {
         backgroundColor: colors.card,
         borderTopColor: colors.border,
-        height: Platform.OS === 'web' ? 56 : undefined,
-        paddingBottom: Platform.OS === 'web' ? 4 : undefined,
-        paddingTop: Platform.OS === 'web' ? 4 : undefined,
-        position: Platform.OS === 'web' ? 'fixed' : 'absolute',
+        height: Platform.OS === 'web' ? 64 : undefined,
+        paddingBottom: Platform.OS === 'web' ? 10 : undefined,
+        paddingTop: Platform.OS === 'web' ? 6 : undefined,
+        position: Platform.OS === 'web' ? 'fixed' as any : 'absolute',
         bottom: 0,
         left: 0,
         right: 0,
       },
       tabBarLabelStyle: {
         fontSize: 11,
-        marginBottom: Platform.OS === 'web' ? 2 : 0,
+        fontWeight: '600',
+        marginTop: Platform.OS === 'web' ? -2 : 0,
+      },
+      tabBarIconStyle: {
+        marginTop: Platform.OS === 'web' ? 4 : 0,
       },
       tabBarActiveTintColor: colors.primary,
       tabBarInactiveTintColor: colors.textMuted,
@@ -78,6 +82,6 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  badge:     { position: 'absolute', top: -4, right: -6, backgroundColor: '#E74C3C', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  badge: { position: 'absolute', top: -4, right: -6, backgroundColor: '#E74C3C', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
   badgeText: { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
 });

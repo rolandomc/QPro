@@ -31,18 +31,34 @@ export function QuinielaCard({
 }: Props) {
   const router = useRouter();
   const [jugadoresPagados, setJugadoresPagados] = useState(0);
+  const [yaParticipo, setYaParticipo] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     let channel: any;
+
     const cargar = async () => {
+      // Contar participantes pagados
       const { count } = await supabase
         .from('participaciones')
         .select('*', { count: 'exact', head: true })
         .eq('quiniela_id', id)
         .in('estado', ['pagado', 'ganador', 'perdedor']);
       setJugadoresPagados(count ?? 0);
+
+      // Verificar si el usuario actual ya participó
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: part } = await supabase
+          .from('participaciones')
+          .select('id')
+          .eq('quiniela_id', id)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        setYaParticipo(!!part);
+      }
     };
+
     cargar();
     channel = supabase
       .channel(`pozo-${id}`)
@@ -66,10 +82,22 @@ export function QuinielaCard({
   const estadoColor = estado === 'abierta' ? '#2ECC71' : estado === 'cerrada' ? '#E74C3C' : '#A0A0A0';
   const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🔴 Cerrada' : '✅ Finalizada';
 
-  const goToDetail = () => router.push(`/quiniela/${id}`);
+  // Si la quiniela está abierta y el usuario NO ha participado → pantalla de selecciones
+  // En cualquier otro caso (ya participó, cerrada, finalizada) → pantalla de picks/ranking
+  const handlePress = () => {
+    if (estado === 'abierta' && !yaParticipo) {
+      router.push(`/quiniela/details?id=${id}`);
+    } else {
+      router.push(`/quiniela/${id}`);
+    }
+  };
+
+  const botonLabel = estado === 'abierta'
+    ? (yaParticipo ? 'Ver mis picks →' : 'Participar →')
+    : 'Ver detalle →';
 
   return (
-    <TouchableOpacity style={styles.card} onPress={goToDetail} activeOpacity={0.85}>
+    <TouchableOpacity style={styles.card} onPress={handlePress} activeOpacity={0.85}>
 
       {/* Header */}
       <View style={styles.cardHeader}>
@@ -106,7 +134,7 @@ export function QuinielaCard({
         </View>
       </View>
 
-      {/* Barra de progreso */}
+      {/* Barra de progreso hacia mínimo */}
       {tieneMinimo && (
         <View style={styles.pozoBox}>
           {!minimoAlcanzado ? (
@@ -129,13 +157,13 @@ export function QuinielaCard({
         </View>
       )}
 
-      {/* Botón Ver / Participar */}
+      {/* Botón Participar / Ver mis picks / Ver detalle */}
       <TouchableOpacity
         style={[styles.button, estado !== 'abierta' && styles.buttonDisabled]}
-        onPress={goToDetail}
+        onPress={handlePress}
       >
         <Text style={[styles.buttonText, estado !== 'abierta' && { color: '#707070' }]}>
-          {estado === 'abierta' ? 'Participar →' : 'Ver detalle →'}
+          {botonLabel}
         </Text>
       </TouchableOpacity>
 

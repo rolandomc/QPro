@@ -10,14 +10,14 @@ import ResultCard from '../../src/components/ResultCard';
 import SegmentedControl from '../../src/components/SegmentedControl';
 import { supabase } from '../../src/config/supabase';
 
-function StatBox({ valor, label, color = '#FFF', glow = false }: { valor: string; label: string; color?: string; glow?: boolean }) {
+function StatBox({ valor, label, color = '#FFF', glow = false }: {
+  valor: string; label: string; color?: string; glow?: boolean;
+}) {
   return (
     <View style={sb.box}>
-      <Text style={[
-        sb.valor,
-        { color },
-        glow && { textShadowColor: color, textShadowRadius: 10 },
-      ]}>{valor}</Text>
+      <Text style={[sb.valor, { color }, glow && { textShadowColor: color, textShadowRadius: 10 }]}>
+        {valor}
+      </Text>
       <Text style={sb.label}>{label}</Text>
     </View>
   );
@@ -37,6 +37,8 @@ export default function ResultsScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Traemos participaciones con join LEFT a partidos (no !inner)
+      // para que nunca se pierdan selecciones aunque un partido no tenga datos
       const { data, error } = await supabase
         .from('participaciones')
         .select(`
@@ -53,13 +55,15 @@ export default function ResultsScreen() {
       if (error) throw error;
       setParticipaciones(data || []);
 
-      // Quinielas finalizadas: buscar ganador + posicion + total jugadores
-      const finalizadas = (data || []).filter(p =>
+      // IDs de quinielas donde ya hay resultado (ganador/perdedor o finalizada)
+      const finalizadas = (data || []).filter((p: any) =>
         p.quinielas?.estado === 'finalizada' ||
         p.estado === 'ganador' ||
         p.estado === 'perdedor'
       );
-      const quinielaIds = [...new Set(finalizadas.map((p: any) => p.quinielas?.id).filter(Boolean))] as string[];
+      const quinielaIds = [
+        ...new Set(finalizadas.map((p: any) => p.quinielas?.id).filter(Boolean)),
+      ] as string[];
 
       if (quinielaIds.length > 0) {
         const gMap:  Record<string, any>    = {};
@@ -67,22 +71,33 @@ export default function ResultsScreen() {
         const tjMap: Record<string, number> = {};
 
         await Promise.all(quinielaIds.map(async (qid) => {
-          // Ganador
-          const { data: gPart } = await supabase
+          // Ganador de la quiniela
+          const { data: gRows } = await supabase
             .from('participaciones')
             .select('aciertos, user_id')
             .eq('quiniela_id', qid)
             .eq('estado', 'ganador')
             .order('aciertos', { ascending: false })
-            .limit(1).single();
+            .limit(1);
 
+          const gPart = gRows?.[0] ?? null;
           if (gPart) {
             const { data: prof } = await supabase
               .from('profiles').select('username').eq('id', gPart.user_id).single();
             gMap[qid] = { username: prof?.username ?? '?', aciertos: gPart.aciertos ?? 0 };
-          } else { gMap[qid] = null; }
+          } else {
+            gMap[qid] = null;
+          }
 
-          // Ranking: solo participaciones procesadas
+          // Total jugadores = TODOS los que participaron (sin importar estado)
+          const { count: totalCount } = await supabase
+            .from('participaciones')
+            .select('id', { count: 'exact', head: true })
+            .eq('quiniela_id', qid);
+
+          tjMap[qid] = totalCount ?? 0;
+
+          // Ranking para calcular posicion del usuario (solo procesados)
           const { data: ranking } = await supabase
             .from('participaciones')
             .select('user_id, aciertos')
@@ -90,11 +105,9 @@ export default function ResultsScreen() {
             .in('estado', ['ganador', 'perdedor'])
             .order('aciertos', { ascending: false });
 
-          tjMap[qid] = ranking?.length ?? 0;
-          const myPart = finalizadas.find(p => p.quinielas?.id === qid);
-          if (myPart && ranking) {
+          if (ranking) {
             const pos = ranking.findIndex((r: any) => r.user_id === user.id);
-            pMap[qid] = pos >= 0 ? pos + 1 : tjMap[qid];
+            pMap[qid] = pos >= 0 ? pos + 1 : (tjMap[qid] ?? 0);
           }
         }));
 
@@ -112,30 +125,37 @@ export default function ResultsScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, []));
 
-  const enJuego  = participaciones.filter(p => ['abierta', 'cerrada'].includes(p.quinielas?.estado));
-  const historial = participaciones.filter(p =>
+  const enJuego  = participaciones.filter((p: any) =>
+    ['abierta', 'cerrada'].includes(p.quinielas?.estado)
+  );
+  const historial = participaciones.filter((p: any) =>
     p.quinielas?.estado === 'finalizada' ||
     p.estado === 'ganador' ||
     p.estado === 'perdedor'
   );
   const lista = tab === 'En Juego' ? enJuego : historial;
 
-  // Stats solo historial
+  // Stats del historial
   const totalJugadas   = historial.length;
-  const totalGanadas   = historial.filter(p => p.estado === 'ganador').length;
+  const totalGanadas   = historial.filter((p: any) => p.estado === 'ganador').length;
   const totalAciertos  = historial.reduce((acc: number, p: any) => {
     const sels = (p.selecciones || []).filter((s: any) => s.partidos != null);
     const con  = sels.filter((s: any) => s.partidos?.resultado !== null);
     return acc + con.filter((s: any) => s.prediccion === s.partidos?.resultado).length;
   }, 0);
-  const totalPartidos  = historial.reduce((acc: number, p: any) => {
-    return acc + (p.selecciones || []).filter((s: any) => s.partidos?.resultado !== null).length;
-  }, 0);
-  const pctAcierto     = totalPartidos > 0 ? Math.round((totalAciertos / totalPartidos) * 100) : 0;
-  const totalInvertido = historial.reduce((acc: number, p: any) => acc + (p.monto_pagado ?? p.quinielas?.precio_entrada ?? 0), 0);
-  const totalGanado    = historial.reduce((acc: number, p: any) => acc + (p.premio_ganado ?? 0), 0);
-  const roi            = totalInvertido > 0 ? (((totalGanado - totalInvertido) / totalInvertido) * 100).toFixed(0) : '0';
-  const roiNum         = Number(roi);
+  const totalConRes    = historial.reduce((acc: number, p: any) =>
+    acc + (p.selecciones || []).filter((s: any) =>
+      s.partidos != null && s.partidos?.resultado !== null
+    ).length, 0);
+  const pctAcierto     = totalConRes > 0 ? Math.round((totalAciertos / totalConRes) * 100) : 0;
+  const totalInvertido = historial.reduce((acc: number, p: any) =>
+    acc + (p.monto_pagado ?? p.quinielas?.precio_entrada ?? 0), 0);
+  const totalGanado    = historial.reduce((acc: number, p: any) =>
+    acc + (p.premio_ganado ?? 0), 0);
+  const roi            = totalInvertido > 0
+    ? (((totalGanado - totalInvertido) / totalInvertido) * 100).toFixed(0)
+    : '0';
+  const roiNum = Number(roi);
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -153,8 +173,13 @@ export default function ResultsScreen() {
           keyExtractor={item => item.id}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData(); }} tintColor="#9B59B6" />}
-
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); loadData(); }}
+              tintColor="#9B59B6"
+            />
+          }
           ListHeaderComponent={
             <>
               {tab === 'Historial' && totalJugadas > 0 && (
@@ -182,14 +207,13 @@ export default function ResultsScreen() {
                     </View>
                     <View style={[s.statsFinBox, { borderLeftWidth: 1, borderLeftColor: '#1E2330' }]}>
                       <Text style={s.statsFinLbl}>GANADO</Text>
-                      <Text style={[s.statsFinVal, { color: '#2ECC71', textShadowColor: '#2ECC71', textShadowRadius: 8 }]}>
-                        ${totalGanado.toLocaleString()}
-                      </Text>
+                      <Text style={[s.statsFinVal, {
+                        color: '#2ECC71', textShadowColor: '#2ECC71', textShadowRadius: 8,
+                      }]}>${totalGanado.toLocaleString()}</Text>
                     </View>
                   </View>
                 </View>
               )}
-
               <View style={s.sectionRow}>
                 {tab === 'En Juego' ? (
                   <><View style={s.liveDot} />
@@ -203,17 +227,19 @@ export default function ResultsScreen() {
               </View>
             </>
           }
-
           ListEmptyComponent={
             <View style={s.emptyBox}>
               <Text style={s.emptyIcon}>{tab === 'En Juego' ? '🎥' : '📊'}</Text>
-              <Text style={s.emptyTitulo}>{tab === 'En Juego' ? 'Sin quinielas activas' : 'Sin historial aún'}</Text>
+              <Text style={s.emptyTitulo}>
+                {tab === 'En Juego' ? 'Sin quinielas activas' : 'Sin historial aún'}
+              </Text>
               <Text style={s.emptySub}>
-                {tab === 'En Juego' ? 'Cuando participes aparecerá aquí.' : 'Las quinielas finalizadas aparecerán aquí.'}
+                {tab === 'En Juego'
+                  ? 'Cuando participes aparecerá aquí.'
+                  : 'Las quinielas finalizadas aparecerán aquí.'}
               </Text>
             </View>
           }
-
           renderItem={({ item }) => (
             <ResultCard
               quiniela={item.quinielas}
@@ -232,35 +258,35 @@ export default function ResultsScreen() {
 }
 
 const s = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#0A0C10' },
-  list:         { paddingHorizontal: 14, paddingBottom: 40, paddingTop: 8 },
-  centered:     { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingTxt:   { color: '#606060', fontSize: 13, letterSpacing: 1 },
-  statsCard:    { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 18,
-                  borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                  shadowColor: '#9B59B6', shadowOpacity: 0.2, shadowRadius: 14, elevation: 6 },
-  statsNeonLine:{ height: 2, backgroundColor: '#9B59B6',
-                  shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
-  statsTitle:   { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3,
-                  textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
-  statsGrid:    { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 14, alignItems: 'center' },
-  statsDiv:     { width: 1, height: 36, backgroundColor: '#1E2330' },
-  statsFinRow:  { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
-  statsFinBox:  { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  statsFinLbl:  { color: '#404040', fontSize: 9, letterSpacing: 2, marginBottom: 4 },
-  statsFinVal:  { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  sectionRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  liveDot:      { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2ECC71',
-                  shadowColor: '#2ECC71', shadowOpacity: 1, shadowRadius: 6 },
-  sectionTxt:   { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1 },
-  countPill:    { backgroundColor: 'rgba(155,89,182,0.15)', borderRadius: 10,
-                  paddingHorizontal: 10, paddingVertical: 2,
-                  borderWidth: 1, borderColor: '#9B59B6' },
-  countTxt:     { color: '#9B59B6', fontWeight: 'bold', fontSize: 12 },
-  emptyBox:     { alignItems: 'center', paddingTop: 60, gap: 10 },
-  emptyIcon:    { fontSize: 50 },
-  emptyTitulo:  { color: '#FFF', fontSize: 17, fontWeight: 'bold' },
-  emptySub:     { color: '#505050', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  container:     { flex: 1, backgroundColor: '#0A0C10' },
+  list:          { paddingHorizontal: 14, paddingBottom: 40, paddingTop: 8 },
+  centered:      { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingTxt:    { color: '#606060', fontSize: 13, letterSpacing: 1 },
+  statsCard:     { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 18,
+                   borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
+                   shadowColor: '#9B59B6', shadowOpacity: 0.2, shadowRadius: 14, elevation: 6 },
+  statsNeonLine: { height: 2, backgroundColor: '#9B59B6',
+                   shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+  statsTitle:    { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3,
+                   textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
+  statsGrid:     { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 14, alignItems: 'center' },
+  statsDiv:      { width: 1, height: 36, backgroundColor: '#1E2330' },
+  statsFinRow:   { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
+  statsFinBox:   { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  statsFinLbl:   { color: '#404040', fontSize: 9, letterSpacing: 2, marginBottom: 4 },
+  statsFinVal:   { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  sectionRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  liveDot:       { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2ECC71',
+                   shadowColor: '#2ECC71', shadowOpacity: 1, shadowRadius: 6 },
+  sectionTxt:    { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1 },
+  countPill:     { backgroundColor: 'rgba(155,89,182,0.15)', borderRadius: 10,
+                   paddingHorizontal: 10, paddingVertical: 2,
+                   borderWidth: 1, borderColor: '#9B59B6' },
+  countTxt:      { color: '#9B59B6', fontWeight: 'bold', fontSize: 12 },
+  emptyBox:      { alignItems: 'center', paddingTop: 60, gap: 10 },
+  emptyIcon:     { fontSize: 50 },
+  emptyTitulo:   { color: '#FFF', fontSize: 17, fontWeight: 'bold' },
+  emptySub:      { color: '#505050', fontSize: 13, textAlign: 'center', lineHeight: 20 },
 });
 
 const sb = StyleSheet.create({

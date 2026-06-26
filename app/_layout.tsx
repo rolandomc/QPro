@@ -1,8 +1,8 @@
+import '../src/utils/alertPatch'; // <-- parchea Alert.alert globalmente en web
 import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar, View, ActivityIndicator, Platform } from 'react-native';
 import { supabase } from '../src/config/supabase';
-import { AlertProvider } from '../src/components/WebAlert';
 
 export default function RootLayout() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -19,16 +19,15 @@ export default function RootLayout() {
         document.head.appendChild(link);
       }
       const metaTags = [
-        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-capable',        content: 'yes' },
         { name: 'apple-mobile-web-app-status-bar-style', content: 'black' },
-        { name: 'apple-mobile-web-app-title', content: 'QPro' },
-        { name: 'theme-color', content: '#0A0C10' },
+        { name: 'apple-mobile-web-app-title',           content: 'QPro' },
+        { name: 'theme-color',                          content: '#0A0C10' },
       ];
       metaTags.forEach(({ name, content }) => {
         if (!document.querySelector(`meta[name="${name}"]`)) {
           const meta = document.createElement('meta');
-          meta.name = name;
-          meta.content = content;
+          meta.name = name; meta.content = content;
           document.head.appendChild(meta);
         }
       });
@@ -56,26 +55,26 @@ export default function RootLayout() {
     else if (session && inAuthGroup) router.replace('/(tabs)');
   }, [session, isInitialized, segments]);
 
-  // IMPORTANTE: AlertProvider SIEMPRE envuelve todo, incluso el spinner
-  // para que el Context nunca se rompa por el early return
+  if (!isInitialized) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0A0C10', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#2ECC71" />
+      </View>
+    );
+  }
+
   return (
-    <AlertProvider>
+    <>
       <StatusBar barStyle="light-content" backgroundColor="#0A0C10" />
-      {!isInitialized ? (
-        <View style={{ flex: 1, backgroundColor: '#0A0C10', justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color="#2ECC71" />
-        </View>
-      ) : (
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="auth/login" />
-          <Stack.Screen name="auth/register" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="quiniela/details" />
-          <Stack.Screen name="admin/index" />
-          <Stack.Screen name="admin/create" />
-          <Stack.Screen name="wallet/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-        </Stack>
-      )}
-    </AlertProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="auth/login" />
+        <Stack.Screen name="auth/register" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="quiniela/details" />
+        <Stack.Screen name="admin/index" />
+        <Stack.Screen name="admin/create" />
+        <Stack.Screen name="wallet/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      </Stack>
+    </>
   );
 }

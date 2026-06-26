@@ -10,9 +10,9 @@ import { AdminService } from '../../src/services/admin.service';
 import { supabase } from '../../src/config/supabase';
 
 const TIPO_CONFIG: Record<string, { icon: string; color: string }> = {
-  ganador:  { icon: '🏆', color: '#F39C12' },
-  perdedor: { icon: '😔', color: '#707070' },
-  info:     { icon: '📢', color: '#3498DB' },
+  ganador:  { icon: '🏆', color: '#FFD700' },
+  perdedor: { icon: '😔', color: '#606060' },
+  info:     { icon: '📢', color: '#00E5FF' },
 };
 
 export default function ProfileScreen() {
@@ -23,207 +23,267 @@ export default function ProfileScreen() {
   const [loading,       setLoading]       = useState(true);
   const [signingOut,    setSigningOut]    = useState(false);
   const [notifs,        setNotifs]        = useState<any[]>([]);
-  const [loadingNotifs, setLoadingNotifs] = useState(false);
   const [notifExpanded, setNotifExpanded] = useState(false);
 
-  const xpCurrent = 1250;
-  const xpNextLevel = 2000;
-  const xpPercentage = (xpCurrent / xpNextLevel) * 100;
+  // Stats reales
+  const [stats, setStats] = useState({
+    jugadas: 0, ganadas: 0, pctAcierto: 0,
+    roi: 0, invertido: 0, ganado: 0, mejorPos: null as number | null,
+  });
 
   const loadUserData = useCallback(async () => {
     try {
-      const user = await AuthService.getCurrentUser();
-      if (user?.email) setUserEmail(user.email);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      setUserEmail(user.email ?? '');
       const adminStatus = await AdminService.isAdmin();
       setIsAdmin(adminStatus);
-      // Cargar username
-      if (user?.id) {
-        const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single();
-        if (profile?.username) setUsername(profile.username);
+
+      const { data: profile } = await supabase
+        .from('profiles').select('username').eq('id', user.id).single();
+      if (profile?.username) setUsername(profile.username);
+
+      // Participaciones finalizadas
+      const { data: parts } = await supabase
+        .from('participaciones')
+        .select('id, estado, aciertos, monto_pagado, premio_ganado, quiniela_id, selecciones(partido_id, prediccion, partidos(resultado))')
+        .eq('user_id', user.id);
+
+      const finalizadas = (parts || []).filter((p: any) => p.estado === 'ganador' || p.estado === 'pagado');
+      const jugadas     = finalizadas.length;
+      const ganadas     = finalizadas.filter((p: any) => p.estado === 'ganador').length;
+      const invertido   = finalizadas.reduce((a: number, p: any) => a + (p.monto_pagado ?? 0), 0);
+      const ganado      = finalizadas.reduce((a: number, p: any) => a + (p.premio_ganado ?? 0), 0);
+
+      let totalAc = 0; let totalPts = 0;
+      finalizadas.forEach((p: any) => {
+        (p.selecciones || []).forEach((s: any) => {
+          if (s.partidos?.resultado !== null && s.partidos?.resultado !== undefined) {
+            totalPts++;
+            if (s.prediccion === s.partidos?.resultado) totalAc++;
+          }
+        });
+      });
+      const pctAcierto = totalPts > 0 ? Math.round((totalAc / totalPts) * 100) : 0;
+      const roi        = invertido > 0 ? Math.round(((ganado - invertido) / invertido) * 100) : 0;
+
+      // Mejor posicion: buscar en cada quiniela finalizada el ranking
+      let mejorPos: number | null = null;
+      for (const p of finalizadas) {
+        const { data: rank } = await supabase
+          .from('participaciones')
+          .select('user_id, aciertos')
+          .eq('quiniela_id', p.quiniela_id)
+          .order('aciertos', { ascending: false });
+        if (rank) {
+          const pos = rank.findIndex((r: any) => r.user_id === user.id);
+          if (pos >= 0) {
+            const p1 = pos + 1;
+            if (mejorPos === null || p1 < mejorPos) mejorPos = p1;
+          }
+        }
       }
-    } catch (e) {
-      console.error(e);
+
+      setStats({ jugadas, ganadas, pctAcierto, roi, invertido, ganado, mejorPos });
+
+      // Notificaciones
+      const { data: notifsData } = await supabase
+        .from('notificaciones').select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false }).limit(20);
+      setNotifs(notifsData || []);
+      if ((notifsData || []).some((n: any) => !n.leida)) {
+        await supabase.from('notificaciones').update({ leida: true })
+          .eq('user_id', user.id).eq('leida', false);
+      }
+    } catch (e: any) {
+      console.error(e.message);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const loadNotifs = useCallback(async () => {
-    setLoadingNotifs(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoadingNotifs(false); return; }
-    const { data } = await supabase
-      .from('notificaciones')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(20);
-    setNotifs(data || []);
-    setLoadingNotifs(false);
-    // Marcar como leídas
-    if ((data || []).some(n => !n.leida)) {
-      await supabase.from('notificaciones').update({ leida: true })
-        .eq('user_id', user.id).eq('leida', false);
-    }
-  }, []);
-
-  useFocusEffect(useCallback(() => {
-    setLoading(true);
-    loadUserData();
-    loadNotifs();
-  }, []));
+  useFocusEffect(useCallback(() => { setLoading(true); loadUserData(); }, []));
 
   const handleSignOut = async () => {
     Alert.alert('Cerrar Sesión', '¿Estás seguro que quieres salir?', [
       { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Salir', style: 'destructive',
-        onPress: async () => {
-          setSigningOut(true);
-          try { await AuthService.signOut(); }
-          catch (error: any) { Alert.alert('Error', error.message); setSigningOut(false); }
-        },
-      },
+      { text: 'Salir', style: 'destructive', onPress: async () => {
+        setSigningOut(true);
+        try { await AuthService.signOut(); }
+        catch (e: any) { Alert.alert('Error', e.message); setSigningOut(false); }
+      }},
     ]);
   };
 
-  const getInitials = () => {
-    if (username) return username.substring(0, 2).toUpperCase();
-    if (userEmail) return userEmail.substring(0, 2).toUpperCase();
-    return '??';
-  };
+  const initials = username
+    ? username.substring(0, 2).toUpperCase()
+    : userEmail.substring(0, 2).toUpperCase();
 
-  const noLeidas = notifs.filter(n => !n.leida).length;
+  const roiColor   = stats.roi >= 0 ? '#2ECC71' : '#E91E63';
+  const noLeidas   = notifs.filter(n => !n.leida).length;
+
+  // Nivel basado en quinielas jugadas
+  const nivel = stats.jugadas >= 20 ? 'Oráculo' : stats.jugadas >= 10 ? 'Estratéga' : stats.jugadas >= 5 ? 'Analista' : 'Novato';
+  const niveXP   = stats.jugadas * 100;
+  const nextXP   = Math.ceil((stats.jugadas + 1) / 5) * 5 * 100;
+  const xpPct    = Math.min((niveXP / nextXP) * 100, 100);
 
   if (loading) return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={st.container}>
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#2ECC71" />
+        <ActivityIndicator size="large" color="#9B59B6" />
       </View>
     </SafeAreaView>
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={st.container} edges={['top']}>
       <Header />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Info del Usuario */}
-        <View style={styles.userInfo}>
-          <View style={[styles.avatar, styles.neonAvatarBlue]}>
-            <Text style={styles.avatarText}>{getInitials()}</Text>
+        {/* Avatar + nombre */}
+        <View style={st.heroSection}>
+          <View style={st.avatarWrap}>
+            <View style={st.avatarNeonRing}>
+              <View style={st.avatar}>
+                <Text style={st.avatarTxt}>{initials}</Text>
+              </View>
+            </View>
+            {isAdmin && (
+              <View style={st.adminPill}>
+                <Text style={st.adminPillTxt}>👑 ADMIN</Text>
+              </View>
+            )}
           </View>
-          <Text style={styles.userName}>{username || userEmail}</Text>
-          {isAdmin && (
-            <View style={styles.adminBadge}>
-              <Text style={styles.adminBadgeText}>👑 ADMIN</Text>
+          <Text style={st.nombre}>{username || userEmail}</Text>
+          <Text style={st.email}>{userEmail}</Text>
+
+          {/* Nivel */}
+          <View style={st.nivelBox}>
+            <View style={st.nivelRow}>
+              <Text style={st.nivelLabel}>RANGO</Text>
+              <Text style={[st.nivelNombre, { textShadowColor: '#9B59B6', textShadowRadius: 8 }]}>{nivel}</Text>
             </View>
-          )}
-          <View style={styles.levelContainer}>
-            <Text style={styles.levelTitle}>Rango: <Text style={styles.neonTextOrange}>Estratega</Text></Text>
-            <View style={styles.xpTrack}>
-              <View style={[styles.xpFill, { width: `${xpPercentage}%` }]} />
+            <View style={st.xpTrack}>
+              <View style={[st.xpFill, { width: `${xpPct}%` }]} />
             </View>
-            <Text style={styles.xpText}>{xpCurrent} / {xpNextLevel} XP para Oráculo</Text>
+            <Text style={st.xpTxt}>{niveXP} / {nextXP} XP</Text>
           </View>
         </View>
 
-        {/* Estadísticas */}
-        <View style={styles.statsRow}>
-          <View style={[styles.statCard, styles.neonCardPurple]}>
-            <Text style={styles.statValue}>24</Text>
-            <Text style={styles.statLabel}>Quinielas</Text>
+        {/* Stats grid */}
+        <View style={st.statsCard}>
+          <View style={st.statsNeonLine} />
+          <Text style={st.statsTitle}>ESTADÍSTICAS DE TEMPORADA</Text>
+          <View style={st.statsGrid}>
+            {[
+              { v: String(stats.jugadas),             l: 'JUGADAS',  c: '#00E5FF' },
+              { v: String(stats.ganadas),             l: 'GANADAS',  c: '#FFD700' },
+              { v: `${stats.pctAcierto}%`,            l: 'ACIERTO',  c: '#9B59B6' },
+              { v: `${stats.roi >= 0 ? '+' : ''}${stats.roi}%`, l: 'ROI', c: roiColor },
+            ].map((item, i, arr) => (
+              <React.Fragment key={i}>
+                <View style={st.statItem}>
+                  <Text style={[st.statVal, { color: item.c, textShadowColor: item.c, textShadowRadius: 8 }]}>
+                    {item.v}
+                  </Text>
+                  <Text style={st.statLbl}>{item.l}</Text>
+                </View>
+                {i < arr.length - 1 && <View style={st.statDiv} />}
+              </React.Fragment>
+            ))}
           </View>
-          <View style={[styles.statCard, styles.neonCardGreen]}>
-            <Text style={styles.statValue}>68%</Text>
-            <Text style={styles.statLabel}>Aciertos</Text>
+          {/* Mejor posicion + financiero */}
+          <View style={st.statsBottomRow}>
+            <View style={st.statsFinBox}>
+              <Text style={st.statsFinLbl}>MEJOR POSICIÓN</Text>
+              <Text style={[st.statsFinVal, { color: stats.mejorPos === 1 ? '#FFD700' : '#FFF' }]}>
+                {stats.mejorPos != null ? `#${stats.mejorPos}` : '—'}
+              </Text>
+            </View>
+            <View style={[st.statsFinBox, { borderLeftWidth: 1, borderLeftColor: '#1E2330' }]}>
+              <Text style={st.statsFinLbl}>INVERTIDO</Text>
+              <Text style={st.statsFinVal}>${stats.invertido.toLocaleString()}</Text>
+            </View>
+            <View style={[st.statsFinBox, { borderLeftWidth: 1, borderLeftColor: '#1E2330' }]}>
+              <Text style={st.statsFinLbl}>GANADO</Text>
+              <Text style={[st.statsFinVal, { color: '#2ECC71', textShadowColor: '#2ECC71', textShadowRadius: 6 }]}>
+                ${stats.ganado.toLocaleString()}
+              </Text>
+            </View>
           </View>
         </View>
 
         {/* Logros */}
-        <Text style={styles.sectionTitle}>Tus Logros</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.badgesContainer}>
-          <Badge icon="🎯" title="Pleno Perfecto" isUnlocked={true} neonColor="#E91E63" />
-          <Badge icon="🔥" title="Racha x3" isUnlocked={true} neonColor="#F39C12" />
-          <Badge icon="💰" title="Bolsa Mayor" isUnlocked={false} />
-          <Badge icon="🔮" title="Vidente" isUnlocked={false} />
+        <View style={st.sectionHeader}>
+          <View style={st.sectionLine} />
+          <Text style={st.sectionTitle}>LOGROS</Text>
+          <View style={st.sectionLine} />
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
+          <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 2 }}>
+            <Badge icon="🎯" title="Pleno Perfecto" isUnlocked={stats.ganadas >= 1}  neonColor="#E91E63" />
+            <Badge icon="🔥" title="Racha x3"       isUnlocked={stats.jugadas >= 3} neonColor="#F39C12" />
+            <Badge icon="💰" title="Bolsa Mayor"    isUnlocked={stats.ganado >= 1000} neonColor="#FFD700" />
+            <Badge icon="🔮" title="Vidente"        isUnlocked={stats.pctAcierto >= 80} neonColor="#9B59B6" />
+          </View>
         </ScrollView>
 
-        {/* Panel Admin */}
+        {/* Admin */}
         {isAdmin && (
-          <>
-            <Text style={styles.sectionTitle}>Panel Administrador</Text>
-            <TouchableOpacity style={styles.adminCard} onPress={() => router.push('/admin')}>
-              <Text style={styles.adminCardIcon}>🛠️</Text>
+          <TouchableOpacity style={st.adminCard} onPress={() => router.push('/admin')}>
+            <View style={st.adminCardNeonLine} />
+            <View style={st.adminCardBody}>
+              <Text style={{ fontSize: 26 }}>🛠️</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.adminCardTitle}>Gestionar Quinielas</Text>
-                <Text style={styles.adminCardSubtitle}>Crear, editar y publicar quinielas</Text>
+                <Text style={st.adminCardTitle}>Panel Administrador</Text>
+                <Text style={st.adminCardSub}>Gestionar quinielas y resultados</Text>
               </View>
-              <Text style={styles.adminCardArrow}>›</Text>
-            </TouchableOpacity>
-          </>
+              <Text style={st.adminCardArrow}>›</Text>
+            </View>
+          </TouchableOpacity>
         )}
 
-        {/* 🔔 Notificaciones */}
-        <TouchableOpacity
-          style={styles.notifHeader}
-          onPress={() => setNotifExpanded(prev => !prev)}
-          activeOpacity={0.8}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-            <Text style={styles.sectionTitle}>🔔 Notificaciones</Text>
-            {noLeidas > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{noLeidas}</Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.chevron}>{notifExpanded ? '▲' : '▼'}</Text>
+        {/* Notificaciones */}
+        <TouchableOpacity style={st.notifToggle} onPress={() => setNotifExpanded(v => !v)}>
+          <Text style={st.notifToggleTxt}>🔔 NOTIFICACIONES</Text>
+          {noLeidas > 0 && (
+            <View style={st.notifDot}>
+              <Text style={st.notifDotTxt}>{noLeidas}</Text>
+            </View>
+          )}
+          <Text style={st.notifChevron}>{notifExpanded ? '▲' : '▼'}</Text>
         </TouchableOpacity>
 
         {notifExpanded && (
-          <View style={styles.notifList}>
-            {loadingNotifs ? (
-              <ActivityIndicator color="#9B59B6" style={{ padding: 20 }} />
-            ) : notifs.length === 0 ? (
-              <Text style={styles.notifEmpty}>Sin notificaciones todavía</Text>
-            ) : (
-              notifs.map(n => {
-                const cfg = TIPO_CONFIG[n.tipo] ?? TIPO_CONFIG.info;
-                const fecha = new Date(n.created_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
-                return (
-                  <View key={n.id} style={[styles.notifCard, !n.leida && { borderColor: cfg.color }]}>
-                    <Text style={styles.notifIcon}>{cfg.icon}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.notifTitulo, !n.leida && { color: '#FFF' }]}>{n.titulo}</Text>
-                      <Text style={styles.notifMensaje}>{n.mensaje}</Text>
-                      <Text style={styles.notifFecha}>{fecha}</Text>
-                    </View>
-                    {!n.leida && <View style={[styles.dotUnread, { backgroundColor: cfg.color }]} />}
+          <View style={{ gap: 8, marginBottom: 16 }}>
+            {notifs.length === 0 ? (
+              <Text style={st.emptyTxt}>Sin notificaciones todavía</Text>
+            ) : notifs.map(n => {
+              const cfg  = TIPO_CONFIG[n.tipo] ?? TIPO_CONFIG.info;
+              const fecha = new Date(n.created_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
+              return (
+                <View key={n.id} style={[st.notifCard, !n.leida && { borderColor: cfg.color }]}>
+                  <Text style={{ fontSize: 20 }}>{cfg.icon}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[st.notifTitulo, !n.leida && { color: '#FFF' }]}>{n.titulo}</Text>
+                    <Text style={st.notifMsg}>{n.mensaje}</Text>
+                    <Text style={st.notifFecha}>{fecha}</Text>
                   </View>
-                );
-              })
-            )}
+                  {!n.leida && <View style={[st.dotUnread, { backgroundColor: cfg.color }]} />}
+                </View>
+              );
+            })}
           </View>
         )}
 
-        {/* Ajustes */}
-        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Ajustes</Text>
-        <TouchableOpacity style={styles.optionRow}>
-          <Text style={styles.optionIcon}>⚙️</Text>
-          <Text style={styles.optionText}>Configuración de la cuenta</Text>
-          <Text style={styles.optionArrow}>›</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.optionRow}>
-          <Text style={styles.optionIcon}>🛡️</Text>
-          <Text style={styles.optionText}>Privacidad y Seguridad</Text>
-          <Text style={styles.optionArrow}>›</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut} disabled={signingOut}>
+        {/* Cerrar sesion */}
+        <TouchableOpacity style={st.signOutBtn} onPress={handleSignOut} disabled={signingOut}>
           {signingOut
             ? <ActivityIndicator color="#E74C3C" />
-            : <Text style={styles.signOutText}>🚨 Cerrar Sesión</Text>}
+            : <Text style={st.signOutTxt}>🚨 Cerrar Sesión</Text>}
         </TouchableOpacity>
 
       </ScrollView>
@@ -231,53 +291,92 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#0A0C10' },
-  content:          { padding: 15, paddingBottom: 40 },
-  userInfo:         { alignItems: 'center', marginBottom: 25 },
-  avatar:           { width: 80, height: 80, borderRadius: 40, backgroundColor: '#1C1F26', justifyContent: 'center', alignItems: 'center', marginBottom: 10, borderWidth: 2 },
-  neonAvatarBlue:   { borderColor: '#3498DB' },
-  avatarText:       { color: '#FFF', fontSize: 28, fontWeight: 'bold' },
-  userName:         { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 5 },
-  adminBadge:       { backgroundColor: 'rgba(243,156,18,0.15)', borderWidth: 1, borderColor: '#F39C12', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4, marginBottom: 10 },
-  adminBadgeText:   { color: '#F39C12', fontWeight: 'bold', fontSize: 12 },
-  levelContainer:   { width: '100%', backgroundColor: '#15181F', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#2A2D35' },
-  levelTitle:       { color: '#FFF', fontSize: 14, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
-  neonTextOrange:   { color: '#F39C12' },
-  xpTrack:          { height: 8, backgroundColor: '#1C1F26', borderRadius: 4, overflow: 'hidden', marginBottom: 8 },
-  xpFill:           { height: '100%', backgroundColor: '#F39C12' },
-  xpText:           { color: '#707070', fontSize: 10, textAlign: 'right' },
-  statsRow:         { flexDirection: 'row', gap: 15, marginBottom: 30 },
-  statCard:         { flex: 1, backgroundColor: '#15181F', borderRadius: 12, padding: 15, alignItems: 'center', borderWidth: 1.5 },
-  neonCardPurple:   { borderColor: '#9B59B6' },
-  neonCardGreen:    { borderColor: '#2ECC71' },
-  statValue:        { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
-  statLabel:        { color: '#A0A0A0', fontSize: 12, textTransform: 'uppercase' },
-  sectionTitle:     { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 15, paddingHorizontal: 5 },
-  badgesContainer:  { marginBottom: 30, paddingLeft: 5 },
-  adminCard:        { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(243,156,18,0.08)', borderWidth: 1, borderColor: '#F39C12', borderRadius: 12, padding: 15, marginBottom: 20 },
-  adminCardIcon:    { fontSize: 24, marginRight: 12 },
-  adminCardTitle:   { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  adminCardSubtitle:{ color: '#A0A0A0', fontSize: 12, marginTop: 2 },
-  adminCardArrow:   { color: '#F39C12', fontSize: 22 },
+const st = StyleSheet.create({
+  container:       { flex: 1, backgroundColor: '#0A0C10' },
+  scroll:          { padding: 16, paddingBottom: 50 },
+
+  // Hero
+  heroSection:     { alignItems: 'center', marginBottom: 24 },
+  avatarWrap:      { marginBottom: 14, alignItems: 'center' },
+  avatarNeonRing:  { width: 92, height: 92, borderRadius: 46, borderWidth: 2,
+                     borderColor: '#9B59B6', justifyContent: 'center', alignItems: 'center',
+                     shadowColor: '#9B59B6', shadowOpacity: 0.6, shadowRadius: 16, elevation: 8 },
+  avatar:          { width: 80, height: 80, borderRadius: 40,
+                     backgroundColor: '#15181F', justifyContent: 'center', alignItems: 'center' },
+  avatarTxt:       { color: '#FFF', fontSize: 28, fontWeight: 'bold',
+                     textShadowColor: '#9B59B6', textShadowRadius: 10 },
+  adminPill:       { marginTop: 8, backgroundColor: 'rgba(255,215,0,0.1)',
+                     borderRadius: 20, paddingHorizontal: 12, paddingVertical: 3,
+                     borderWidth: 1, borderColor: '#FFD700' },
+  adminPillTxt:    { color: '#FFD700', fontWeight: 'bold', fontSize: 11, letterSpacing: 1 },
+  nombre:          { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 3 },
+  email:           { color: '#404040', fontSize: 12, marginBottom: 16 },
+  nivelBox:        { width: '100%', backgroundColor: '#0D1117', borderRadius: 14, padding: 14,
+                     borderWidth: 1, borderColor: '#1E2330' },
+  nivelRow:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  nivelLabel:      { color: '#404040', fontSize: 10, letterSpacing: 2 },
+  nivelNombre:     { color: '#9B59B6', fontSize: 15, fontWeight: 'bold' },
+  xpTrack:         { height: 6, backgroundColor: '#1A1D24', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
+  xpFill:          { height: '100%', backgroundColor: '#9B59B6',
+                     shadowColor: '#9B59B6', shadowOpacity: 0.8, shadowRadius: 4 },
+  xpTxt:           { color: '#303030', fontSize: 10, textAlign: 'right', letterSpacing: 1 },
+
+  // Stats
+  statsCard:       { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 20,
+                     borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
+                     shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 14, elevation: 5 },
+  statsNeonLine:   { height: 2, backgroundColor: '#9B59B6',
+                     shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+  statsTitle:      { color: '#303030', fontSize: 9, fontWeight: 'bold', letterSpacing: 3,
+                     textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
+  statsGrid:       { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 16, alignItems: 'center' },
+  statItem:        { flex: 1, alignItems: 'center' },
+  statVal:         { fontSize: 22, fontWeight: 'bold' },
+  statLbl:         { color: '#303030', fontSize: 8, letterSpacing: 1.5, marginTop: 3 },
+  statDiv:         { width: 1, height: 32, backgroundColor: '#1E2330' },
+  statsBottomRow:  { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
+  statsFinBox:     { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  statsFinLbl:     { color: '#303030', fontSize: 8, letterSpacing: 2, marginBottom: 4 },
+  statsFinVal:     { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
+
+  // Section headers
+  sectionHeader:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  sectionLine:     { flex: 1, height: 1, backgroundColor: '#1E2330' },
+  sectionTitle:    { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3 },
+
+  // Admin card
+  adminCard:       { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 20,
+                     borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
+                     shadowColor: '#FFD700', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
+  adminCardNeonLine:{ height: 2, backgroundColor: '#FFD700',
+                      shadowColor: '#FFD700', shadowOpacity: 1, shadowRadius: 8 },
+  adminCardBody:   { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
+  adminCardTitle:  { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  adminCardSub:    { color: '#404040', fontSize: 12, marginTop: 2 },
+  adminCardArrow:  { color: '#FFD700', fontSize: 24 },
+
   // Notificaciones
-  notifHeader:      { flexDirection: 'row', alignItems: 'center', marginBottom: 8, paddingHorizontal: 5 },
-  notifBadge:       { backgroundColor: '#E74C3C', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  notifBadgeText:   { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  chevron:          { color: '#505050', fontSize: 14 },
-  notifList:        { marginBottom: 20, gap: 8 },
-  notifEmpty:       { color: '#505050', textAlign: 'center', paddingVertical: 20 },
-  notifCard:        { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#15181F', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#2A2D35' },
-  notifIcon:        { fontSize: 22, marginTop: 1 },
-  notifTitulo:      { color: '#A0A0A0', fontWeight: 'bold', fontSize: 13, marginBottom: 2 },
-  notifMensaje:     { color: '#707070', fontSize: 12, lineHeight: 17 },
-  notifFecha:       { color: '#404040', fontSize: 10, marginTop: 4 },
-  dotUnread:        { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
-  // Opciones
-  optionRow:        { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#2A2D35' },
-  optionIcon:       { fontSize: 18, marginRight: 12 },
-  optionText:       { color: '#FFF', flex: 1, fontSize: 14 },
-  optionArrow:      { color: '#505050', fontSize: 20 },
-  signOutBtn:       { marginTop: 10, padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#E74C3C', alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.08)' },
-  signOutText:      { color: '#E74C3C', fontWeight: 'bold', fontSize: 16 },
+  notifToggle:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0D1117',
+                     borderRadius: 12, padding: 14, marginBottom: 10,
+                     borderWidth: 1, borderColor: '#1E2330', gap: 8 },
+  notifToggleTxt:  { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, flex: 1 },
+  notifDot:        { backgroundColor: '#E74C3C', borderRadius: 10, minWidth: 20, height: 20,
+                     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  notifDotTxt:     { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+  notifChevron:    { color: '#303030', fontSize: 11 },
+  notifCard:       { flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+                     backgroundColor: '#0D1117', borderRadius: 12, padding: 12,
+                     borderWidth: 1, borderColor: '#1E2330' },
+  notifTitulo:     { color: '#606060', fontWeight: 'bold', fontSize: 13, marginBottom: 2 },
+  notifMsg:        { color: '#404040', fontSize: 12, lineHeight: 17 },
+  notifFecha:      { color: '#303030', fontSize: 10, marginTop: 4 },
+  dotUnread:       { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
+  emptyTxt:        { color: '#404040', textAlign: 'center', padding: 20, letterSpacing: 1 },
+
+  // Sign out
+  signOutBtn:      { marginTop: 8, padding: 15, borderRadius: 14,
+                     borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)',
+                     alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)',
+                     shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
+  signOutTxt:      { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
 });

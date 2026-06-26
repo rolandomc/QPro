@@ -2,21 +2,13 @@ import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar, View, ActivityIndicator, Platform } from 'react-native';
 import { supabase } from '../src/config/supabase';
-import { WebAlert, registerAlertSetter } from '../src/components/WebAlert';
+import { AlertProvider } from '../src/components/WebAlert';
 
 export default function RootLayout() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [session, setSession] = useState<any>(null);
   const router = useRouter();
   const segments = useSegments();
-
-  // Estado global del WebAlert
-  const [alertCfg, setAlertCfg] = useState<any>({ visible: false, title: '', message: '', buttons: [] });
-
-  useEffect(() => {
-    // Registra el setter para que showAlert() funcione globalmente
-    registerAlertSetter((cfg) => setAlertCfg({ ...cfg, visible: true }));
-  }, []);
 
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -73,7 +65,7 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <AlertProvider>
       <StatusBar barStyle="light-content" backgroundColor="#0A0C10" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="auth/login" />
@@ -84,15 +76,6 @@ export default function RootLayout() {
         <Stack.Screen name="admin/create" />
         <Stack.Screen name="wallet/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       </Stack>
-
-      {/* Modal global para web */}
-      <WebAlert
-        visible={alertCfg.visible}
-        title={alertCfg.title}
-        message={alertCfg.message}
-        buttons={alertCfg.buttons}
-        onClose={() => setAlertCfg((prev: any) => ({ ...prev, visible: false }))}
-      />
-    </>
+    </AlertProvider>
   );
 }

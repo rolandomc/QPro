@@ -9,11 +9,12 @@ import ProgressBar from '../../src/components/ProgressBar';
 import MatchSelectionCard from '../../src/components/MatchSelectionCard';
 import { QuinielasService } from '../../src/services/quinielas.service';
 import { supabase } from '../../src/config/supabase';
-import { showAlert } from '../../src/components/WebAlert';
+import { useAlert } from '../../src/components/WebAlert';
 
 export default function QuinielaDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { show } = useAlert();
 
   const [quiniela, setQuiniela] = useState<any>(null);
   const [partidos, setPartidos] = useState<any[]>([]);
@@ -37,7 +38,7 @@ export default function QuinielaDetailsScreen() {
           setPartidos(partidosData || []);
           setYaParticipo(yaParticipoData);
         } catch (e: any) {
-          showAlert('Error', e.message);
+          show('Error', e.message);
         } finally {
           setLoading(false);
         }
@@ -55,13 +56,13 @@ export default function QuinielaDetailsScreen() {
     if (yaParticipo) return;
     const sinSeleccionar = partidos.filter(p => !selecciones[p.id]);
     if (sinSeleccionar.length > 0) {
-      showAlert('Faltan selecciones', `Aún te faltan ${sinSeleccionar.length} partido(s) por seleccionar.`, [
+      show('Faltan selecciones', `Aún te faltan ${sinSeleccionar.length} partido(s) por seleccionar.`, [
         { text: 'Entendido' },
       ]);
       return;
     }
 
-    showAlert(
+    show(
       '🎉 Confirmar Participación',
       `¿Confirmar tu quiniela?\n\nCosto: $${quiniela?.precio_entrada ?? 50} MXN\n\nUna vez confirmada no podrás cambiar tus selecciones.`,
       [
@@ -72,13 +73,13 @@ export default function QuinielaDetailsScreen() {
             setSaving(true);
             try {
               await QuinielasService.guardarSelecciones(id, selecciones);
-              showAlert(
+              show(
                 '✅ ¡Registrado!',
                 '¡Tus selecciones han sido guardadas! Buena suerte 🍀',
                 [{ text: 'Ver mis quinielas', onPress: () => router.replace('/(tabs)') }]
               );
             } catch (e: any) {
-              showAlert('Error al guardar', e.message);
+              show('Error al guardar', e.message);
             } finally {
               setSaving(false);
             }

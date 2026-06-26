@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   StyleSheet, Text, View, FlatList,
-  ActivityIndicator, RefreshControl, ScrollView,
+  ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -53,8 +53,12 @@ export default function ResultsScreen() {
       if (error) throw error;
       setParticipaciones(data || []);
 
-      // Para quinielas finalizadas: ganador + posicion del usuario + total jugadores
-      const finalizadas = (data || []).filter(p => p.quinielas?.estado === 'finalizada');
+      // Quinielas finalizadas: buscar ganador + posicion + total jugadores
+      const finalizadas = (data || []).filter(p =>
+        p.quinielas?.estado === 'finalizada' ||
+        p.estado === 'ganador' ||
+        p.estado === 'perdedor'
+      );
       const quinielaIds = [...new Set(finalizadas.map((p: any) => p.quinielas?.id).filter(Boolean))] as string[];
 
       if (quinielaIds.length > 0) {
@@ -78,11 +82,12 @@ export default function ResultsScreen() {
             gMap[qid] = { username: prof?.username ?? '?', aciertos: gPart.aciertos ?? 0 };
           } else { gMap[qid] = null; }
 
-          // Ranking: todos ordenados por aciertos
+          // Ranking: solo participaciones procesadas
           const { data: ranking } = await supabase
             .from('participaciones')
             .select('user_id, aciertos')
             .eq('quiniela_id', qid)
+            .in('estado', ['ganador', 'perdedor'])
             .order('aciertos', { ascending: false });
 
           tjMap[qid] = ranking?.length ?? 0;
@@ -107,26 +112,30 @@ export default function ResultsScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, []));
 
-  const enJuego  = participaciones.filter(p => ['abierta','cerrada'].includes(p.quinielas?.estado));
-  const historial = participaciones.filter(p => p.quinielas?.estado === 'finalizada');
-  const lista     = tab === 'En Juego' ? enJuego : historial;
+  const enJuego  = participaciones.filter(p => ['abierta', 'cerrada'].includes(p.quinielas?.estado));
+  const historial = participaciones.filter(p =>
+    p.quinielas?.estado === 'finalizada' ||
+    p.estado === 'ganador' ||
+    p.estado === 'perdedor'
+  );
+  const lista = tab === 'En Juego' ? enJuego : historial;
 
-  // Stats personales (solo historial)
-  const totalJugadas  = historial.length;
-  const totalGanadas  = historial.filter(p => p.estado === 'ganador').length;
-  const totalAciertos = historial.reduce((acc: number, p: any) => {
+  // Stats solo historial
+  const totalJugadas   = historial.length;
+  const totalGanadas   = historial.filter(p => p.estado === 'ganador').length;
+  const totalAciertos  = historial.reduce((acc: number, p: any) => {
     const sels = (p.selecciones || []).filter((s: any) => s.partidos != null);
     const con  = sels.filter((s: any) => s.partidos?.resultado !== null);
     return acc + con.filter((s: any) => s.prediccion === s.partidos?.resultado).length;
   }, 0);
-  const totalPartidos = historial.reduce((acc: number, p: any) => {
+  const totalPartidos  = historial.reduce((acc: number, p: any) => {
     return acc + (p.selecciones || []).filter((s: any) => s.partidos?.resultado !== null).length;
   }, 0);
-  const pctAcierto    = totalPartidos > 0 ? Math.round((totalAciertos / totalPartidos) * 100) : 0;
+  const pctAcierto     = totalPartidos > 0 ? Math.round((totalAciertos / totalPartidos) * 100) : 0;
   const totalInvertido = historial.reduce((acc: number, p: any) => acc + (p.monto_pagado ?? p.quinielas?.precio_entrada ?? 0), 0);
-  const totalGanado   = historial.reduce((acc: number, p: any) => acc + (p.premio_ganado ?? 0), 0);
-  const roi           = totalInvertido > 0 ? (((totalGanado - totalInvertido) / totalInvertido) * 100).toFixed(0) : '0';
-  const roiNum        = Number(roi);
+  const totalGanado    = historial.reduce((acc: number, p: any) => acc + (p.premio_ganado ?? 0), 0);
+  const roi            = totalInvertido > 0 ? (((totalGanado - totalInvertido) / totalInvertido) * 100).toFixed(0) : '0';
+  const roiNum         = Number(roi);
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -148,7 +157,6 @@ export default function ResultsScreen() {
 
           ListHeaderComponent={
             <>
-              {/* Stats header solo en historial */}
               {tab === 'Historial' && totalJugadas > 0 && (
                 <View style={s.statsCard}>
                   <View style={s.statsNeonLine} />
@@ -182,7 +190,6 @@ export default function ResultsScreen() {
                 </View>
               )}
 
-              {/* Section label */}
               <View style={s.sectionRow}>
                 {tab === 'En Juego' ? (
                   <><View style={s.liveDot} />
@@ -229,7 +236,6 @@ const s = StyleSheet.create({
   list:         { paddingHorizontal: 14, paddingBottom: 40, paddingTop: 8 },
   centered:     { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   loadingTxt:   { color: '#606060', fontSize: 13, letterSpacing: 1 },
-
   statsCard:    { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 18,
                   borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
                   shadowColor: '#9B59B6', shadowOpacity: 0.2, shadowRadius: 14, elevation: 6 },
@@ -243,7 +249,6 @@ const s = StyleSheet.create({
   statsFinBox:  { flex: 1, alignItems: 'center', paddingVertical: 12 },
   statsFinLbl:  { color: '#404040', fontSize: 9, letterSpacing: 2, marginBottom: 4 },
   statsFinVal:  { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-
   sectionRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   liveDot:      { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2ECC71',
                   shadowColor: '#2ECC71', shadowOpacity: 1, shadowRadius: 6 },
@@ -252,7 +257,6 @@ const s = StyleSheet.create({
                   paddingHorizontal: 10, paddingVertical: 2,
                   borderWidth: 1, borderColor: '#9B59B6' },
   countTxt:     { color: '#9B59B6', fontWeight: 'bold', fontSize: 12 },
-
   emptyBox:     { alignItems: 'center', paddingTop: 60, gap: 10 },
   emptyIcon:    { fontSize: 50 },
   emptyTitulo:  { color: '#FFF', fontSize: 17, fontWeight: 'bold' },

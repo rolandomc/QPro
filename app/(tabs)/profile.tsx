@@ -25,7 +25,6 @@ export default function ProfileScreen() {
   const [notifs,        setNotifs]        = useState<any[]>([]);
   const [notifExpanded, setNotifExpanded] = useState(false);
 
-  // Stats reales
   const [stats, setStats] = useState({
     jugadas: 0, ganadas: 0, pctAcierto: 0,
     roi: 0, invertido: 0, ganado: 0, mejorPos: null as number | null,
@@ -44,17 +43,28 @@ export default function ProfileScreen() {
         .from('profiles').select('username').eq('id', user.id).single();
       if (profile?.username) setUsername(profile.username);
 
-      // Participaciones finalizadas
+      // Traemos todas las participaciones con info de quiniela
       const { data: parts } = await supabase
         .from('participaciones')
-        .select('id, estado, aciertos, monto_pagado, premio_ganado, quiniela_id, selecciones(partido_id, prediccion, partidos(resultado))')
+        .select(`
+          id, estado, aciertos, monto_pagado, premio_ganado, quiniela_id,
+          quinielas ( estado ),
+          selecciones ( partido_id, prediccion, partidos ( resultado ) )
+        `)
         .eq('user_id', user.id);
 
-      const finalizadas = (parts || []).filter((p: any) => p.estado === 'ganador' || p.estado === 'pagado');
-      const jugadas     = finalizadas.length;
-      const ganadas     = finalizadas.filter((p: any) => p.estado === 'ganador').length;
-      const invertido   = finalizadas.reduce((a: number, p: any) => a + (p.monto_pagado ?? 0), 0);
-      const ganado      = finalizadas.reduce((a: number, p: any) => a + (p.premio_ganado ?? 0), 0);
+      // Finalizadas = participaciones donde la quiniela está finalizada
+      // O el estado ya fue procesado (ganador / perdedor)
+      const finalizadas = (parts || []).filter((p: any) =>
+        p.quinielas?.estado === 'finalizada' ||
+        p.estado === 'ganador' ||
+        p.estado === 'perdedor'
+      );
+
+      const jugadas   = finalizadas.length;
+      const ganadas   = finalizadas.filter((p: any) => p.estado === 'ganador').length;
+      const invertido = finalizadas.reduce((a: number, p: any) => a + (p.monto_pagado ?? 0), 0);
+      const ganado    = finalizadas.reduce((a: number, p: any) => a + (p.premio_ganado ?? 0), 0);
 
       let totalAc = 0; let totalPts = 0;
       finalizadas.forEach((p: any) => {
@@ -68,13 +78,14 @@ export default function ProfileScreen() {
       const pctAcierto = totalPts > 0 ? Math.round((totalAc / totalPts) * 100) : 0;
       const roi        = invertido > 0 ? Math.round(((ganado - invertido) / invertido) * 100) : 0;
 
-      // Mejor posicion: buscar en cada quiniela finalizada el ranking
+      // Mejor posicion en quinielas finalizadas
       let mejorPos: number | null = null;
       for (const p of finalizadas) {
         const { data: rank } = await supabase
           .from('participaciones')
           .select('user_id, aciertos')
           .eq('quiniela_id', p.quiniela_id)
+          .in('estado', ['ganador', 'perdedor'])
           .order('aciertos', { ascending: false });
         if (rank) {
           const pos = rank.findIndex((r: any) => r.user_id === user.id);
@@ -121,14 +132,13 @@ export default function ProfileScreen() {
     ? username.substring(0, 2).toUpperCase()
     : userEmail.substring(0, 2).toUpperCase();
 
-  const roiColor   = stats.roi >= 0 ? '#2ECC71' : '#E91E63';
-  const noLeidas   = notifs.filter(n => !n.leida).length;
+  const roiColor = stats.roi >= 0 ? '#2ECC71' : '#E91E63';
+  const noLeidas = notifs.filter(n => !n.leida).length;
 
-  // Nivel basado en quinielas jugadas
-  const nivel = stats.jugadas >= 20 ? 'Oráculo' : stats.jugadas >= 10 ? 'Estratéga' : stats.jugadas >= 5 ? 'Analista' : 'Novato';
-  const niveXP   = stats.jugadas * 100;
-  const nextXP   = Math.ceil((stats.jugadas + 1) / 5) * 5 * 100;
-  const xpPct    = Math.min((niveXP / nextXP) * 100, 100);
+  const nivel  = stats.jugadas >= 20 ? 'Oráculo' : stats.jugadas >= 10 ? 'Estratéga' : stats.jugadas >= 5 ? 'Analista' : 'Novato';
+  const niveXP = stats.jugadas * 100;
+  const nextXP = Math.ceil((stats.jugadas + 1) / 5) * 5 * 100;
+  const xpPct  = Math.min((niveXP / nextXP) * 100, 100);
 
   if (loading) return (
     <SafeAreaView style={st.container}>
@@ -160,7 +170,6 @@ export default function ProfileScreen() {
           <Text style={st.nombre}>{username || userEmail}</Text>
           <Text style={st.email}>{userEmail}</Text>
 
-          {/* Nivel */}
           <View style={st.nivelBox}>
             <View style={st.nivelRow}>
               <Text style={st.nivelLabel}>RANGO</Text>
@@ -179,10 +188,10 @@ export default function ProfileScreen() {
           <Text style={st.statsTitle}>ESTADÍSTICAS DE TEMPORADA</Text>
           <View style={st.statsGrid}>
             {[
-              { v: String(stats.jugadas),             l: 'JUGADAS',  c: '#00E5FF' },
-              { v: String(stats.ganadas),             l: 'GANADAS',  c: '#FFD700' },
-              { v: `${stats.pctAcierto}%`,            l: 'ACIERTO',  c: '#9B59B6' },
-              { v: `${stats.roi >= 0 ? '+' : ''}${stats.roi}%`, l: 'ROI', c: roiColor },
+              { v: String(stats.jugadas),                              l: 'JUGADAS', c: '#00E5FF' },
+              { v: String(stats.ganadas),                              l: 'GANADAS', c: '#FFD700' },
+              { v: `${stats.pctAcierto}%`,                             l: 'ACIERTO', c: '#9B59B6' },
+              { v: `${stats.roi >= 0 ? '+' : ''}${stats.roi}%`,       l: 'ROI',     c: roiColor  },
             ].map((item, i, arr) => (
               <React.Fragment key={i}>
                 <View style={st.statItem}>
@@ -195,7 +204,6 @@ export default function ProfileScreen() {
               </React.Fragment>
             ))}
           </View>
-          {/* Mejor posicion + financiero */}
           <View style={st.statsBottomRow}>
             <View style={st.statsFinBox}>
               <Text style={st.statsFinLbl}>MEJOR POSICIÓN</Text>
@@ -224,9 +232,9 @@ export default function ProfileScreen() {
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
           <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 2 }}>
-            <Badge icon="🎯" title="Pleno Perfecto" isUnlocked={stats.ganadas >= 1}  neonColor="#E91E63" />
-            <Badge icon="🔥" title="Racha x3"       isUnlocked={stats.jugadas >= 3} neonColor="#F39C12" />
-            <Badge icon="💰" title="Bolsa Mayor"    isUnlocked={stats.ganado >= 1000} neonColor="#FFD700" />
+            <Badge icon="🎯" title="Pleno Perfecto" isUnlocked={stats.ganadas >= 1}     neonColor="#E91E63" />
+            <Badge icon="🔥" title="Racha x3"       isUnlocked={stats.jugadas >= 3}    neonColor="#F39C12" />
+            <Badge icon="💰" title="Bolsa Mayor"    isUnlocked={stats.ganado >= 1000}  neonColor="#FFD700" />
             <Badge icon="🔮" title="Vidente"        isUnlocked={stats.pctAcierto >= 80} neonColor="#9B59B6" />
           </View>
         </ScrollView>
@@ -292,91 +300,79 @@ export default function ProfileScreen() {
 }
 
 const st = StyleSheet.create({
-  container:       { flex: 1, backgroundColor: '#0A0C10' },
-  scroll:          { padding: 16, paddingBottom: 50 },
-
-  // Hero
-  heroSection:     { alignItems: 'center', marginBottom: 24 },
-  avatarWrap:      { marginBottom: 14, alignItems: 'center' },
-  avatarNeonRing:  { width: 92, height: 92, borderRadius: 46, borderWidth: 2,
-                     borderColor: '#9B59B6', justifyContent: 'center', alignItems: 'center',
-                     shadowColor: '#9B59B6', shadowOpacity: 0.6, shadowRadius: 16, elevation: 8 },
-  avatar:          { width: 80, height: 80, borderRadius: 40,
-                     backgroundColor: '#15181F', justifyContent: 'center', alignItems: 'center' },
-  avatarTxt:       { color: '#FFF', fontSize: 28, fontWeight: 'bold',
-                     textShadowColor: '#9B59B6', textShadowRadius: 10 },
-  adminPill:       { marginTop: 8, backgroundColor: 'rgba(255,215,0,0.1)',
-                     borderRadius: 20, paddingHorizontal: 12, paddingVertical: 3,
-                     borderWidth: 1, borderColor: '#FFD700' },
-  adminPillTxt:    { color: '#FFD700', fontWeight: 'bold', fontSize: 11, letterSpacing: 1 },
-  nombre:          { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 3 },
-  email:           { color: '#404040', fontSize: 12, marginBottom: 16 },
-  nivelBox:        { width: '100%', backgroundColor: '#0D1117', borderRadius: 14, padding: 14,
-                     borderWidth: 1, borderColor: '#1E2330' },
-  nivelRow:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  nivelLabel:      { color: '#404040', fontSize: 10, letterSpacing: 2 },
-  nivelNombre:     { color: '#9B59B6', fontSize: 15, fontWeight: 'bold' },
-  xpTrack:         { height: 6, backgroundColor: '#1A1D24', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
-  xpFill:          { height: '100%', backgroundColor: '#9B59B6',
-                     shadowColor: '#9B59B6', shadowOpacity: 0.8, shadowRadius: 4 },
-  xpTxt:           { color: '#303030', fontSize: 10, textAlign: 'right', letterSpacing: 1 },
-
-  // Stats
-  statsCard:       { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 20,
-                     borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                     shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 14, elevation: 5 },
-  statsNeonLine:   { height: 2, backgroundColor: '#9B59B6',
-                     shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
-  statsTitle:      { color: '#303030', fontSize: 9, fontWeight: 'bold', letterSpacing: 3,
-                     textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
-  statsGrid:       { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 16, alignItems: 'center' },
-  statItem:        { flex: 1, alignItems: 'center' },
-  statVal:         { fontSize: 22, fontWeight: 'bold' },
-  statLbl:         { color: '#303030', fontSize: 8, letterSpacing: 1.5, marginTop: 3 },
-  statDiv:         { width: 1, height: 32, backgroundColor: '#1E2330' },
-  statsBottomRow:  { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
-  statsFinBox:     { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  statsFinLbl:     { color: '#303030', fontSize: 8, letterSpacing: 2, marginBottom: 4 },
-  statsFinVal:     { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
-
-  // Section headers
-  sectionHeader:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  sectionLine:     { flex: 1, height: 1, backgroundColor: '#1E2330' },
-  sectionTitle:    { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3 },
-
-  // Admin card
-  adminCard:       { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 20,
-                     borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                     shadowColor: '#FFD700', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
+  container:        { flex: 1, backgroundColor: '#0A0C10' },
+  scroll:           { padding: 16, paddingBottom: 50 },
+  heroSection:      { alignItems: 'center', marginBottom: 24 },
+  avatarWrap:       { marginBottom: 14, alignItems: 'center' },
+  avatarNeonRing:   { width: 92, height: 92, borderRadius: 46, borderWidth: 2,
+                      borderColor: '#9B59B6', justifyContent: 'center', alignItems: 'center',
+                      shadowColor: '#9B59B6', shadowOpacity: 0.6, shadowRadius: 16, elevation: 8 },
+  avatar:           { width: 80, height: 80, borderRadius: 40,
+                      backgroundColor: '#15181F', justifyContent: 'center', alignItems: 'center' },
+  avatarTxt:        { color: '#FFF', fontSize: 28, fontWeight: 'bold',
+                      textShadowColor: '#9B59B6', textShadowRadius: 10 },
+  adminPill:        { marginTop: 8, backgroundColor: 'rgba(255,215,0,0.1)',
+                      borderRadius: 20, paddingHorizontal: 12, paddingVertical: 3,
+                      borderWidth: 1, borderColor: '#FFD700' },
+  adminPillTxt:     { color: '#FFD700', fontWeight: 'bold', fontSize: 11, letterSpacing: 1 },
+  nombre:           { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 3 },
+  email:            { color: '#404040', fontSize: 12, marginBottom: 16 },
+  nivelBox:         { width: '100%', backgroundColor: '#0D1117', borderRadius: 14, padding: 14,
+                      borderWidth: 1, borderColor: '#1E2330' },
+  nivelRow:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  nivelLabel:       { color: '#404040', fontSize: 10, letterSpacing: 2 },
+  nivelNombre:      { color: '#9B59B6', fontSize: 15, fontWeight: 'bold' },
+  xpTrack:          { height: 6, backgroundColor: '#1A1D24', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
+  xpFill:           { height: '100%', backgroundColor: '#9B59B6',
+                      shadowColor: '#9B59B6', shadowOpacity: 0.8, shadowRadius: 4 },
+  xpTxt:            { color: '#303030', fontSize: 10, textAlign: 'right', letterSpacing: 1 },
+  statsCard:        { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 20,
+                      borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
+                      shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 14, elevation: 5 },
+  statsNeonLine:    { height: 2, backgroundColor: '#9B59B6',
+                      shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+  statsTitle:       { color: '#303030', fontSize: 9, fontWeight: 'bold', letterSpacing: 3,
+                      textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
+  statsGrid:        { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 16, alignItems: 'center' },
+  statItem:         { flex: 1, alignItems: 'center' },
+  statVal:          { fontSize: 22, fontWeight: 'bold' },
+  statLbl:          { color: '#303030', fontSize: 8, letterSpacing: 1.5, marginTop: 3 },
+  statDiv:          { width: 1, height: 32, backgroundColor: '#1E2330' },
+  statsBottomRow:   { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
+  statsFinBox:      { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  statsFinLbl:      { color: '#303030', fontSize: 8, letterSpacing: 2, marginBottom: 4 },
+  statsFinVal:      { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
+  sectionHeader:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  sectionLine:      { flex: 1, height: 1, backgroundColor: '#1E2330' },
+  sectionTitle:     { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3 },
+  adminCard:        { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 20,
+                      borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
+                      shadowColor: '#FFD700', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
   adminCardNeonLine:{ height: 2, backgroundColor: '#FFD700',
                       shadowColor: '#FFD700', shadowOpacity: 1, shadowRadius: 8 },
-  adminCardBody:   { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
-  adminCardTitle:  { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  adminCardSub:    { color: '#404040', fontSize: 12, marginTop: 2 },
-  adminCardArrow:  { color: '#FFD700', fontSize: 24 },
-
-  // Notificaciones
-  notifToggle:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0D1117',
-                     borderRadius: 12, padding: 14, marginBottom: 10,
-                     borderWidth: 1, borderColor: '#1E2330', gap: 8 },
-  notifToggleTxt:  { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, flex: 1 },
-  notifDot:        { backgroundColor: '#E74C3C', borderRadius: 10, minWidth: 20, height: 20,
-                     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  notifDotTxt:     { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  notifChevron:    { color: '#303030', fontSize: 11 },
-  notifCard:       { flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-                     backgroundColor: '#0D1117', borderRadius: 12, padding: 12,
-                     borderWidth: 1, borderColor: '#1E2330' },
-  notifTitulo:     { color: '#606060', fontWeight: 'bold', fontSize: 13, marginBottom: 2 },
-  notifMsg:        { color: '#404040', fontSize: 12, lineHeight: 17 },
-  notifFecha:      { color: '#303030', fontSize: 10, marginTop: 4 },
-  dotUnread:       { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
-  emptyTxt:        { color: '#404040', textAlign: 'center', padding: 20, letterSpacing: 1 },
-
-  // Sign out
-  signOutBtn:      { marginTop: 8, padding: 15, borderRadius: 14,
-                     borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)',
-                     alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)',
-                     shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
-  signOutTxt:      { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
+  adminCardBody:    { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
+  adminCardTitle:   { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  adminCardSub:     { color: '#404040', fontSize: 12, marginTop: 2 },
+  adminCardArrow:   { color: '#FFD700', fontSize: 24 },
+  notifToggle:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0D1117',
+                      borderRadius: 12, padding: 14, marginBottom: 10,
+                      borderWidth: 1, borderColor: '#1E2330', gap: 8 },
+  notifToggleTxt:   { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, flex: 1 },
+  notifDot:         { backgroundColor: '#E74C3C', borderRadius: 10, minWidth: 20, height: 20,
+                      alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  notifDotTxt:      { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+  notifChevron:     { color: '#303030', fontSize: 11 },
+  notifCard:        { flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+                      backgroundColor: '#0D1117', borderRadius: 12, padding: 12,
+                      borderWidth: 1, borderColor: '#1E2330' },
+  notifTitulo:      { color: '#606060', fontWeight: 'bold', fontSize: 13, marginBottom: 2 },
+  notifMsg:         { color: '#404040', fontSize: 12, lineHeight: 17 },
+  notifFecha:       { color: '#303030', fontSize: 10, marginTop: 4 },
+  dotUnread:        { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
+  emptyTxt:         { color: '#404040', textAlign: 'center', padding: 20, letterSpacing: 1 },
+  signOutBtn:       { marginTop: 8, padding: 15, borderRadius: 14,
+                      borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)',
+                      alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)',
+                      shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
+  signOutTxt:       { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
 });

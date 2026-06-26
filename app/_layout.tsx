@@ -10,7 +10,6 @@ export default function RootLayout() {
   const segments = useSegments();
 
   useEffect(() => {
-    // Registrar Service Worker y manifest para PWA en web
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       // Manifest
       if (!document.querySelector('link[rel="manifest"]')) {
@@ -19,6 +18,23 @@ export default function RootLayout() {
         link.href = '/manifest.json';
         document.head.appendChild(link);
       }
+
+      // iOS PWA: notch y status bar negros
+      const metaTags = [
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-status-bar-style', content: 'black' },
+        { name: 'apple-mobile-web-app-title', content: 'QPro' },
+        { name: 'theme-color', content: '#0A0C10' },
+      ];
+      metaTags.forEach(({ name, content }) => {
+        if (!document.querySelector(`meta[name="${name}"]`)) {
+          const meta = document.createElement('meta');
+          meta.name = name;
+          meta.content = content;
+          document.head.appendChild(meta);
+        }
+      });
+
       // Service Worker
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -27,25 +43,19 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    // 1. Obtener sesión actual al arrancar
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setIsInitialized(true);
     });
-
-    // 2. Escuchar cambios de estado (login, logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
     if (!isInitialized) return;
-
     const inAuthGroup = segments[0] === 'auth';
-
     if (!session && !inAuthGroup) {
       router.replace('/auth/login');
     } else if (session && inAuthGroup) {
@@ -63,7 +73,7 @@ export default function RootLayout() {
 
   return (
     <>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="#0A0C10" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="auth/login" />
         <Stack.Screen name="auth/register" />

@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { colors } from '../../src/theme/colors';
 import { supabase } from '../../src/config/supabase';
 
@@ -51,7 +51,14 @@ export default function TabLayout() {
   return (
     <Tabs screenOptions={{
       headerShown: false,
-      tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
+      tabBarStyle: {
+        backgroundColor: colors.card,
+        borderTopColor: colors.border,
+        // Evita que los iconos bajen demasiado en PWA/web
+        height: Platform.OS === 'web' ? 60 : undefined,
+        paddingBottom: Platform.OS === 'web' ? 8 : undefined,
+        paddingTop: Platform.OS === 'web' ? 8 : undefined,
+      },
       tabBarActiveTintColor: colors.primary,
       tabBarInactiveTintColor: colors.textMuted,
     }}>

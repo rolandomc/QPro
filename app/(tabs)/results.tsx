@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import Header from '../../src/components/Header';
-import ResultCard from '../../src/components/ResultCard';
+import { QuinielaCard } from '../../src/components/QuinielaCard';
 import SegmentedControl from '../../src/components/SegmentedControl';
 import { supabase } from '../../src/config/supabase';
 
@@ -26,9 +26,6 @@ function StatBox({ valor, label, color = '#FFF', glow = false }: {
 export default function ResultsScreen() {
   const [tab,             setTab]             = useState('En Juego');
   const [participaciones, setParticipaciones] = useState<any[]>([]);
-  const [ganadoresMap,    setGanadoresMap]    = useState<Record<string, any>>({});
-  const [posicionMap,     setPosicionMap]     = useState<Record<string, number>>({});
-  const [totalJugMap,     setTotalJugMap]     = useState<Record<string, number>>({});
   const [loading,         setLoading]         = useState(true);
   const [refreshing,      setRefreshing]      = useState(false);
 
@@ -37,16 +34,15 @@ export default function ResultsScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Traemos participaciones con join LEFT a partidos (no !inner)
-      // para que nunca se pierdan selecciones aunque un partido no tenga datos
+      // Traer participaciones del usuario con datos de la quiniela
       const { data, error } = await supabase
         .from('participaciones')
         .select(`
           id, aciertos, estado, premio_ganado, monto_pagado, created_at,
-          quinielas ( id, titulo, precio_entrada, estado, premio_total ),
-          selecciones (
-            partido_id, prediccion,
-            partidos ( equipo_local, equipo_visitante, fecha_partido, resultado )
+          quinielas (
+            id, titulo, descripcion, precio_entrada, premio_total, estado,
+            fecha_cierre, jugadores_minimos, porcentaje_admin,
+            partidos ( id )
           )
         `)
         .eq('user_id', user.id)
@@ -54,67 +50,6 @@ export default function ResultsScreen() {
 
       if (error) throw error;
       setParticipaciones(data || []);
-
-      // IDs de quinielas donde ya hay resultado (ganador/perdedor o finalizada)
-      const finalizadas = (data || []).filter((p: any) =>
-        p.quinielas?.estado === 'finalizada' ||
-        p.estado === 'ganador' ||
-        p.estado === 'perdedor'
-      );
-      const quinielaIds = [
-        ...new Set(finalizadas.map((p: any) => p.quinielas?.id).filter(Boolean)),
-      ] as string[];
-
-      if (quinielaIds.length > 0) {
-        const gMap:  Record<string, any>    = {};
-        const pMap:  Record<string, number> = {};
-        const tjMap: Record<string, number> = {};
-
-        await Promise.all(quinielaIds.map(async (qid) => {
-          // Ganador de la quiniela
-          const { data: gRows } = await supabase
-            .from('participaciones')
-            .select('aciertos, user_id')
-            .eq('quiniela_id', qid)
-            .eq('estado', 'ganador')
-            .order('aciertos', { ascending: false })
-            .limit(1);
-
-          const gPart = gRows?.[0] ?? null;
-          if (gPart) {
-            const { data: prof } = await supabase
-              .from('profiles').select('username').eq('id', gPart.user_id).single();
-            gMap[qid] = { username: prof?.username ?? '?', aciertos: gPart.aciertos ?? 0 };
-          } else {
-            gMap[qid] = null;
-          }
-
-          // Total jugadores = TODOS los que participaron (sin importar estado)
-          const { count: totalCount } = await supabase
-            .from('participaciones')
-            .select('id', { count: 'exact', head: true })
-            .eq('quiniela_id', qid);
-
-          tjMap[qid] = totalCount ?? 0;
-
-          // Ranking para calcular posicion del usuario (solo procesados)
-          const { data: ranking } = await supabase
-            .from('participaciones')
-            .select('user_id, aciertos')
-            .eq('quiniela_id', qid)
-            .in('estado', ['ganador', 'perdedor'])
-            .order('aciertos', { ascending: false });
-
-          if (ranking) {
-            const pos = ranking.findIndex((r: any) => r.user_id === user.id);
-            pMap[qid] = pos >= 0 ? pos + 1 : (tjMap[qid] ?? 0);
-          }
-        }));
-
-        setGanadoresMap(gMap);
-        setPosicionMap(pMap);
-        setTotalJugMap(tjMap);
-      }
     } catch (e: any) {
       console.error(e.message);
     } finally {
@@ -125,9 +60,11 @@ export default function ResultsScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, []));
 
+  // En Juego = abierta o cerrada (aún no finalizada)
   const enJuego  = participaciones.filter((p: any) =>
     ['abierta', 'cerrada'].includes(p.quinielas?.estado)
   );
+  // Historial = finalizadas o marcadas como ganador/perdedor
   const historial = participaciones.filter((p: any) =>
     p.quinielas?.estado === 'finalizada' ||
     p.estado === 'ganador' ||
@@ -138,24 +75,16 @@ export default function ResultsScreen() {
   // Stats del historial
   const totalJugadas   = historial.length;
   const totalGanadas   = historial.filter((p: any) => p.estado === 'ganador').length;
-  const totalAciertos  = historial.reduce((acc: number, p: any) => {
-    const sels = (p.selecciones || []).filter((s: any) => s.partidos != null);
-    const con  = sels.filter((s: any) => s.partidos?.resultado !== null);
-    return acc + con.filter((s: any) => s.prediccion === s.partidos?.resultado).length;
-  }, 0);
-  const totalConRes    = historial.reduce((acc: number, p: any) =>
-    acc + (p.selecciones || []).filter((s: any) =>
-      s.partidos != null && s.partidos?.resultado !== null
-    ).length, 0);
-  const pctAcierto     = totalConRes > 0 ? Math.round((totalAciertos / totalConRes) * 100) : 0;
   const totalInvertido = historial.reduce((acc: number, p: any) =>
-    acc + (p.monto_pagado ?? p.quinielas?.precio_entrada ?? 0), 0);
+    acc + Number(p.monto_pagado ?? p.quinielas?.precio_entrada ?? 0), 0);
   const totalGanado    = historial.reduce((acc: number, p: any) =>
-    acc + (p.premio_ganado ?? 0), 0);
+    acc + Number(p.premio_ganado ?? 0), 0);
   const roi            = totalInvertido > 0
     ? (((totalGanado - totalInvertido) / totalInvertido) * 100).toFixed(0)
     : '0';
   const roiNum = Number(roi);
+  // % acierto global — aproximación: ganadas / jugadas
+  const pctAcierto = totalJugadas > 0 ? Math.round((totalGanadas / totalJugadas) * 100) : 0;
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -191,7 +120,7 @@ export default function ResultsScreen() {
                     <View style={s.statsDiv} />
                     <StatBox valor={String(totalGanadas)} label="Ganadas" color="#FFD700" glow />
                     <View style={s.statsDiv} />
-                    <StatBox valor={`${pctAcierto}%`} label="Acierto" color="#9B59B6" glow />
+                    <StatBox valor={`${pctAcierto}%`} label="Win Rate" color="#9B59B6" glow />
                     <View style={s.statsDiv} />
                     <StatBox
                       valor={`${roiNum >= 0 ? '+' : ''}${roi}%`}
@@ -214,6 +143,7 @@ export default function ResultsScreen() {
                   </View>
                 </View>
               )}
+
               <View style={s.sectionRow}>
                 {tab === 'En Juego' ? (
                   <><View style={s.liveDot} />
@@ -235,22 +165,30 @@ export default function ResultsScreen() {
               </Text>
               <Text style={s.emptySub}>
                 {tab === 'En Juego'
-                  ? 'Cuando participes aparecerá aquí.'
+                  ? 'Las quinielas donde participes aparecerán aquí.'
                   : 'Las quinielas finalizadas aparecerán aquí.'}
               </Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <ResultCard
-              quiniela={item.quinielas}
-              participacion={item}
-              selecciones={item.selecciones ?? []}
-              modo={tab === 'En Juego' ? 'en_juego' : 'historial'}
-              ganador={ganadoresMap[item.quinielas?.id] ?? null}
-              posicion={posicionMap[item.quinielas?.id] ?? null}
-              totalJugadores={totalJugMap[item.quinielas?.id] ?? null}
-            />
-          )}
+          renderItem={({ item }) => {
+            const q = item.quinielas;
+            if (!q) return null;
+            return (
+              <QuinielaCard
+                id={q.id}
+                titulo={q.titulo}
+                descripcion={q.descripcion}
+                precioEntrada={Number(q.precio_entrada)}
+                premioTotal={Number(q.premio_total)}
+                estado={q.estado}
+                totalPartidos={q.partidos?.length ?? 0}
+                fechaCierre={q.fecha_cierre}
+                jugadoresMinimos={q.jugadores_minimos ?? 0}
+                porcentajeAdmin={q.porcentaje_admin ?? 0}
+                modoResultados
+              />
+            );
+          }}
         />
       )}
     </SafeAreaView>

@@ -15,6 +15,8 @@ interface Props {
   fechaCierre?: string;
   jugadoresMinimos?: number;
   porcentajeAdmin?: number;
+  /** Modo resultados: oculta lógica de participar, siempre va a [id] */
+  modoResultados?: boolean;
 }
 
 export function QuinielaCard({
@@ -28,25 +30,24 @@ export function QuinielaCard({
   fechaCierre,
   jugadoresMinimos = 0,
   porcentajeAdmin  = 0,
+  modoResultados   = false,
 }: Props) {
   const router = useRouter();
   const [jugadoresPagados, setJugadoresPagados] = useState(0);
-  const [yaParticipo, setYaParticipo] = useState(false);
+  const [yaParticipo,      setYaParticipo]      = useState(false);
 
   useEffect(() => {
     if (!id) return;
     let channel: any;
 
     const cargar = async () => {
-      // Contar participantes pagados
       const { count } = await supabase
         .from('participaciones')
         .select('*', { count: 'exact', head: true })
         .eq('quiniela_id', id)
-        .in('estado', ['pagado', 'ganador', 'perdedor']);
+        .in('estado', ['pagado', 'ganador', 'perdedor', 'pendiente']);
       setJugadoresPagados(count ?? 0);
 
-      // Verificar si el usuario actual ya participó
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         const { data: part } = await supabase
@@ -70,31 +71,35 @@ export function QuinielaCard({
     return () => { if (channel) supabase.removeChannel(channel); };
   }, [id]);
 
-  const tieneMinimo      = jugadoresMinimos > 0;
-  const pozoActual       = jugadoresPagados * precioEntrada;
-  const premioCalculado  = tieneMinimo && porcentajeAdmin > 0
+  const tieneMinimo     = jugadoresMinimos > 0;
+  const pozoActual      = jugadoresPagados * precioEntrada;
+  const premioCalculado = tieneMinimo && porcentajeAdmin > 0
     ? pozoActual * (1 - porcentajeAdmin / 100)
     : premioTotal;
-  const minimoAlcanzado  = tieneMinimo ? jugadoresPagados >= jugadoresMinimos : true;
-  const faltanJugadores  = Math.max(0, jugadoresMinimos - jugadoresPagados);
-  const premioVisible    = !tieneMinimo || minimoAlcanzado;
+  const minimoAlcanzado = tieneMinimo ? jugadoresPagados >= jugadoresMinimos : true;
+  const faltanJugadores = Math.max(0, jugadoresMinimos - jugadoresPagados);
+  const premioVisible   = !tieneMinimo || minimoAlcanzado;
 
-  const estadoColor = estado === 'abierta' ? '#2ECC71' : estado === 'cerrada' ? '#E74C3C' : '#A0A0A0';
-  const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🔴 Cerrada' : '✅ Finalizada';
+  const estadoColor = estado === 'abierta' ? '#2ECC71' : estado === 'cerrada' ? '#F39C12' : '#9B59B6';
+  const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🟡 Cerrada' : '✅ Finalizada';
 
-  // Si la quiniela está abierta y el usuario NO ha participado → pantalla de selecciones
-  // En cualquier otro caso (ya participó, cerrada, finalizada) → pantalla de picks/ranking
   const handlePress = () => {
-    if (estado === 'abierta' && !yaParticipo) {
+    if (!modoResultados && estado === 'abierta' && !yaParticipo) {
+      // Quiniela abierta y no ha participado → pantalla de selecciones
       router.push(`/quiniela/details?id=${id}`);
     } else {
+      // Ya participó, cerrada, finalizada, o modo resultados → picks/ranking
       router.push(`/quiniela/${id}`);
     }
   };
 
-  const botonLabel = estado === 'abierta'
-    ? (yaParticipo ? 'Ver mis picks →' : 'Participar →')
-    : 'Ver detalle →';
+  const botonLabel = modoResultados
+    ? (estado === 'finalizada' ? 'Ver resultado →' : 'Ver mis picks →')
+    : estado === 'abierta'
+      ? (yaParticipo ? 'Ver mis picks →' : 'Participar →')
+      : 'Ver detalle →';
+
+  const botonActivo = modoResultados || estado === 'abierta';
 
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress} activeOpacity={0.85}>
@@ -107,10 +112,9 @@ export function QuinielaCard({
         </View>
       </View>
 
-      {/* Descripcion */}
       {descripcion ? <Text style={styles.descripcion}>{descripcion}</Text> : null}
 
-      {/* Stats row */}
+      {/* Stats */}
       <View style={styles.statsRow}>
         <View style={styles.stat}>
           <Text style={styles.statValue}>{totalPartidos}</Text>
@@ -131,6 +135,11 @@ export function QuinielaCard({
             <Text style={[styles.statValue, { color: '#505050' }]}>🔒 Oculto</Text>
           )}
           <Text style={styles.statLabel}>Premio</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.stat}>
+          <Text style={[styles.statValue, { color: '#00E5FF' }]}>{jugadoresPagados}</Text>
+          <Text style={styles.statLabel}>Jugadores</Text>
         </View>
       </View>
 
@@ -157,12 +166,12 @@ export function QuinielaCard({
         </View>
       )}
 
-      {/* Botón Participar / Ver mis picks / Ver detalle */}
+      {/* Botón */}
       <TouchableOpacity
-        style={[styles.button, estado !== 'abierta' && styles.buttonDisabled]}
+        style={[styles.button, !botonActivo && styles.buttonDisabled]}
         onPress={handlePress}
       >
-        <Text style={[styles.buttonText, estado !== 'abierta' && { color: '#707070' }]}>
+        <Text style={[styles.buttonText, !botonActivo && { color: '#707070' }]}>
           {botonLabel}
         </Text>
       </TouchableOpacity>

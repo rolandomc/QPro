@@ -155,7 +155,9 @@ export default function GanadoresScreen() {
               await cargarDatos();
               Alert.alert(
                 '🎉 ¡Premio distribuido!',
-                `${ganadores[0].username} recibe $${montoPorGanador.toLocaleString()}.`,
+                ganadores.length === 1
+                  ? `${ganadores[0].username} recibe $${montoPorGanador.toLocaleString()}.`
+                  : `${ganadores.length} ganadores reciben $${montoPorGanador.toLocaleString()} c/u.`,
               );
             } catch (e: any) {
               Alert.alert('Error', e.message);
@@ -168,12 +170,9 @@ export default function GanadoresScreen() {
     );
   };
 
-  // ── Premio ya distribuido si: alguna participación es 'ganador',
-  //    hay premio_ganado > 0, O la quiniela ya está 'finalizada'
-  const premioYaDistribuido =
-    quiniela?.estado === 'finalizada' ||
-    participantes.some(p => p.estado === 'ganador') ||
-    participantes.some(p => (p.premio_ganado ?? 0) > 0);
+  // ── Premio ya distribuido SOLO si hay participaciones con estado 'ganador'
+  // (no depende de quiniela.estado para evitar que se bloquee si ya se finalizó antes)
+  const premioYaDistribuido = participantes.some(p => p.estado === 'ganador');
 
   const premioTotal = quiniela?.premio_total ?? 0;
 

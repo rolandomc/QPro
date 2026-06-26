@@ -108,9 +108,9 @@ export default function CreateQuinielaScreen() {
   };
 
   const handlePublicar = async () => {
-    if (!titulo.trim())             { Alert.alert('Falta el título',      'Escribe un título.'); return; }
-    if (seleccionados.size === 0)   { Alert.alert('Sin partidos',         'Selecciona al menos uno.'); return; }
-    if (jugMinNum < 2)              { Alert.alert('J. mínimos inválido',  'Mínimo 2 jugadores.'); return; }
+    if (!titulo.trim())             { Alert.alert('Falta el título',     'Escribe un título.'); return; }
+    if (seleccionados.size === 0)   { Alert.alert('Sin partidos',        'Selecciona al menos uno.'); return; }
+    if (jugMinNum < 2)              { Alert.alert('J. mínimos inválido', 'Mínimo 2 jugadores.'); return; }
     if (pctAdminNum < 0 || pctAdminNum > 50) { Alert.alert('% Admin inválido', 'Debe estar entre 0 y 50%.'); return; }
 
     setLoadingPublish(true);
@@ -143,7 +143,6 @@ export default function CreateQuinielaScreen() {
     return '#A0A0A0';
   };
 
-  // El botón flotante aparece cuando hay partidos cargados (aunque sean 0 seleccionados)
   const showFloating = partidosApi.length > 0;
 
   return (
@@ -157,9 +156,8 @@ export default function CreateQuinielaScreen() {
         <View style={{ width: 60 }} />
       </View>
 
-      {/* Scroll — con paddingBottom extra cuando hay botón flotante */}
       <ScrollView
-        contentContainerStyle={[styles.content, showFloating && { paddingBottom: 110 }]}
+        contentContainerStyle={[styles.content, showFloating && { paddingBottom: 120 }]}
         keyboardShouldPersistTaps="handled"
       >
         {/* 1. Detalles */}
@@ -266,7 +264,7 @@ export default function CreateQuinielaScreen() {
             : <Text style={styles.fetchBtnText}>🔍 Buscar Partidos</Text>}
         </TouchableOpacity>
 
-        {/* 4. Lista de partidos */}
+        {/* 4. Lista */}
         {partidosApi.length > 0 && (
           <View style={{ marginTop: 20 }}>
             <View style={styles.listHeader}>
@@ -298,7 +296,9 @@ export default function CreateQuinielaScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <View style={styles.matchRow}>
-                      <Text style={styles.matchTeams} numberOfLines={1}>{partido.equipo_local} vs {partido.equipo_visitante}</Text>
+                      <Text style={styles.matchTeams} numberOfLines={1}>
+                        {partido.equipo_local} vs {partido.equipo_visitante}
+                      </Text>
                       {marcador && <Text style={styles.marcadorText}>{marcador}</Text>}
                     </View>
                     <View style={styles.matchMeta}>
@@ -315,43 +315,28 @@ export default function CreateQuinielaScreen() {
         )}
       </ScrollView>
 
-      {/* ── BOTÓN FLOTANTE ── */}
+      {/* ═══ BOTÓN FLOTANTE REAL ═══ */}
       {showFloating && (
-        <View style={styles.floatingWrap}>
-          <TouchableOpacity
-            style={[
-              styles.floatingBtn,
-              seleccionados.size > 0 ? styles.floatingBtnActive : styles.floatingBtnDisabled,
-            ]}
-            onPress={handlePublicar}
-            disabled={seleccionados.size === 0 || loadingPublish}
-            activeOpacity={0.85}
-          >
-            {loadingPublish ? (
-              <ActivityIndicator color="#000" />
-            ) : (
-              <>
-                <Text style={[
-                  styles.floatingBtnText,
-                  seleccionados.size === 0 && { color: '#505050' },
-                ]}>
-                  🚀 Publicar
-                </Text>
-                <View style={[
-                  styles.floatingBadge,
-                  seleccionados.size > 0 ? styles.floatingBadgeActive : styles.floatingBadgeDisabled,
-                ]}>
-                  <Text style={[
-                    styles.floatingBadgeText,
-                    seleccionados.size === 0 && { color: '#505050' },
-                  ]}>
-                    {seleccionados.size} partido{seleccionados.size !== 1 ? 's' : ''}
-                  </Text>
-                </View>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={[
+            styles.fab,
+            seleccionados.size > 0 ? styles.fabActive : styles.fabInactive,
+          ]}
+          onPress={handlePublicar}
+          disabled={seleccionados.size === 0 || loadingPublish}
+          activeOpacity={0.85}
+        >
+          {loadingPublish ? (
+            <ActivityIndicator color="#000" size="small" />
+          ) : (
+            <Text style={[
+              styles.fabText,
+              seleccionados.size === 0 && { color: '#505050' },
+            ]}>
+              🚀 Publicar {seleccionados.size > 0 ? `${seleccionados.size} partido${seleccionados.size !== 1 ? 's' : ''}` : ''}
+            </Text>
+          )}
+        </TouchableOpacity>
       )}
     </SafeAreaView>
   );
@@ -397,7 +382,8 @@ const styles = StyleSheet.create({
                         borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   selectAllText:      { color: '#3498DB', fontSize: 12, fontWeight: 'bold' },
   matchCard:          { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15181F',
-                        padding: 14, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#2A2D35' },
+                        padding: 14, borderRadius: 12, marginBottom: 10,
+                        borderWidth: 1, borderColor: '#2A2D35' },
   matchCardSelected:  { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
   checkbox:           { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#707070',
                         marginRight: 14, alignItems: 'center', justifyContent: 'center' },
@@ -410,25 +396,39 @@ const styles = StyleSheet.create({
   matchDate:          { color: '#707070', fontSize: 11 },
   statusBadge:        { fontSize: 11, fontWeight: '600' },
 
-  // ── Floating button ──────────────────────────────────────────────────────
-  floatingWrap:       {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 16, paddingBottom: 24, paddingTop: 10,
-    backgroundColor: 'rgba(10,12,16,0.92)',
-    borderTopWidth: 1, borderTopColor: '#1E2330',
+  // ═══ FAB ═══
+  fab: {
+    position: 'absolute',
+    bottom: 30,
+    alignSelf: 'center',
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 50,
+    minWidth: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  floatingBtn:        {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 15, borderRadius: 14, gap: 10,
-  },
-  floatingBtnActive:  {
+  fabActive: {
     backgroundColor: '#2ECC71',
-    shadowColor: '#2ECC71', shadowOpacity: 0.7, shadowRadius: 14, elevation: 10,
+    shadowColor: '#2ECC71',
+    shadowOpacity: 0.8,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 12,
   },
-  floatingBtnDisabled:{ backgroundColor: '#15181F', borderWidth: 1, borderColor: '#2A2D35' },
-  floatingBtnText:    { color: '#000', fontWeight: 'bold', fontSize: 17 },
-  floatingBadge:      { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
-  floatingBadgeActive:  { backgroundColor: 'rgba(0,0,0,0.2)' },
-  floatingBadgeDisabled:{ backgroundColor: '#1C1F26' },
-  floatingBadgeText:  { color: '#000', fontWeight: 'bold', fontSize: 13 },
+  fabInactive: {
+    backgroundColor: '#1C1F26',
+    borderWidth: 1,
+    borderColor: '#2A2D35',
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  fabText: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 16,
+    letterSpacing: 0.5,
+  },
 });

@@ -5,6 +5,15 @@ export type MatchStatus = 'SCHEDULED' | 'FINISHED' | 'LIVE' | 'ALL';
 
 const FOOTBALL_API_BASE = 'https://api.football-data.org/v4';
 
+function getMatchesUrl(competition: string, params: URLSearchParams): string {
+  const query = params.toString();
+  // En web/produccion usamos el proxy para evitar CORS
+  if (typeof window !== 'undefined' && !__DEV__) {
+    return `/api/matches?competition=${competition}${query ? '&' + query : ''}`;
+  }
+  return `${FOOTBALL_API_BASE}/competitions/${competition}/matches${query ? '?' + query : ''}`;
+}
+
 export class AdminService {
 
   static async isAdmin(): Promise<boolean> {
@@ -32,9 +41,6 @@ export class AdminService {
       dateTo?: string;
     }
   ) {
-    const apiKey = process.env.EXPO_PUBLIC_FOOTBALL_API_KEY;
-    if (!apiKey) throw new Error('EXPO_PUBLIC_FOOTBALL_API_KEY no configurada en .env');
-
     const params = new URLSearchParams();
 
     const md = options?.matchday;
@@ -52,10 +58,17 @@ export class AdminService {
       if (st !== 'ALL') params.set('status', st);
     }
 
-    const query = params.toString();
-    const url = `${FOOTBALL_API_BASE}/competitions/${competition}/matches${query ? '?' + query : ''}`;
+    const url = getMatchesUrl(competition, params);
 
-    const res = await fetch(url, { headers: { 'X-Auth-Token': apiKey } });
+    const headers: Record<string, string> = {};
+    // Solo mandamos el API key directo si NO vamos por el proxy
+    if (typeof window === 'undefined' || __DEV__) {
+      const apiKey = process.env.EXPO_PUBLIC_FOOTBALL_API_KEY;
+      if (!apiKey) throw new Error('EXPO_PUBLIC_FOOTBALL_API_KEY no configurada en .env');
+      headers['X-Auth-Token'] = apiKey;
+    }
+
+    const res = await fetch(url, { headers });
     if (!res.ok) {
       const json = await res.json().catch(() => null);
       const msg = json?.message ?? await res.text();
@@ -168,7 +181,6 @@ export class AdminService {
     return data;
   }
 
-  /** Cuenta jugadores con pago confirmado */
   static async getJugadoresPagados(quinielaId: string): Promise<number> {
     const { count } = await supabase
       .from('participaciones')

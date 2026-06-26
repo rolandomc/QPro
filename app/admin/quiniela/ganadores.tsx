@@ -141,7 +141,7 @@ export default function GanadoresScreen() {
                 });
               }
 
-              // ── BUG FIX: marcar la quiniela como finalizada ──
+              // ─ Marcar quiniela como finalizada
               const { error: errFin } = await supabase
                 .from('quinielas')
                 .update({ estado: 'finalizada' })
@@ -168,8 +168,14 @@ export default function GanadoresScreen() {
     );
   };
 
-  const premioYaDistribuido = participantes.some(p => (p.premio_ganado ?? 0) > 0);
-  const premioTotal         = quiniela?.premio_total ?? 0;
+  // ── Premio ya distribuido si: alguna participación es 'ganador',
+  //    hay premio_ganado > 0, O la quiniela ya está 'finalizada'
+  const premioYaDistribuido =
+    quiniela?.estado === 'finalizada' ||
+    participantes.some(p => p.estado === 'ganador') ||
+    participantes.some(p => (p.premio_ganado ?? 0) > 0);
+
+  const premioTotal = quiniela?.premio_total ?? 0;
 
   if (loading) return (
     <SafeAreaView style={styles.container}>
@@ -204,7 +210,7 @@ export default function GanadoresScreen() {
           </View>
         </View>
 
-        {/* Estado badge si ya está finalizada */}
+        {/* Badge estado */}
         {quiniela?.estado === 'finalizada' && (
           <View style={styles.finalizadaBadge}>
             <Text style={styles.finalizadaText}>✅ Quiniela finalizada</Text>

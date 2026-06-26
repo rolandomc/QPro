@@ -13,8 +13,8 @@ interface Props {
   estado: 'abierta' | 'cerrada' | 'finalizada';
   totalPartidos: number;
   fechaCierre?: string;
-  jugadoresMinimos?: number;  // viene de jugadores_minimos en BD
-  porcentajeAdmin?: number;   // viene de porcentaje_admin en BD
+  jugadoresMinimos?: number;
+  porcentajeAdmin?: number;
 }
 
 export function QuinielaCard({
@@ -26,7 +26,7 @@ export function QuinielaCard({
   estado,
   totalPartidos,
   fechaCierre,
-  jugadoresMinimos = 0,   // 0 = sin mínimo configurado
+  jugadoresMinimos = 0,
   porcentajeAdmin  = 0,
 }: Props) {
   const router = useRouter();
@@ -58,7 +58,7 @@ export function QuinielaCard({
   const pozoActual       = jugadoresPagados * precioEntrada;
   const premioCalculado  = tieneMinimo && porcentajeAdmin > 0
     ? pozoActual * (1 - porcentajeAdmin / 100)
-    : premioTotal;  // fallback al valor guardado en BD
+    : premioTotal;
   const minimoAlcanzado  = tieneMinimo ? jugadoresPagados >= jugadoresMinimos : true;
   const faltanJugadores  = Math.max(0, jugadoresMinimos - jugadoresPagados);
   const premioVisible    = !tieneMinimo || minimoAlcanzado;
@@ -66,8 +66,10 @@ export function QuinielaCard({
   const estadoColor = estado === 'abierta' ? '#2ECC71' : estado === 'cerrada' ? '#E74C3C' : '#A0A0A0';
   const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🔴 Cerrada' : '✅ Finalizada';
 
+  const goToDetail = () => router.push(`/quiniela/${id}`);
+
   return (
-    <View style={styles.card}>
+    <TouchableOpacity style={styles.card} onPress={goToDetail} activeOpacity={0.85}>
 
       {/* Header */}
       <View style={styles.cardHeader}>
@@ -104,7 +106,7 @@ export function QuinielaCard({
         </View>
       </View>
 
-      {/* Barra de progreso — solo si hay mínimo configurado */}
+      {/* Barra de progreso */}
       {tieneMinimo && (
         <View style={styles.pozoBox}>
           {!minimoAlcanzado ? (
@@ -127,18 +129,17 @@ export function QuinielaCard({
         </View>
       )}
 
-      {/* Botón Participar */}
+      {/* Botón Ver / Participar */}
       <TouchableOpacity
         style={[styles.button, estado !== 'abierta' && styles.buttonDisabled]}
-        disabled={estado !== 'abierta'}
-        onPress={() => router.push({ pathname: '/quiniela/details', params: { id } })}
+        onPress={goToDetail}
       >
         <Text style={[styles.buttonText, estado !== 'abierta' && { color: '#707070' }]}>
-          {estado === 'abierta' ? 'Participar →' : 'No disponible'}
+          {estado === 'abierta' ? 'Participar →' : 'Ver detalle →'}
         </Text>
       </TouchableOpacity>
 
-    </View>
+    </TouchableOpacity>
   );
 }
 

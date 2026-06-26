@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar, View, ActivityIndicator, Platform } from 'react-native';
 import { supabase } from '../src/config/supabase';
+import { WebAlert, registerAlertSetter } from '../src/components/WebAlert';
 
 export default function RootLayout() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -9,17 +10,22 @@ export default function RootLayout() {
   const router = useRouter();
   const segments = useSegments();
 
+  // Estado global del WebAlert
+  const [alertCfg, setAlertCfg] = useState<any>({ visible: false, title: '', message: '', buttons: [] });
+
+  useEffect(() => {
+    // Registra el setter para que showAlert() funcione globalmente
+    registerAlertSetter((cfg) => setAlertCfg({ ...cfg, visible: true }));
+  }, []);
+
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      // Manifest
       if (!document.querySelector('link[rel="manifest"]')) {
         const link = document.createElement('link');
         link.rel = 'manifest';
         link.href = '/manifest.json';
         document.head.appendChild(link);
       }
-
-      // iOS PWA: notch y status bar negros
       const metaTags = [
         { name: 'apple-mobile-web-app-capable', content: 'yes' },
         { name: 'apple-mobile-web-app-status-bar-style', content: 'black' },
@@ -34,8 +40,6 @@ export default function RootLayout() {
           document.head.appendChild(meta);
         }
       });
-
-      // Service Worker
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => {});
       }
@@ -56,11 +60,8 @@ export default function RootLayout() {
   useEffect(() => {
     if (!isInitialized) return;
     const inAuthGroup = segments[0] === 'auth';
-    if (!session && !inAuthGroup) {
-      router.replace('/auth/login');
-    } else if (session && inAuthGroup) {
-      router.replace('/(tabs)');
-    }
+    if (!session && !inAuthGroup) router.replace('/auth/login');
+    else if (session && inAuthGroup) router.replace('/(tabs)');
   }, [session, isInitialized, segments]);
 
   if (!isInitialized) {
@@ -81,11 +82,17 @@ export default function RootLayout() {
         <Stack.Screen name="quiniela/details" />
         <Stack.Screen name="admin/index" />
         <Stack.Screen name="admin/create" />
-        <Stack.Screen
-          name="wallet/index"
-          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-        />
+        <Stack.Screen name="wallet/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       </Stack>
+
+      {/* Modal global para web */}
+      <WebAlert
+        visible={alertCfg.visible}
+        title={alertCfg.title}
+        message={alertCfg.message}
+        buttons={alertCfg.buttons}
+        onClose={() => setAlertCfg((prev: any) => ({ ...prev, visible: false }))}
+      />
     </>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   StyleSheet, Text, View, ActivityIndicator,
-  Alert, TouchableOpacity, FlatList,
+  TouchableOpacity, FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -9,6 +9,7 @@ import ProgressBar from '../../src/components/ProgressBar';
 import MatchSelectionCard from '../../src/components/MatchSelectionCard';
 import { QuinielasService } from '../../src/services/quinielas.service';
 import { supabase } from '../../src/config/supabase';
+import { showAlert } from '../../src/components/WebAlert';
 
 export default function QuinielaDetailsScreen() {
   const router = useRouter();
@@ -36,7 +37,7 @@ export default function QuinielaDetailsScreen() {
           setPartidos(partidosData || []);
           setYaParticipo(yaParticipoData);
         } catch (e: any) {
-          Alert.alert('Error', e.message);
+          showAlert('Error', e.message);
         } finally {
           setLoading(false);
         }
@@ -54,11 +55,13 @@ export default function QuinielaDetailsScreen() {
     if (yaParticipo) return;
     const sinSeleccionar = partidos.filter(p => !selecciones[p.id]);
     if (sinSeleccionar.length > 0) {
-      Alert.alert('Faltan selecciones', `Aún te faltan ${sinSeleccionar.length} partido(s) por seleccionar.`);
+      showAlert('Faltan selecciones', `Aún te faltan ${sinSeleccionar.length} partido(s) por seleccionar.`, [
+        { text: 'Entendido' },
+      ]);
       return;
     }
 
-    Alert.alert(
+    showAlert(
       '🎉 Confirmar Participación',
       `¿Confirmar tu quiniela?\n\nCosto: $${quiniela?.precio_entrada ?? 50} MXN\n\nUna vez confirmada no podrás cambiar tus selecciones.`,
       [
@@ -69,13 +72,13 @@ export default function QuinielaDetailsScreen() {
             setSaving(true);
             try {
               await QuinielasService.guardarSelecciones(id, selecciones);
-              Alert.alert(
+              showAlert(
                 '✅ ¡Registrado!',
                 '¡Tus selecciones han sido guardadas! Buena suerte 🍀',
                 [{ text: 'Ver mis quinielas', onPress: () => router.replace('/(tabs)') }]
               );
             } catch (e: any) {
-              Alert.alert('Error al guardar', e.message);
+              showAlert('Error al guardar', e.message);
             } finally {
               setSaving(false);
             }

@@ -54,10 +54,17 @@ export default function TabLayout() {
       tabBarStyle: {
         backgroundColor: colors.card,
         borderTopColor: colors.border,
-        // Evita que los iconos bajen demasiado en PWA/web
-        height: Platform.OS === 'web' ? 60 : undefined,
-        paddingBottom: Platform.OS === 'web' ? 8 : undefined,
-        paddingTop: Platform.OS === 'web' ? 8 : undefined,
+        height: Platform.OS === 'web' ? 56 : undefined,
+        paddingBottom: Platform.OS === 'web' ? 4 : undefined,
+        paddingTop: Platform.OS === 'web' ? 4 : undefined,
+        position: Platform.OS === 'web' ? 'fixed' : 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+      },
+      tabBarLabelStyle: {
+        fontSize: 11,
+        marginBottom: Platform.OS === 'web' ? 2 : 0,
       },
       tabBarActiveTintColor: colors.primary,
       tabBarInactiveTintColor: colors.textMuted,

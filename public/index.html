@@ -4,20 +4,35 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
-    <!-- PWA / notch negro -->
+    <!-- PWA -->
     <meta name="theme-color" content="#0A0C10" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <!-- black-translucent: la app se extiende bajo el notch, sin barra blanca -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="QPro" />
 
     <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="/assets/images/icon.png" />
+    <link rel="apple-touch-icon" href="/icon.png" />
 
     <title>QPro</title>
 
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body, #root { height: 100%; background-color: #0A0C10; }
+
+      html, body {
+        height: 100%;
+        background-color: #0A0C10;
+        /* Extiende el fondo oscuro al area del notch */
+        background-attachment: fixed;
+      }
+
+      #root {
+        height: 100%;
+        background-color: #0A0C10;
+        /* Empuja el contenido debajo del notch cuando black-translucent esta activo */
+        padding-top: env(safe-area-inset-top);
+        padding-top: constant(safe-area-inset-top); /* iOS < 11.2 */
+      }
     </style>
   </head>
   <body>

@@ -143,13 +143,12 @@ export default function QuinielaDetailsScreen() {
     setConfirmState('confirming');
   };
 
-  // ── Confirmar: guarda picks + abre Mercado Pago ───────────────────────────
   const handleConfirmarFinal = async () => {
     setSaving(true);
     try {
-      // 1. Guardar selecciones y crear participacion (estado pendiente)
-      const newPartId = await QuinielasService.guardarSelecciones(id, selecciones);
-      const partId = newPartId ?? participacionId;
+      // 1. Guardar selecciones -> retorna el objeto participacion
+      const participacion = await QuinielasService.guardarSelecciones(id, selecciones);
+      const partId = participacion.id ?? participacionId;
 
       // 2. Crear preferencia de pago en Mercado Pago
       const { init_point } = await MercadoPagoService.crearPreferencia(
@@ -160,8 +159,7 @@ export default function QuinielaDetailsScreen() {
       // 3. Abrir el checkout de MP en el browser
       await WebBrowser.openBrowserAsync(init_point);
 
-      // 4. Cuando el usuario vuelve a la app mostrar pantalla de éxito
-      //    (el estado real lo actualiza el webhook en el backend)
+      // 4. Mostrar pantalla de exito al volver
       setConfirmState('success');
     } catch (e: any) {
       setErrorMsg(e.message);
@@ -208,10 +206,9 @@ export default function QuinielaDetailsScreen() {
           <Text style={{ fontSize: 60, marginBottom: 20 }}>🍀</Text>
           <Text style={styles.successTitle}>¡Pago en proceso!</Text>
           <Text style={styles.successSub}>
-            Tus picks fueron guardados.{'
-'}Tu participación se confirmará cuando MP apruebe el pago.
+            {'Tus picks fueron guardados.\nTu participaci\u00f3n se confirmar\u00e1 cuando MP apruebe el pago.'}
           </Text>
-          <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/(tabs)')}>
+          <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/(tabs)/resultados')}>
             <Text style={styles.successBtnTxt}>Ver mis quinielas</Text>
           </TouchableOpacity>
         </View>

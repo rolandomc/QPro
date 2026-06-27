@@ -255,6 +255,16 @@ export default function QuinielaDetailScreen() {
   const pct = conResultado.length > 0 ? Math.round((misAciertos / conResultado.length) * 100) : 0;
   const pctColor = pct >= 70 ? '#2ECC71' : pct >= 40 ? '#F39C12' : '#E91E63';
 
+  // Premio calculado dinamicamente: participantes pagados x precio_entrada x 90%
+  const comision = quiniela?.comision ?? 0.10;
+  const premioCalculado = Math.floor(
+    totalParts * Number(quiniela?.precio_entrada ?? 0) * (1 - comision)
+  );
+  // Si la quiniela ya esta finalizada y tiene premio_total guardado, usarlo
+  const bolsa = (quiniela?.estado === 'finalizada' && Number(quiniela?.premio_total) > 0)
+    ? Number(quiniela.premio_total)
+    : premioCalculado;
+
   if (loading) return (
     <SafeAreaView style={s.container}>
       <View style={s.centered}><ActivityIndicator size="large" color="#9B59B6" /></View>
@@ -295,7 +305,7 @@ export default function QuinielaDetailScreen() {
           {quiniela && <StatusPill estado={quiniela.estado} />}
         </View>
         <View style={s.bolsaBox}>
-          <Text style={s.bolsaVal}>${Number(quiniela?.premio_total || 0).toLocaleString()}</Text>
+          <Text style={s.bolsaVal}>${bolsa.toLocaleString()}</Text>
           <Text style={s.bolsaLbl}>BOLSA</Text>
         </View>
         {miPart && (

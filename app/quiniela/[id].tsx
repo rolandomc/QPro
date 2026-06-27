@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, ActivityIndicator,
-  TouchableOpacity, RefreshControl, Animated, Alert, Modal,
+  TouchableOpacity, RefreshControl, Animated, Alert, Modal, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
 import { supabase } from '../../src/config/supabase';
 import QuinielaShareCard from '../../src/components/QuinielaShareCard';
+import { captureView } from '../../src/utils/captureView';
 
 const LABEL: Record<string, string> = { local: '1', empate: 'X', visitante: '2' };
 const RES_LABEL: Record<string, string> = { local: 'Local', empate: 'Empate', visitante: 'Visitante' };
@@ -105,30 +105,44 @@ export default function QuinielaDetailScreen() {
 
   const myUserId = useRef<string | null>(null);
   const myUsername = useRef<string>('Jugador');
-  // ref al View raiz del card — lo usa captureRef()
   const cardViewRef = useRef<View>(null);
 
   const compartirImagen = useCallback(async () => {
     if (!quiniela || partidos.length === 0) return;
 
+    // En web no existe expo-sharing de archivos, descargamos directamente
+    if (Platform.OS === 'web') {
+      setSharing(true);
+      setShowCard(true);
+      setTimeout(async () => {
+        try {
+          const dataUrl = await captureView(cardViewRef);
+          // Descarga automática en el browser
+          const a = document.createElement('a');
+          a.href = dataUrl;
+          a.download = `${quiniela?.titulo ?? 'quiniela'}.png`;
+          a.click();
+        } catch (e: any) {
+          Alert.alert('Error', `No se pudo generar la imagen.\n\n${e?.message}`);
+        } finally {
+          setShowCard(false);
+          setSharing(false);
+        }
+      }, 600);
+      return;
+    }
+
+    // Nativo (iOS / Android)
     const canShare = await Sharing.isAvailableAsync();
     if (!canShare) {
       Alert.alert('No disponible', 'Tu dispositivo no soporta compartir archivos.');
       return;
     }
-
     setSharing(true);
     setShowCard(true);
-
-    // Esperar a que React pinte el card antes de capturarlo
     setTimeout(async () => {
       try {
-        const uri = await captureRef(cardViewRef, {
-          format: 'png',
-          quality: 1,
-          result: 'tmpfile',
-        });
-
+        const uri = await captureView(cardViewRef);
         await Sharing.shareAsync(uri, {
           mimeType: 'image/png',
           dialogTitle: quiniela?.titulo ?? 'Compartir quiniela',
@@ -251,8 +265,6 @@ export default function QuinielaDetailScreen() {
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
-
-      {/* Card invisible para captura — dentro del viewport, opacidad mínima */}
       {showCard && (
         <View style={s.captureLayer} pointerEvents="none">
           <QuinielaShareCard
@@ -382,7 +394,6 @@ export default function QuinielaDetailScreen() {
                 </View>
               );
             })}
-
             {miPart && (
               <TouchableOpacity onPress={compartirImagen} disabled={sharing} style={[s.shareFullBtn, sharing && { opacity: 0.4 }]} activeOpacity={0.75}>
                 <Text style={s.shareFullBtnTxt}>{sharing ? '⏳ Generando imagen…' : '📤  Compartir imagen de mis picks'}</Text>
@@ -422,7 +433,6 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0C10' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scroll: { padding: 14, paddingBottom: 40 },
-  // El card queda en la esquina superior-izquierda, casi invisible
   captureLayer: { position: 'absolute', top: 0, left: 0, opacity: 0.01, zIndex: -1 },
   sharingOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
   sharingBox: { backgroundColor: '#0D1117', borderRadius: 16, padding: 28, alignItems: 'center', gap: 14, borderWidth: 1, borderColor: '#9B59B655' },

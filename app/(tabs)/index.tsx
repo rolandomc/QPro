@@ -82,7 +82,7 @@ export default function QuinielasScreen() {
             premioTotal={item.premio_total}
             estado={item.estado}
             totalPartidos={item.partidos?.[0]?.count ?? 0}
-            fechaCierre={item.fecha_cierre}
+            fechaCierre={item.fecha_primer_partido}   {/* ← ahora usa el primer partido */}
             jugadoresMinimos={item.jugadores_minimos ?? 0}
             porcentajeAdmin={item.porcentaje_admin ?? 0}
             jugadoresCount={item.jugadores_count ?? 0}

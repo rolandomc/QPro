@@ -12,22 +12,43 @@ export const QuinielasService = {
       .order('created_at', { ascending: false });
     if (error) throw error;
 
-    if (!user || !data) return data;
+    if (!data) return data;
 
-    // Verificar en una sola query cuáles ya tiene el usuario
+    // Obtener el primer partido (orden asc) de cada quiniela para el countdown
     const ids = data.map((q: any) => q.id);
-    const { data: misParticipaciones } = await supabase
-      .from('participaciones')
-      .select('quiniela_id')
-      .eq('user_id', user.id)
-      .in('quiniela_id', ids);
 
-    const yaParticipo = new Set((misParticipaciones || []).map((p: any) => p.quiniela_id));
+    const [misParticipacionesRes, primerPartidoRes] = await Promise.all([
+      user
+        ? supabase
+            .from('participaciones')
+            .select('quiniela_id')
+            .eq('user_id', user.id)
+            .in('quiniela_id', ids)
+        : Promise.resolve({ data: [] }),
+      supabase
+        .from('partidos')
+        .select('quiniela_id, fecha_partido')
+        .in('quiniela_id', ids)
+        .order('orden', { ascending: true }),
+    ]);
+
+    // Quedarnos solo con el primer partido por quiniela
+    const primerPartidoMap: Record<string, string> = {};
+    for (const p of (primerPartidoRes.data || [])) {
+      if (!primerPartidoMap[p.quiniela_id] && p.fecha_partido) {
+        primerPartidoMap[p.quiniela_id] = p.fecha_partido;
+      }
+    }
+
+    const yaParticipo = new Set(
+      ((misParticipacionesRes as any).data || []).map((p: any) => p.quiniela_id)
+    );
 
     return data.map((q: any) => ({
       ...q,
-      jugadores_count: q.participaciones?.[0]?.count ?? 0,
-      ya_participo: yaParticipo.has(q.id),
+      jugadores_count:    q.participaciones?.[0]?.count ?? 0,
+      ya_participo:       yaParticipo.has(q.id),
+      fecha_primer_partido: primerPartidoMap[q.id] ?? q.fecha_cierre ?? null,
     }));
   },
 

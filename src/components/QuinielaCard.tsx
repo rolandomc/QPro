@@ -12,7 +12,7 @@ interface Props {
   premioTotal: number;
   estado: 'abierta' | 'cerrada' | 'finalizada';
   totalPartidos: number;
-  fechaCierre?: string;
+  fechaCierre?: string;  // ahora representa fecha del primer partido
   jugadoresMinimos?: number;
   porcentajeAdmin?: number;
   modoResultados?: boolean;
@@ -35,15 +35,17 @@ function SkeletonBlock({ width, height = 18, style }: { width: number | string; 
 }
 
 // ─── Countdown hook ──────────────────────────────────────────────────────────
-function useCountdown(fechaCierre?: string, estado?: string) {
+function useCountdown(fechaPrimerPartido?: string, estado?: string) {
   const [label, setLabel] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!fechaCierre || estado !== 'abierta') { setLabel(null); return; }
+    if (!fechaPrimerPartido || estado !== 'abierta') { setLabel(null); return; }
 
     const calc = () => {
-      const diff = new Date(fechaCierre).getTime() - Date.now();
-      if (diff <= 0) { setLabel('⏰ Cerrando...'); return; }
+      const diff = new Date(fechaPrimerPartido).getTime() - Date.now();
+
+      // Ya pasó la hora del primer partido → no mostrar countdown
+      if (diff <= 0) { setLabel(null); return; }
 
       const totalSecs = Math.floor(diff / 1000);
       const days  = Math.floor(totalSecs / 86400);
@@ -52,18 +54,18 @@ function useCountdown(fechaCierre?: string, estado?: string) {
       const secs  = totalSecs % 60;
 
       if (days > 0) {
-        setLabel(`⏱ Cierra en ${days}d ${hours}h`);
+        setLabel(`⏱ Primer partido en ${days}d ${hours}h`);
       } else if (hours > 0) {
-        setLabel(`⏱ Cierra en ${hours}h ${String(mins).padStart(2,'0')}m`);
+        setLabel(`⏱ Primer partido en ${hours}h ${String(mins).padStart(2,'0')}m`);
       } else {
-        setLabel(`⏱ Cierra en ${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`);
+        setLabel(`⚠️ ¡Últimos ${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')} para participar!`);
       }
     };
 
     calc();
     const interval = setInterval(calc, 1000);
     return () => clearInterval(interval);
-  }, [fechaCierre, estado]);
+  }, [fechaPrimerPartido, estado]);
 
   return label;
 }
@@ -163,18 +165,13 @@ export function QuinielaCard({
 
   const handlePress = () => {
     if (modoResultados) {
-      // Desde pestaña Resultados → siempre ver picks/resultado
       router.push(`/quiniela/${id}`);
       return;
     }
-
     if (estado === 'abierta') {
-      // Quiniela abierta: ir a details (tanto para participar como para editar picks)
       router.push(`/quiniela/details?id=${id}`);
       return;
     }
-
-    // Cerrada o finalizada → ver detalle
     router.push(`/quiniela/${id}`);
   };
 
@@ -206,7 +203,6 @@ export function QuinielaCard({
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress} activeOpacity={0.85}>
 
-      {/* Header: título + badge estado + share */}
       <View style={styles.cardHeader}>
         <Text style={styles.title}>🏆 {titulo}</Text>
         <View style={styles.headerRight}>
@@ -221,14 +217,12 @@ export function QuinielaCard({
 
       {descripcion ? <Text style={styles.descripcion}>{descripcion}</Text> : null}
 
-      {/* Countdown — solo cuando está abierta y hay fecha */}
       {countdown && (
         <View style={styles.countdownRow}>
           <Text style={styles.countdownText}>{countdown}</Text>
         </View>
       )}
 
-      {/* Stats */}
       <View style={styles.statsRow}>
         <View style={styles.stat}>
           <Text style={styles.statValue}>{totalPartidos}</Text>
@@ -263,7 +257,6 @@ export function QuinielaCard({
         </View>
       </View>
 
-      {/* Barra de progreso */}
       {tieneMinimo && (
         <View style={styles.pozoBox}>
           {isLoading ? (

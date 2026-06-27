@@ -17,8 +17,8 @@ const TIPO_CONFIG: Record<string, { icon: string; color: string }> = {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const [userEmail,     setUserEmail]     = useState('');
   const [username,      setUsername]      = useState('');
+  const [displayName,   setDisplayName]   = useState('');
   const [isAdmin,       setIsAdmin]       = useState(false);
   const [loading,       setLoading]       = useState(true);
   const [signingOut,    setSigningOut]    = useState(false);
@@ -35,13 +35,25 @@ export default function ProfileScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      setUserEmail(user.email ?? '');
       const adminStatus = await AdminService.isAdmin();
       setIsAdmin(adminStatus);
 
+      // Leer perfil: username, display_name, nombre, apellido
       const { data: profile } = await supabase
-        .from('profiles').select('username').eq('id', user.id).single();
-      if (profile?.username) setUsername(profile.username);
+        .from('profiles')
+        .select('username, display_name, nombre, apellido')
+        .eq('id', user.id)
+        .single();
+
+      const uname = profile?.username ?? '';
+      const dname = profile?.display_name
+        || (profile?.nombre && profile?.apellido
+              ? `${profile.nombre} ${profile.apellido}`.trim()
+              : '')
+        || uname;
+
+      setUsername(uname);
+      setDisplayName(dname);
 
       // Traemos todas las participaciones con info de quiniela
       const { data: parts } = await supabase
@@ -53,8 +65,6 @@ export default function ProfileScreen() {
         `)
         .eq('user_id', user.id);
 
-      // Finalizadas = participaciones donde la quiniela está finalizada
-      // O el estado ya fue procesado (ganador / perdedor)
       const finalizadas = (parts || []).filter((p: any) =>
         p.quinielas?.estado === 'finalizada' ||
         p.estado === 'ganador' ||
@@ -78,7 +88,6 @@ export default function ProfileScreen() {
       const pctAcierto = totalPts > 0 ? Math.round((totalAc / totalPts) * 100) : 0;
       const roi        = invertido > 0 ? Math.round(((ganado - invertido) / invertido) * 100) : 0;
 
-      // Mejor posicion en quinielas finalizadas
       let mejorPos: number | null = null;
       for (const p of finalizadas) {
         const { data: rank } = await supabase
@@ -128,9 +137,10 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const initials = username
-    ? username.substring(0, 2).toUpperCase()
-    : userEmail.substring(0, 2).toUpperCase();
+  // Iniciales: primeras 2 letras del displayName o username
+  const initials = (displayName || username)
+    ? (displayName || username).substring(0, 2).toUpperCase()
+    : '?';
 
   const roiColor = stats.roi >= 0 ? '#2ECC71' : '#E91E63';
   const noLeidas = notifs.filter(n => !n.leida).length;
@@ -167,8 +177,15 @@ export default function ProfileScreen() {
               </View>
             )}
           </View>
-          <Text style={st.nombre}>{username || userEmail}</Text>
-          <Text style={st.email}>{userEmail}</Text>
+
+          {/* Nombre completo */}
+          <Text style={st.nombre}>{displayName || username || 'Usuario'}</Text>
+          {/* @username — siempre visible */}
+          {username ? (
+            <View style={st.usernamePill}>
+              <Text style={st.usernamePillTxt}>@{username}</Text>
+            </View>
+          ) : null}
 
           <View style={st.nivelBox}>
             <View style={st.nivelRow}>
@@ -315,8 +332,11 @@ const st = StyleSheet.create({
                       borderRadius: 20, paddingHorizontal: 12, paddingVertical: 3,
                       borderWidth: 1, borderColor: '#FFD700' },
   adminPillTxt:     { color: '#FFD700', fontWeight: 'bold', fontSize: 11, letterSpacing: 1 },
-  nombre:           { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 3 },
-  email:            { color: '#404040', fontSize: 12, marginBottom: 16 },
+  nombre:           { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 6 },
+  usernamePill:     { backgroundColor: 'rgba(155,89,182,0.12)', borderRadius: 20,
+                      paddingHorizontal: 14, paddingVertical: 4, marginBottom: 16,
+                      borderWidth: 1, borderColor: '#9B59B655' },
+  usernamePillTxt:  { color: '#9B59B6', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
   nivelBox:         { width: '100%', backgroundColor: '#0D1117', borderRadius: 14, padding: 14,
                       borderWidth: 1, borderColor: '#1E2330' },
   nivelRow:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },

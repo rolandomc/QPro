@@ -1,14 +1,9 @@
-import React, { forwardRef, useImperativeHandle, useRef } from 'react';
+import React, { forwardRef } from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
-import ViewShot from 'react-native-view-shot';
 
 const PICK_LABEL: Record<string, string> = { local: '1', empate: 'X', visitante: '2' };
 const PICK_EMOJI: Record<string, string> = { local: '🏠', empate: '🤝', visitante: '✈️' };
 const RES_LABEL: Record<string, string> = { local: 'Local', empate: 'Empate', visitante: 'Visitante' };
-
-export interface QuinielaShareCardHandle {
-  capture: () => Promise<string>;
-}
 
 interface Props {
   quiniela: any;
@@ -19,25 +14,20 @@ interface Props {
   totalParts?: number;
 }
 
-const QuinielaShareCard = forwardRef<QuinielaShareCardHandle, Props>(({ quiniela, partidos, misSelec, username = 'Jugador', miPosicion, totalParts }, ref) => {
-  const shotRef = useRef<ViewShot>(null);
-
-  useImperativeHandle(ref, () => ({
-    capture: async () => {
-      const uri = await shotRef.current?.capture?.();
-      if (!uri) throw new Error('capture_failed');
-      return uri;
-    },
-  }), []);
-
-  const conRes = partidos.filter(p => p.resultado !== null);
-  const aciertos = conRes.filter(p => misSelec[p.id] === p.resultado).length;
+// El ref apunta directamente al View raíz que se pasa a captureRef()
+const QuinielaShareCard = forwardRef<View, Props>((
+  { quiniela, partidos, misSelec, username = 'Jugador', miPosicion, totalParts },
+  ref
+) => {
+  const conRes = partidos.filter((p: any) => p.resultado !== null);
+  const aciertos = conRes.filter((p: any) => misSelec[p.id] === p.resultado).length;
   const pct = conRes.length > 0 ? Math.round((aciertos / conRes.length) * 100) : null;
   const pctColor = pct === null ? '#00E5FF' : pct >= 70 ? '#2ECC71' : pct >= 40 ? '#F39C12' : '#E91E63';
   const bolsa = `$${Number(quiniela?.premio_total || 0).toLocaleString()}`;
 
   return (
-    <ViewShot ref={shotRef} options={{ format: 'png', quality: 1, result: 'tmpfile' }} style={c.card}>
+    <View ref={ref} style={c.card} collapsable={false}>
+      {/* ─ Header branding ─ */}
       <View style={c.brandRow}>
         <Image source={require('../../assets/images/icon.png')} style={c.logo} resizeMode="contain" />
         <View>
@@ -51,8 +41,10 @@ const QuinielaShareCard = forwardRef<QuinielaShareCardHandle, Props>(({ quiniela
         </View>
       </View>
 
+      {/* ─ Título ─ */}
       <Text style={c.titulo} numberOfLines={2}>{quiniela?.titulo ?? 'Quiniela'}</Text>
 
+      {/* ─ Usuario ─ */}
       <View style={c.userRow}>
         <View style={c.userAvatar}>
           <Text style={c.userAvatarTxt}>{username[0]?.toUpperCase() ?? '?'}</Text>
@@ -67,14 +59,14 @@ const QuinielaShareCard = forwardRef<QuinielaShareCardHandle, Props>(({ quiniela
 
       <View style={c.divider} />
 
-      {partidos.map((p, i) => {
+      {/* ─ Picks ─ */}
+      {partidos.map((p: any, i: number) => {
         const pick = misSelec[p.id];
         const tieneRes = p.resultado !== null;
         const acerto = tieneRes && pick === p.resultado;
         const fallo = tieneRes && !!pick && pick !== p.resultado;
         const neon = acerto ? '#2ECC71' : fallo ? '#E91E63' : '#00E5FF';
         const icon = tieneRes ? (acerto ? '✅' : '❌') : '⏳';
-
         return (
           <View key={p.id} style={[c.row, { borderLeftColor: neon }]}>
             <Text style={c.rowNum}>{i + 1}</Text>
@@ -85,7 +77,10 @@ const QuinielaShareCard = forwardRef<QuinielaShareCardHandle, Props>(({ quiniela
               </Text>
               {tieneRes && <Text style={[c.rowRes, { color: neon }]}>{RES_LABEL[p.resultado]}</Text>}
             </View>
-            <View style={[c.pickBadge, { borderColor: neon, backgroundColor: acerto ? 'rgba(46,204,113,0.12)' : fallo ? 'rgba(233,30,99,0.1)' : 'rgba(0,229,255,0.08)' }]}>
+            <View style={[c.pickBadge, {
+              borderColor: neon,
+              backgroundColor: acerto ? 'rgba(46,204,113,0.12)' : fallo ? 'rgba(233,30,99,0.1)' : 'rgba(0,229,255,0.08)',
+            }]}>
               <Text style={c.pickEmoji}>{pick ? PICK_EMOJI[pick] : '❓'}</Text>
               <Text style={[c.pickLbl, { color: neon }]}>{pick ? PICK_LABEL[pick] : '?'}</Text>
             </View>
@@ -95,6 +90,7 @@ const QuinielaShareCard = forwardRef<QuinielaShareCardHandle, Props>(({ quiniela
 
       <View style={c.divider} />
 
+      {/* ─ Stats ─ */}
       <View style={c.statsRow}>
         {pct !== null && (
           <View style={c.statBox}>
@@ -107,15 +103,16 @@ const QuinielaShareCard = forwardRef<QuinielaShareCardHandle, Props>(({ quiniela
           <Text style={c.statLbl}>% ACIERTO</Text>
         </View>
         <View style={c.statBox}>
-          <Text style={[c.statVal, { color: '#9B59B6' }]}>{partidos.filter(p => p.resultado === null).length}</Text>
+          <Text style={[c.statVal, { color: '#9B59B6' }]}>{partidos.filter((p: any) => p.resultado === null).length}</Text>
           <Text style={c.statLbl}>PENDIENTES</Text>
         </View>
       </View>
 
+      {/* ─ Footer ─ */}
       <View style={c.footer}>
         <Text style={c.footerTxt}>Descarga QPro y compite 🏆</Text>
       </View>
-    </ViewShot>
+    </View>
   );
 });
 
@@ -133,7 +130,7 @@ const c = StyleSheet.create({
   brandSlogan: { color: '#505060', fontSize: 10, letterSpacing: 1.5 },
   brandSpacer: { flex: 1 },
   bolsaPill: { alignItems: 'flex-end', backgroundColor: 'rgba(46,204,113,0.08)', borderWidth: 1, borderColor: '#2ECC7155', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
-  bolsaVal: { color: '#2ECC71', fontSize: 18, fontWeight: 'bold', textShadowColor: '#2ECC71', textShadowRadius: 6 },
+  bolsaVal: { color: '#2ECC71', fontSize: 18, fontWeight: 'bold' },
   bolsaLbl: { color: '#2ECC71', fontSize: 8, letterSpacing: 2, opacity: 0.7 },
   titulo: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 14, lineHeight: 22 },
   userRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },

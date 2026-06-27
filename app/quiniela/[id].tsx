@@ -6,8 +6,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { captureRef } from 'react-native-view-shot';
 import { supabase } from '../../src/config/supabase';
-import QuinielaShareCard, { QuinielaShareCardHandle } from '../../src/components/QuinielaShareCard';
+import QuinielaShareCard from '../../src/components/QuinielaShareCard';
 
 const LABEL: Record<string, string> = { local: '1', empate: 'X', visitante: '2' };
 const RES_LABEL: Record<string, string> = { local: 'Local', empate: 'Empate', visitante: 'Visitante' };
@@ -69,9 +70,7 @@ function RankRow({ item, totalPartidos, isLast }: { item: any; totalPartidos: nu
       <View style={s.rankInner}>
         <Text style={[s.rankPos, { color: posColor, fontSize: item.pos <= 3 ? 22 : 14 }]}>{medalla}</Text>
         <View style={{ flex: 1 }}>
-          <Text style={[s.rankName, item.isMe && { color: '#9B59B6' }]}>
-            {item.username}{item.isMe ? '  (Tú)' : ''}
-          </Text>
+          <Text style={[s.rankName, item.isMe && { color: '#9B59B6' }]}>{item.username}{item.isMe ? '  (Tú)' : ''}</Text>
           <View style={s.rankBarWrap}>
             <View style={[s.rankBarFill, { width: `${Math.round(pct * 100)}%`, backgroundColor: barColor, shadowColor: barColor, shadowOpacity: 0.6, shadowRadius: 4 }]} />
           </View>
@@ -106,10 +105,12 @@ export default function QuinielaDetailScreen() {
 
   const myUserId = useRef<string | null>(null);
   const myUsername = useRef<string>('Jugador');
-  const shareCardRef = useRef<QuinielaShareCardHandle>(null);
+  // ref al View raiz del card — lo usa captureRef()
+  const cardViewRef = useRef<View>(null);
 
   const compartirImagen = useCallback(async () => {
     if (!quiniela || partidos.length === 0) return;
+
     const canShare = await Sharing.isAvailableAsync();
     if (!canShare) {
       Alert.alert('No disponible', 'Tu dispositivo no soporta compartir archivos.');
@@ -119,24 +120,30 @@ export default function QuinielaDetailScreen() {
     setSharing(true);
     setShowCard(true);
 
+    // Esperar a que React pinte el card antes de capturarlo
     setTimeout(async () => {
       try {
-        const uri = await shareCardRef.current?.capture();
-        if (!uri) throw new Error('capture_failed');
+        const uri = await captureRef(cardViewRef, {
+          format: 'png',
+          quality: 1,
+          result: 'tmpfile',
+        });
+
         await Sharing.shareAsync(uri, {
           mimeType: 'image/png',
           dialogTitle: quiniela?.titulo ?? 'Compartir quiniela',
           UTI: 'public.png',
         });
       } catch (e: any) {
-        if (!String(e?.message || '').includes('cancel')) {
-          Alert.alert('Error', 'No se pudo generar la imagen.');
+        const msg = String(e?.message ?? '');
+        if (!msg.includes('cancel') && !msg.includes('dismiss')) {
+          Alert.alert('Error', `No se pudo generar la imagen.\n\n${msg}`);
         }
       } finally {
         setShowCard(false);
         setSharing(false);
       }
-    }, 700);
+    }, 800);
   }, [quiniela, partidos.length]);
 
   const loadRanking = useCallback(async (userId: string, _n: number) => {
@@ -150,10 +157,7 @@ export default function QuinielaDetailScreen() {
       .order('aciertos', { ascending: false })
       .limit(20);
 
-    if (!rank || rank.length === 0) {
-      setRanking([]);
-      return;
-    }
+    if (!rank || rank.length === 0) { setRanking([]); return; }
 
     const uids = rank.map((r: any) => r.user_id);
     const { data: profs } = await supabase.from('profiles').select('id, username').in('id', uids);
@@ -165,18 +169,12 @@ export default function QuinielaDetailScreen() {
 
     if (!yoEnTop) {
       const { data: miRow } = await supabase
-        .from('participaciones')
-        .select('user_id, aciertos, estado')
-        .eq('quiniela_id', id!)
-        .eq('user_id', userId)
-        .single();
-
+        .from('participaciones').select('user_id, aciertos, estado')
+        .eq('quiniela_id', id!).eq('user_id', userId).single();
       if (miRow) {
         const { count: porDelante } = await supabase
-          .from('participaciones')
-          .select('id', { count: 'exact', head: true })
-          .eq('quiniela_id', id!)
-          .gt('aciertos', miRow.aciertos ?? 0);
+          .from('participaciones').select('id', { count: 'exact', head: true })
+          .eq('quiniela_id', id!).gt('aciertos', miRow.aciertos ?? 0);
         const miPos = (porDelante ?? 0) + 1;
         setMiPosicion(miPos);
         rows.push({ ...miRow, username: pm[userId] ?? 'Tú', pos: miPos, isMe: true, separador: true });
@@ -208,11 +206,8 @@ export default function QuinielaDetailScreen() {
       myUsername.current = myProf?.username ?? 'Jugador';
 
       const { data: part } = await supabase
-        .from('participaciones')
-        .select('id, aciertos, estado, premio_ganado, monto_pagado')
-        .eq('quiniela_id', id!)
-        .eq('user_id', user.id)
-        .single();
+        .from('participaciones').select('id, aciertos, estado, premio_ganado, monto_pagado')
+        .eq('quiniela_id', id!).eq('user_id', user.id).single();
       setMiPart(part ?? null);
 
       if (part) {
@@ -235,9 +230,8 @@ export default function QuinielaDetailScreen() {
     load();
     const channel = supabase
       .channel(`ranking-${id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` }, () => {
-        if (myUserId.current) loadRanking(myUserId.current, 0);
-      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` },
+        () => { if (myUserId.current) loadRanking(myUserId.current, 0); })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [id, load, loadRanking]);
@@ -249,20 +243,20 @@ export default function QuinielaDetailScreen() {
   const pct = conResultado.length > 0 ? Math.round((misAciertos / conResultado.length) * 100) : 0;
   const pctColor = pct >= 70 ? '#2ECC71' : pct >= 40 ? '#F39C12' : '#E91E63';
 
-  if (loading) {
-    return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}><ActivityIndicator size="large" color="#9B59B6" /></View>
-      </SafeAreaView>
-    );
-  }
+  if (loading) return (
+    <SafeAreaView style={s.container}>
+      <View style={s.centered}><ActivityIndicator size="large" color="#9B59B6" /></View>
+    </SafeAreaView>
+  );
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
+
+      {/* Card invisible para captura — dentro del viewport, opacidad mínima */}
       {showCard && (
         <View style={s.captureLayer} pointerEvents="none">
           <QuinielaShareCard
-            ref={shareCardRef}
+            ref={cardViewRef}
             quiniela={quiniela}
             partidos={partidos}
             misSelec={misSelec}
@@ -409,7 +403,6 @@ export default function QuinielaDetailScreen() {
                 <Text style={s.totalPartsText}>{totalParts} participantes</Text>
               </View>
             </View>
-
             {ranking.length === 0 ? (
               <View style={s.emptyRank}>
                 <Text style={s.emptyIcon}>🏟️</Text>
@@ -429,6 +422,7 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0C10' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scroll: { padding: 14, paddingBottom: 40 },
+  // El card queda en la esquina superior-izquierda, casi invisible
   captureLayer: { position: 'absolute', top: 0, left: 0, opacity: 0.01, zIndex: -1 },
   sharingOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
   sharingBox: { backgroundColor: '#0D1117', borderRadius: 16, padding: 28, alignItems: 'center', gap: 14, borderWidth: 1, borderColor: '#9B59B655' },
@@ -443,7 +437,7 @@ const s = StyleSheet.create({
   shareBtn: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 10, borderWidth: 1, borderColor: '#9B59B655' },
   shareBtnTxt: { fontSize: 18 },
   resumenCard: { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden', shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 12, elevation: 4 },
-  resumenNeonLine: { height: 2, backgroundColor: '#9B59B6', shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+  resumenNeonLine: { height: 2, backgroundColor: '#9B59B6' },
   resumenBody: { flexDirection: 'row', padding: 16, alignItems: 'center' },
   resumenStat: { flex: 1, alignItems: 'center' },
   resumenNum: { fontSize: 22, fontWeight: 'bold' },

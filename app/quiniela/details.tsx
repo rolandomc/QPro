@@ -5,9 +5,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import ProgressBar from '../../src/components/ProgressBar';
 import MatchSelectionCard from '../../src/components/MatchSelectionCard';
 import { QuinielasService } from '../../src/services/quinielas.service';
+import { MercadoPagoService } from '../../src/services/mercadopago.service';
 import { supabase } from '../../src/config/supabase';
 
 type ConfirmState = 'idle' | 'confirming' | 'confirmingEdit' | 'success' | 'successEdit' | 'error';
@@ -28,10 +30,8 @@ export default function QuinielaDetailsScreen() {
   const [errorMsg,        setErrorMsg]        = useState('');
   const [faltanMsg,       setFaltanMsg]       = useState('');
 
-  // Guardamos los picks originales para poder restaurarlos al cancelar
   const picksOriginalesRef = useRef<Record<string, 'local' | 'empate' | 'visitante'>>({});
 
-  // ── Cargar picks desde BD (reutilizable) ─────────────────────────────────
   const cargarPicksActuales = useCallback(async (partId: string) => {
     const { data: sels } = await supabase
       .from('selecciones')
@@ -90,17 +90,14 @@ export default function QuinielaDetailsScreen() {
     setSelecciones(prev => ({ ...prev, [partidoId]: opcion }));
   };
 
-  // ── Cancelar edicion: restaurar picks originales desde BD ────────────────
   const handleCancelarEdicion = useCallback(async () => {
     setModoEdicion(false);
     setFaltanMsg('');
     if (participacionId) {
-      // Restaurar desde ref (ya cargados, sin nueva query)
       setSelecciones({ ...picksOriginalesRef.current });
     }
   }, [participacionId]);
 
-  // ── Guardar picks editados con upsert ─────────────────────────────────────
   const handleGuardarEdicion = async () => {
     if (!participacionId) return;
     setSaving(true);
@@ -110,12 +107,10 @@ export default function QuinielaDetailsScreen() {
         partido_id,
         prediccion,
       }));
-      // upsert evita duplicate key — actualiza si ya existe, inserta si no
       const { error } = await supabase
         .from('selecciones')
         .upsert(rows, { onConflict: 'participacion_id,partido_id' });
       if (error) throw error;
-      // Actualizar ref con los nuevos picks guardados
       picksOriginalesRef.current = { ...selecciones };
       setModoEdicion(false);
       setConfirmState('successEdit');
@@ -137,7 +132,6 @@ export default function QuinielaDetailsScreen() {
     setConfirmState('confirmingEdit');
   };
 
-  // ── Primera participación ─────────────────────────────────────────────────
   const handleConfirmarClick = () => {
     if (yaParticipo) return;
     const sinSeleccionar = partidos.filter(p => !selecciones[p.id]);
@@ -149,10 +143,25 @@ export default function QuinielaDetailsScreen() {
     setConfirmState('confirming');
   };
 
+  // ── Confirmar: guarda picks + abre Mercado Pago ───────────────────────────
   const handleConfirmarFinal = async () => {
     setSaving(true);
     try {
-      await QuinielasService.guardarSelecciones(id, selecciones);
+      // 1. Guardar selecciones y crear participacion (estado pendiente)
+      const newPartId = await QuinielasService.guardarSelecciones(id, selecciones);
+      const partId = newPartId ?? participacionId;
+
+      // 2. Crear preferencia de pago en Mercado Pago
+      const { init_point } = await MercadoPagoService.crearPreferencia(
+        partId!,
+        id as string
+      );
+
+      // 3. Abrir el checkout de MP en el browser
+      await WebBrowser.openBrowserAsync(init_point);
+
+      // 4. Cuando el usuario vuelve a la app mostrar pantalla de éxito
+      //    (el estado real lo actualiza el webhook en el backend)
       setConfirmState('success');
     } catch (e: any) {
       setErrorMsg(e.message);
@@ -166,7 +175,6 @@ export default function QuinielaDetailsScreen() {
   const isComplete = totalSeleccionados === partidos.length && partidos.length > 0;
   const puedeEditar = yaParticipo && quiniela?.estado === 'abierta';
 
-  // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -178,7 +186,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Éxito edición ────────────────────────────────────────────────────────
   if (confirmState === 'successEdit') {
     return (
       <SafeAreaView style={styles.container}>
@@ -194,14 +201,16 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Éxito primera vez ────────────────────────────────────────────────────
   if (confirmState === 'success') {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
           <Text style={{ fontSize: 60, marginBottom: 20 }}>🍀</Text>
-          <Text style={styles.successTitle}>¡Selecciones guardadas!</Text>
-          <Text style={styles.successSub}>Buena suerte en la quiniela</Text>
+          <Text style={styles.successTitle}>¡Pago en proceso!</Text>
+          <Text style={styles.successSub}>
+            Tus picks fueron guardados.{'
+'}Tu participación se confirmará cuando MP apruebe el pago.
+          </Text>
           <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/(tabs)')}>
             <Text style={styles.successBtnTxt}>Ver mis quinielas</Text>
           </TouchableOpacity>
@@ -210,7 +219,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Error ────────────────────────────────────────────────────────────────
   if (confirmState === 'error') {
     return (
       <SafeAreaView style={styles.container}>
@@ -226,7 +234,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Confirmación edición ─────────────────────────────────────────────────
   if (confirmState === 'confirmingEdit') {
     return (
       <SafeAreaView style={styles.container}>
@@ -255,7 +262,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Confirmación primera vez ─────────────────────────────────────────────
   if (confirmState === 'confirming') {
     return (
       <SafeAreaView style={styles.container}>
@@ -267,7 +273,7 @@ export default function QuinielaDetailsScreen() {
             <Text style={styles.confirmLine}>💰 Costo: <Text style={{ color: '#2ECC71' }}>${quiniela?.precio_entrada ?? 50} MXN</Text></Text>
             <Text style={styles.confirmLine}>🎯 Picks: <Text style={{ color: '#00E5FF' }}>{totalSeleccionados} selecciones</Text></Text>
             <Text style={[styles.confirmLine, { color: '#606060', fontSize: 11, marginTop: 8 }]}>
-              Una vez confirmada no podrás cambiar tus selecciones.
+              Serás redirigido a Mercado Pago para completar el pago.
             </Text>
           </View>
           <View style={styles.confirmBtns}>
@@ -277,7 +283,7 @@ export default function QuinielaDetailsScreen() {
             <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmarFinal} disabled={saving}>
               {saving
                 ? <ActivityIndicator color="#000" />
-                : <Text style={styles.confirmBtnTxt}>Confirmar ${quiniela?.precio_entrada ?? 50}</Text>}
+                : <Text style={styles.confirmBtnTxt}>💳 Ir a pagar ${quiniela?.precio_entrada ?? 50}</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -285,7 +291,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Vista principal ──────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -407,7 +412,7 @@ export default function QuinielaDetailsScreen() {
           >
             <Text style={[styles.fabText, !isComplete && { color: '#505050' }]}>
               {isComplete
-                ? `🚀 Confirmar y Participar — $${quiniela?.precio_entrada ?? 50} MXN`
+                ? `💳 Confirmar y Pagar — $${quiniela?.precio_entrada ?? 50} MXN`
                 : `Selecciona todos los partidos (${totalSeleccionados}/${partidos.length})`}
             </Text>
           </TouchableOpacity>
@@ -422,36 +427,28 @@ const styles = StyleSheet.create({
   centered:           { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   loadingText:        { color: '#A0A0A0', marginTop: 12, fontSize: 14 },
   emptyText:          { color: '#A0A0A0', fontSize: 14, textAlign: 'center' },
-
   header:             { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
   backBtn:            { width: 60 },
   backText:           { color: '#2ECC71', fontSize: 15 },
   title:              { flex: 1, color: '#FFF', fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
   spacer:             { width: 60 },
-
   editBtn:            { backgroundColor: 'rgba(243,156,18,0.12)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#F39C12' },
   editBtnTxt:         { color: '#F39C12', fontWeight: 'bold', fontSize: 13 },
   cancelEditBtn:      { backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#E74C3C' },
   cancelEditBtnTxt:   { color: '#E74C3C', fontWeight: 'bold', fontSize: 13 },
-
   yaParticipoBar:     { backgroundColor: 'rgba(46,204,113,0.1)', borderBottomWidth: 1, borderBottomColor: '#2ECC71', padding: 10, alignItems: 'center' },
   yaParticipoText:    { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
-
   editableBanner:     { backgroundColor: 'rgba(243,156,18,0.08)', borderBottomWidth: 1, borderBottomColor: '#F39C12', padding: 10, alignItems: 'center' },
   editableBannerText: { color: '#F39C12', fontWeight: 'bold', fontSize: 13 },
-
   editingBanner:      { backgroundColor: 'rgba(243,156,18,0.15)', borderBottomWidth: 1, borderBottomColor: '#F39C12', padding: 10, alignItems: 'center' },
   editingBannerText:  { color: '#FFD700', fontWeight: 'bold', fontSize: 13 },
-
   infoRow:            { flexDirection: 'row', gap: 8, paddingHorizontal: 15, paddingVertical: 10 },
   infoPill:           { flex: 1, backgroundColor: '#15181F', borderRadius: 8, padding: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
   infoPillGreen:      { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
   infoPillOrange:     { borderColor: '#F39C12', backgroundColor: 'rgba(243,156,18,0.05)' },
   infoPillText:       { color: '#A0A0A0', fontSize: 11, fontWeight: '600', textAlign: 'center' },
-
   faltanBanner:       { backgroundColor: 'rgba(231,76,60,0.12)', borderBottomWidth: 1, borderBottomColor: '#E74C3C', padding: 10, alignItems: 'center' },
   faltanTxt:          { color: '#E74C3C', fontWeight: '600', fontSize: 13 },
-
   list:               { paddingHorizontal: 15, paddingTop: 5, paddingBottom: 120 },
   fab:                { position: 'absolute', bottom: 25, left: 15, right: 15, zIndex: 100 },
   fabBtn:             { padding: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1 },
@@ -459,7 +456,6 @@ const styles = StyleSheet.create({
   fabBtnEdit:         { backgroundColor: '#F39C12', borderColor: '#F39C12', shadowColor: '#F39C12', shadowOpacity: 0.7, shadowRadius: 12, elevation: 8 },
   fabBtnDisabled:     { backgroundColor: '#15181F', borderColor: '#2A2D35' },
   fabText:            { color: '#000', fontWeight: 'bold', fontSize: 15 },
-
   confirmTitle:       { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
   confirmCard:        { backgroundColor: '#15181F', borderRadius: 16, padding: 20, width: '100%', borderWidth: 1, borderColor: '#2A2D35', gap: 10, marginBottom: 24 },
   confirmLine:        { color: '#A0A0A0', fontSize: 14, lineHeight: 22 },
@@ -468,9 +464,8 @@ const styles = StyleSheet.create({
   cancelBtnTxt:       { color: '#A0A0A0', fontWeight: 'bold', fontSize: 15 },
   confirmBtn:         { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#2ECC71' },
   confirmBtnTxt:      { color: '#000', fontWeight: 'bold', fontSize: 15 },
-
   successTitle:       { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
-  successSub:         { color: '#A0A0A0', fontSize: 14, marginBottom: 32, textAlign: 'center' },
+  successSub:         { color: '#A0A0A0', fontSize: 14, marginBottom: 32, textAlign: 'center', lineHeight: 22 },
   successBtn:         { backgroundColor: '#2ECC71', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 14 },
   successBtnTxt:      { color: '#000', fontWeight: 'bold', fontSize: 16 },
 });

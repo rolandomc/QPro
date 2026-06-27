@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
-  Alert, ActivityIndicator, ScrollView, Animated,
+  Alert, ActivityIndicator, ScrollView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { AuthService } from '../../src/services/auth.service';
 
-// ——— Utilidades ———
+// ─── Utilidades ───
 function slugify(str: string) {
   return str
     .toLowerCase()
@@ -37,18 +37,20 @@ function getPasswordStrength(pw: string): { score: number; label: string; color:
   return { score, label: 'Segura', color: '#2ECC71' };
 }
 
-// ——— Componente campo ———
-function Field({
-  label, placeholder, value, onChangeText, keyboardType, autoCapitalize,
-  secureTextEntry, prefix, editable = true,
-}: any) {
+// Elimina el outline azul en web
+const noOutline = Platform.OS === 'web'
+  ? { outlineWidth: 0, outlineStyle: 'none' } as any
+  : {};
+
+// ─── Campo reutilizable ───
+function Field({ label, placeholder, value, onChangeText, keyboardType, autoCapitalize, secureTextEntry, prefix }: any) {
   return (
     <View style={s.inputContainer}>
       <Text style={s.label}>{label}</Text>
-      <View style={[s.inputWrap, !editable && { opacity: 0.7 }]}>
+      <View style={s.inputWrap}>
         {prefix ? <Text style={s.prefix}>{prefix}</Text> : null}
         <TextInput
-          style={[s.input, prefix && { paddingLeft: 4 }]}
+          style={[s.input, noOutline]}
           placeholder={placeholder}
           placeholderTextColor="#505060"
           keyboardType={keyboardType ?? 'default'}
@@ -56,14 +58,13 @@ function Field({
           secureTextEntry={secureTextEntry}
           value={value}
           onChangeText={onChangeText}
-          editable={editable}
         />
       </View>
     </View>
   );
 }
 
-// ——— Pantalla ———
+// ─── Pantalla ───
 export default function RegisterScreen() {
   const router = useRouter();
   const [nombre, setNombre] = useState('');
@@ -75,11 +76,8 @@ export default function RegisterScreen() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Auto-generar username mientras no lo haya editado manualmente
   useEffect(() => {
-    if (!usernameTouched) {
-      setUsername(buildUsername(nombre, apellido));
-    }
+    if (!usernameTouched) setUsername(buildUsername(nombre, apellido));
   }, [nombre, apellido, usernameTouched]);
 
   const strength = getPasswordStrength(password);
@@ -102,7 +100,6 @@ export default function RegisterScreen() {
       Alert.alert('Contraseña débil', 'Usa al menos 8 caracteres, una mayúscula y un número.');
       return;
     }
-
     setLoading(true);
     try {
       await AuthService.signUp(email, password, {
@@ -123,7 +120,13 @@ export default function RegisterScreen() {
 
   return (
     <SafeAreaView style={s.container}>
-      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Espacio flexible arriba para centrar */}
+        <View style={{ flex: 1 }} />
 
         <View style={s.header}>
           <Text style={s.title}>Crea tu cuenta</Text>
@@ -132,7 +135,7 @@ export default function RegisterScreen() {
 
         <View style={s.form}>
 
-          {/* Nombre + Apellido en fila */}
+          {/* Nombre + Apellido */}
           <View style={s.row}>
             <View style={{ flex: 1 }}>
               <Field label="Nombre" placeholder="Juan" value={nombre} onChangeText={setNombre} />
@@ -143,13 +146,13 @@ export default function RegisterScreen() {
             </View>
           </View>
 
-          {/* Username con @ */}
+          {/* Username */}
           <View style={s.inputContainer}>
             <Text style={s.label}>Usuario</Text>
             <View style={s.inputWrap}>
               <Text style={s.prefix}>@</Text>
               <TextInput
-                style={[s.input, { paddingLeft: 4 }]}
+                style={[s.input, { paddingLeft: 2 }, noOutline]}
                 placeholder="tu_usuario"
                 placeholderTextColor="#505060"
                 autoCapitalize="none"
@@ -173,12 +176,12 @@ export default function RegisterScreen() {
             autoCapitalize="none"
           />
 
-          {/* Contraseña + indicador de seguridad */}
+          {/* Contraseña + barra de seguridad */}
           <View style={s.inputContainer}>
             <Text style={s.label}>Contraseña</Text>
             <View style={s.inputWrap}>
               <TextInput
-                style={s.input}
+                style={[s.input, noOutline]}
                 placeholder="••••••••"
                 placeholderTextColor="#505060"
                 secureTextEntry={!showPass}
@@ -187,20 +190,16 @@ export default function RegisterScreen() {
                 autoCapitalize="none"
               />
               <TouchableOpacity onPress={() => setShowPass(v => !v)} style={s.eyeBtn}>
-                <Text style={s.eyeTxt}>{showPass ? '👁️' : '👁‍🗨️'}</Text>
+                <Text style={s.eyeTxt}>{showPass ? '🙈' : '👁️'}</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Barra de seguridad */}
+            {/* Barra */}
             <View style={s.strengthWrap}>
               <View style={s.strengthTrack}>
                 <View style={[
                   s.strengthFill,
-                  {
-                    width: `${strengthPct}%` as any,
-                    backgroundColor: strength.color,
-                    shadowColor: strength.color,
-                  },
+                  { width: `${strengthPct}%` as any, backgroundColor: strength.color, shadowColor: strength.color },
                 ]} />
               </View>
               {strength.label ? (
@@ -234,6 +233,9 @@ export default function RegisterScreen() {
             <Text style={s.linkTxt}>¿Ya tienes cuenta? <Text style={s.linkAccent}>Inicia sesión</Text></Text>
           </TouchableOpacity>
         </View>
+
+        {/* Espacio flexible abajo para centrar */}
+        <View style={{ flex: 1 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -250,17 +252,34 @@ function Rule({ ok, text }: { ok: boolean; text: string }) {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0C10' },
-  scroll: { padding: 24, paddingBottom: 40 },
-  header: { alignItems: 'center', marginBottom: 28 },
+  scroll: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 32 },
+
+  header: { alignItems: 'center', marginBottom: 24 },
   title: { color: '#FFF', fontSize: 26, fontWeight: 'bold', marginBottom: 6 },
   subtitle: { color: '#606070', fontSize: 13 },
 
-  form: { backgroundColor: '#0D1117', borderRadius: 18, padding: 20, borderWidth: 1, borderColor: '#1E2330', gap: 4 },
+  form: {
+    backgroundColor: '#0D1117',
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#1E2330',
+    gap: 4,
+  },
   row: { flexDirection: 'row' },
 
   inputContainer: { marginBottom: 16 },
   label: { color: '#808090', fontSize: 11, letterSpacing: 1, marginBottom: 7, textTransform: 'uppercase' },
-  inputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#131620', borderRadius: 12, borderWidth: 1, borderColor: '#1E2330', paddingHorizontal: 14, height: 50 },
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#131620',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1E2330',
+    paddingHorizontal: 14,
+    height: 50,
+  },
   prefix: { color: '#9B59B6', fontSize: 16, fontWeight: 'bold', marginRight: 2 },
   input: { flex: 1, color: '#FFF', fontSize: 15 },
   hint: { color: '#404050', fontSize: 10, marginTop: 5, letterSpacing: 0.5 },
@@ -278,7 +297,18 @@ const s = StyleSheet.create({
   ruleDot: { fontSize: 11, width: 14, textAlign: 'center' },
   ruleTxt: { fontSize: 11 },
 
-  btn: { backgroundColor: '#9B59B6', borderRadius: 14, height: 52, justifyContent: 'center', alignItems: 'center', marginTop: 8, shadowColor: '#9B59B6', shadowOpacity: 0.5, shadowRadius: 12, elevation: 8 },
+  btn: {
+    backgroundColor: '#9B59B6',
+    borderRadius: 14,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
+    shadowColor: '#9B59B6',
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
+  },
   btnTxt: { color: '#FFF', fontWeight: 'bold', fontSize: 16, letterSpacing: 0.5 },
 
   linkBtn: { marginTop: 18, alignItems: 'center' },

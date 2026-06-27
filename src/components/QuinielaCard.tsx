@@ -96,7 +96,7 @@ export function QuinielaCard({
 
   useEffect(() => {
     if (!id) return;
-    const needsCount    = jugadoresCount === undefined;
+    const needsCount     = jugadoresCount === undefined;
     const needsParticipo = yaParticipoInit === undefined;
 
     if (!needsCount && !needsParticipo) {
@@ -162,11 +162,20 @@ export function QuinielaCard({
   const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🟡 Cerrada' : '✅ Finalizada';
 
   const handlePress = () => {
-    if (!modoResultados && estado === 'abierta' && !yaParticipo) {
-      router.push(`/quiniela/details?id=${id}`);
-    } else {
+    if (modoResultados) {
+      // Desde pestaña Resultados → siempre ver picks/resultado
       router.push(`/quiniela/${id}`);
+      return;
     }
+
+    if (estado === 'abierta') {
+      // Quiniela abierta: ir a details (tanto para participar como para editar picks)
+      router.push(`/quiniela/details?id=${id}`);
+      return;
+    }
+
+    // Cerrada o finalizada → ver detalle
+    router.push(`/quiniela/${id}`);
   };
 
   const handleShare = async () => {
@@ -189,7 +198,7 @@ export function QuinielaCard({
   const botonLabel = modoResultados
     ? (estado === 'finalizada' ? 'Ver resultado →' : 'Ver mis picks →')
     : estado === 'abierta'
-      ? (yaParticipo ? 'Ver mis picks →' : 'Participar →')
+      ? (yaParticipo ? '✏️ Ver / Editar picks →' : 'Participar →')
       : 'Ver detalle →';
 
   const botonActivo = modoResultados || estado === 'abierta';

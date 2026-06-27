@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ActivityIndicator,
   TouchableOpacity, FlatList, Alert,
@@ -16,17 +16,33 @@ export default function QuinielaDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const [quiniela,      setQuiniela]      = useState<any>(null);
-  const [partidos,      setPartidos]      = useState<any[]>([]);
-  const [selecciones,   setSelecciones]   = useState<Record<string, 'local' | 'empate' | 'visitante'>>({});
-  const [loading,       setLoading]       = useState(true);
-  const [saving,        setSaving]        = useState(false);
-  const [yaParticipo,   setYaParticipo]   = useState(false);
-  const [modoEdicion,   setModoEdicion]   = useState(false);
+  const [quiniela,        setQuiniela]        = useState<any>(null);
+  const [partidos,        setPartidos]        = useState<any[]>([]);
+  const [selecciones,     setSelecciones]     = useState<Record<string, 'local' | 'empate' | 'visitante'>>({});
+  const [loading,         setLoading]         = useState(true);
+  const [saving,          setSaving]          = useState(false);
+  const [yaParticipo,     setYaParticipo]     = useState(false);
+  const [modoEdicion,     setModoEdicion]     = useState(false);
   const [participacionId, setParticipacionId] = useState<string | null>(null);
-  const [confirmState,  setConfirmState]  = useState<ConfirmState>('idle');
-  const [errorMsg,      setErrorMsg]      = useState('');
-  const [faltanMsg,     setFaltanMsg]     = useState('');
+  const [confirmState,    setConfirmState]    = useState<ConfirmState>('idle');
+  const [errorMsg,        setErrorMsg]        = useState('');
+  const [faltanMsg,       setFaltanMsg]       = useState('');
+
+  // Guardamos los picks originales para poder restaurarlos al cancelar
+  const picksOriginalesRef = useRef<Record<string, 'local' | 'empate' | 'visitante'>>({});
+
+  // ── Cargar picks desde BD (reutilizable) ─────────────────────────────────
+  const cargarPicksActuales = useCallback(async (partId: string) => {
+    const { data: sels } = await supabase
+      .from('selecciones')
+      .select('partido_id, prediccion')
+      .eq('participacion_id', partId);
+    const map: Record<string, any> = {};
+    (sels || []).forEach((s: any) => { map[s.partido_id] = s.prediccion; });
+    picksOriginalesRef.current = map;
+    setSelecciones(map);
+    return map;
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -43,7 +59,6 @@ export default function QuinielaDetailsScreen() {
           setPartidos(partidosData || []);
           setYaParticipo(yaParticipoData);
 
-          // Si ya participó y la quiniela está abierta, cargamos sus picks actuales
           if (yaParticipoData && quinielaData?.estado === 'abierta') {
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
@@ -55,13 +70,7 @@ export default function QuinielaDetailsScreen() {
                 .single();
               if (part) {
                 setParticipacionId(part.id);
-                const { data: sels } = await supabase
-                  .from('selecciones')
-                  .select('partido_id, prediccion')
-                  .eq('participacion_id', part.id);
-                const map: Record<string, any> = {};
-                (sels || []).forEach((s: any) => { map[s.partido_id] = s.prediccion; });
-                setSelecciones(map);
+                await cargarPicksActuales(part.id);
               }
             }
           }
@@ -73,7 +82,7 @@ export default function QuinielaDetailsScreen() {
         }
       }
       loadData();
-    }, [id])
+    }, [id, cargarPicksActuales])
   );
 
   const handleSelect = (partidoId: string, opcion: 'local' | 'empate' | 'visitante') => {
@@ -81,20 +90,33 @@ export default function QuinielaDetailsScreen() {
     setSelecciones(prev => ({ ...prev, [partidoId]: opcion }));
   };
 
-  // ── Flujo NUEVO: guardar picks editados ──────────────────────────────────
+  // ── Cancelar edicion: restaurar picks originales desde BD ────────────────
+  const handleCancelarEdicion = useCallback(async () => {
+    setModoEdicion(false);
+    setFaltanMsg('');
+    if (participacionId) {
+      // Restaurar desde ref (ya cargados, sin nueva query)
+      setSelecciones({ ...picksOriginalesRef.current });
+    }
+  }, [participacionId]);
+
+  // ── Guardar picks editados con upsert ─────────────────────────────────────
   const handleGuardarEdicion = async () => {
     if (!participacionId) return;
     setSaving(true);
     try {
-      // Borrar selecciones anteriores y reinsertar
-      await supabase.from('selecciones').delete().eq('participacion_id', participacionId);
       const rows = Object.entries(selecciones).map(([partido_id, prediccion]) => ({
         participacion_id: participacionId,
         partido_id,
         prediccion,
       }));
-      const { error } = await supabase.from('selecciones').insert(rows);
+      // upsert evita duplicate key — actualiza si ya existe, inserta si no
+      const { error } = await supabase
+        .from('selecciones')
+        .upsert(rows, { onConflict: 'participacion_id,partido_id' });
       if (error) throw error;
+      // Actualizar ref con los nuevos picks guardados
+      picksOriginalesRef.current = { ...selecciones };
       setModoEdicion(false);
       setConfirmState('successEdit');
     } catch (e: any) {
@@ -115,7 +137,7 @@ export default function QuinielaDetailsScreen() {
     setConfirmState('confirmingEdit');
   };
 
-  // ── Flujo original: primera participación ────────────────────────────────
+  // ── Primera participación ─────────────────────────────────────────────────
   const handleConfirmarClick = () => {
     if (yaParticipo) return;
     const sinSeleccionar = partidos.filter(p => !selecciones[p.id]);
@@ -272,7 +294,7 @@ export default function QuinielaDetailsScreen() {
             if (modoEdicion) {
               Alert.alert('¿Cancelar edición?', 'Perderás los cambios no guardados.', [
                 { text: 'Seguir editando', style: 'cancel' },
-                { text: 'Cancelar', style: 'destructive', onPress: () => { setModoEdicion(false); router.back(); } },
+                { text: 'Cancelar', style: 'destructive', onPress: () => { handleCancelarEdicion(); router.back(); } },
               ]);
             } else {
               router.back();
@@ -283,7 +305,7 @@ export default function QuinielaDetailsScreen() {
           <Text style={styles.backText}>← Volver</Text>
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>{quiniela?.titulo ?? 'Quiniela'}</Text>
-        {/* Botón Editar */}
+
         {puedeEditar && !modoEdicion && (
           <TouchableOpacity style={styles.editBtn} onPress={() => setModoEdicion(true)}>
             <Text style={styles.editBtnTxt}>✏️ Editar</Text>
@@ -295,7 +317,7 @@ export default function QuinielaDetailsScreen() {
             onPress={() => {
               Alert.alert('¿Cancelar edición?', 'Perderás los cambios no guardados.', [
                 { text: 'Seguir editando', style: 'cancel' },
-                { text: 'Cancelar', style: 'destructive', onPress: () => setModoEdicion(false) },
+                { text: 'Cancelar', style: 'destructive', onPress: handleCancelarEdicion },
               ]);
             }}
           >
@@ -305,7 +327,6 @@ export default function QuinielaDetailsScreen() {
         {!puedeEditar && <View style={styles.spacer} />}
       </View>
 
-      {/* Banner estado */}
       {yaParticipo && !modoEdicion && (
         <View style={puedeEditar ? styles.editableBanner : styles.yaParticipoBar}>
           <Text style={puedeEditar ? styles.editableBannerText : styles.yaParticipoText}>
@@ -363,7 +384,6 @@ export default function QuinielaDetailsScreen() {
         )}
       />
 
-      {/* FAB guardar edición */}
       {modoEdicion && (
         <View style={styles.fab}>
           <TouchableOpacity
@@ -378,7 +398,6 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* FAB primera participación */}
       {!yaParticipo && (
         <View style={styles.fab}>
           <TouchableOpacity

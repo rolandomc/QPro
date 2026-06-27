@@ -1,15 +1,17 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, ActivityIndicator,
-  TouchableOpacity, RefreshControl, Animated, Share, Alert,
+  TouchableOpacity, RefreshControl, Animated, Alert, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
+import ViewShot from 'react-native-view-shot';
 import { supabase } from '../../src/config/supabase';
+import QuinielaShareCard from '../../src/components/QuinielaShareCard';
 
 const LABEL: Record<string, string>     = { local: '1', empate: 'X', visitante: '2' };
 const RES_LABEL: Record<string, string>  = { local: 'Local', empate: 'Empate', visitante: 'Visitante' };
-const PICK_EMOJI: Record<string, string> = { local: '🏠', empate: '🤝', visitante: '✈️' };
 
 // ── StatusPill ────────────────────────────────────────────────────────────────
 function StatusPill({ estado }: { estado: string }) {
@@ -33,11 +35,11 @@ const pill = StyleSheet.create({
   txt:  { fontSize: 10, fontWeight: 'bold', letterSpacing: 1.5 },
 });
 
-// ── RankRow ───────────────────────────────────────────────────────────────────
+// ── RankRow ────────────────────────────────────────────────────────────────────
 function RankRow({ item, totalPartidos, isLast }: {
   item: any; totalPartidos: number; isLast?: boolean;
 }) {
-  const flashAnim   = useRef(new Animated.Value(0)).current;
+  const flashAnim    = useRef(new Animated.Value(0)).current;
   const prevAciertos = useRef(item.aciertos);
 
   useEffect(() => {
@@ -97,7 +99,7 @@ function RankRow({ item, totalPartidos, isLast }: {
   );
 }
 
-// ── Pantalla principal ────────────────────────────────────────────────────────
+// ── Pantalla principal ─────────────────────────────────────────────────────────
 export default function QuinielaDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router  = useRouter();
@@ -114,55 +116,42 @@ export default function QuinielaDetailScreen() {
   const [tabActivo,  setTabActivo]  = useState<'picks' | 'ranking'>('picks');
   const [livePulse,  setLivePulse]  = useState(false);
   const [sharing,    setSharing]    = useState(false);
-  const myUserId     = useRef<string | null>(null);
-  const myUsername   = useRef<string>('Jugador');
+  const [showCard,   setShowCard]   = useState(false); // controla render del card offscreen
 
-  // ── Compartir quiniela ──────────────────────────────────────────────────────
-  const compartirQuiniela = useCallback(async () => {
+  const myUserId   = useRef<string | null>(null);
+  const myUsername = useRef<string>('Jugador');
+  const shareCardRef = useRef<ViewShot>(null);
+
+  // ── Compartir como imagen ───────────────────────────────────────────────────
+  const compartirImagen = useCallback(async () => {
     if (!quiniela || partidos.length === 0) return;
-    setSharing(true);
-    try {
-      const titulo   = quiniela.titulo ?? 'Quiniela';
-      const bolsa    = `$${Number(quiniela.premio_total || 0).toLocaleString()}`;
-      const usuario  = myUsername.current;
-
-      // Línea por partido: número | equipos | mi pick
-      const lineas = partidos.map((p: any, i: number) => {
-        const pick    = misSelec[p.id];
-        const pickLbl = pick ? LABEL[pick] : '?';
-        const pickEmj = pick ? PICK_EMOJI[pick] : '❓';
-        const tieneRes = p.resultado !== null;
-        const acerto  = tieneRes && pick === p.resultado;
-        const fallo   = tieneRes && pick !== p.resultado;
-        const status  = tieneRes ? (acerto ? '✅' : '❌') : '⏳';
-        return `${status} ${i + 1}. ${p.equipo_local} vs ${p.equipo_visitante}  →  ${pickEmj}${pickLbl}`;
-      });
-
-      // Resumen de aciertos (si la quiniela tiene resultados parciales)
-      const conRes    = partidos.filter((p: any) => p.resultado !== null);
-      const aciertos  = conRes.filter((p: any) => misSelec[p.id] === p.resultado).length;
-      const resumen   = conRes.length > 0
-        ? `\n🎯 Aciertos: ${aciertos}/${conRes.length}  (${Math.round((aciertos / conRes.length) * 100)}%)`
-        : '';
-
-      const posicionTxt = miPosicion ? `\n🏅 Posición: #${miPosicion} de ${totalParts}` : '';
-
-      const mensaje =
-`🏆 *${titulo}*
-💰 Bolsa: ${bolsa}  |  👤 ${usuario}
-${'─'.repeat(30)}
-${lineas.join('\n')}${resumen}${posicionTxt}
-${'─'.repeat(30)}
-📲 Únete a QPro y participa!`;
-
-      await Share.share({ message: mensaje, title: titulo });
-    } catch (e: any) {
-      if (e.message !== 'User did not share') {
-        Alert.alert('Error', 'No se pudo compartir la quiniela.');
-      }
-    } finally {
-      setSharing(false);
+    const canShare = await Sharing.isAvailableAsync();
+    if (!canShare) {
+      Alert.alert('No disponible', 'Tu dispositivo no soporta compartir archivos.');
+      return;
     }
+    setSharing(true);
+    setShowCard(true);  // monta el componente offscreen
+
+    // pequeño delay para que React renderice el card antes de capturar
+    setTimeout(async () => {
+      try {
+        const uri = await (shareCardRef.current as any).capture();
+        setShowCard(false);
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          dialogTitle: quiniela?.titulo ?? 'Compartir quiniela',
+          UTI: 'public.png',
+        });
+      } catch (e: any) {
+        setShowCard(false);
+        if (!e.message?.includes('cancelled')) {
+          Alert.alert('Error', 'No se pudo generar la imagen.');
+        }
+      } finally {
+        setSharing(false);
+      }
+    }, 300);
   }, [quiniela, partidos, misSelec, miPosicion, totalParts]);
 
   // ── Cargar ranking ──────────────────────────────────────────────────────────
@@ -231,7 +220,6 @@ ${'─'.repeat(30)}
 
       if (!user) return;
 
-      // Perfil del usuario para mostrar en el share
       const { data: myProf } = await supabase
         .from('profiles').select('username').eq('id', user.id).single();
       myUsername.current = myProf?.username ?? 'Jugador';
@@ -287,6 +275,35 @@ ${'─'.repeat(30)}
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
+      {/*
+        ── ShareCard montado FUERA de pantalla ──
+        position: absolute + opacity: 0 + pointerEvents: none
+        lo mantiene invisible pero React lo renderiza para ViewShot.
+      */}
+      {showCard && (
+        <View style={s.offscreen} pointerEvents="none">
+          <QuinielaShareCard
+            ref={shareCardRef}
+            quiniela={quiniela}
+            partidos={partidos}
+            misSelec={misSelec}
+            username={myUsername.current}
+            miPosicion={miPosicion}
+            totalParts={totalParts}
+          />
+        </View>
+      )}
+
+      {/* ── Overlay de carga mientras se genera la imagen ── */}
+      <Modal transparent visible={sharing} animationType="fade">
+        <View style={s.sharingOverlay}>
+          <View style={s.sharingBox}>
+            <ActivityIndicator size="large" color="#9B59B6" />
+            <Text style={s.sharingTxt}>Generando imagen…</Text>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Header ── */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
@@ -300,15 +317,14 @@ ${'─'.repeat(30)}
           <Text style={s.bolsaVal}>${Number(quiniela?.premio_total || 0).toLocaleString()}</Text>
           <Text style={s.bolsaLbl}>BOLSA</Text>
         </View>
-        {/* Botón compartir */}
         {miPart && (
           <TouchableOpacity
-            onPress={compartirQuiniela}
+            onPress={compartirImagen}
             disabled={sharing}
-            style={[s.shareBtn, sharing && { opacity: 0.5 }]}
+            style={[s.shareBtn, sharing && { opacity: 0.4 }]}
             activeOpacity={0.7}
           >
-            <Text style={s.shareBtnTxt}>{sharing ? '⏳' : '📤'}</Text>
+            <Text style={s.shareBtnTxt}>📤</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -384,12 +400,12 @@ ${'─'.repeat(30)}
         {tabActivo === 'picks' && (
           <View style={s.section}>
             {partidos.map((p, i) => {
-              const miPick   = misSelec[p.id];
-              const tieneRes = p.resultado !== null;
+              const miPick    = misSelec[p.id];
+              const tieneRes  = p.resultado !== null;
               const esAcierto = tieneRes && miPick === p.resultado;
               const esFallo   = tieneRes && miPick !== p.resultado;
-              const neon = esAcierto ? '#2ECC71' : esFallo ? '#E91E63' : '#00E5FF';
-              const icon = tieneRes ? (esAcierto ? '✅' : '❌') : '⏳';
+              const neon      = esAcierto ? '#2ECC71' : esFallo ? '#E91E63' : '#00E5FF';
+              const icon      = tieneRes ? (esAcierto ? '✅' : '❌') : '⏳';
               return (
                 <View key={p.id} style={[s.partidoCard, { borderLeftColor: neon, shadowColor: neon }]}>
                   <View style={s.partidoTop}>
@@ -410,7 +426,7 @@ ${'─'.repeat(30)}
                     {['local', 'empate', 'visitante'].map(op => {
                       const isMiPick  = miPick === op;
                       const isCorrect = tieneRes && p.resultado === op;
-                      const opNeon = isMiPick
+                      const opNeon    = isMiPick
                         ? (tieneRes ? (isCorrect ? '#2ECC71' : '#E91E63') : '#00E5FF')
                         : (isCorrect ? 'rgba(46,204,113,0.4)' : '#1E2330');
                       return (
@@ -430,16 +446,16 @@ ${'─'.repeat(30)}
               );
             })}
 
-            {/* Botón compartir en la parte de abajo de los picks */}
+            {/* Botón compartir al pie de picks */}
             {miPart && (
               <TouchableOpacity
-                onPress={compartirQuiniela}
+                onPress={compartirImagen}
                 disabled={sharing}
-                style={[s.shareFullBtn, sharing && { opacity: 0.5 }]}
+                style={[s.shareFullBtn, sharing && { opacity: 0.4 }]}
                 activeOpacity={0.75}
               >
                 <Text style={s.shareFullBtnTxt}>
-                  {sharing ? 'Preparando…' : '📤  Compartir mis picks'}
+                  {sharing ? '⏳ Generando imagen…' : '📤  Compartir imagen de mis picks'}
                 </Text>
               </TouchableOpacity>
             )}
@@ -489,6 +505,16 @@ const s = StyleSheet.create({
   centered:           { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scroll:             { padding: 14, paddingBottom: 40 },
 
+  // Offscreen share card
+  offscreen:          { position: 'absolute', top: 0, left: -9999, opacity: 0 },
+
+  // Loading overlay
+  sharingOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+                        justifyContent: 'center', alignItems: 'center' },
+  sharingBox:         { backgroundColor: '#0D1117', borderRadius: 16, padding: 28,
+                        alignItems: 'center', gap: 14, borderWidth: 1, borderColor: '#9B59B655' },
+  sharingTxt:         { color: '#9B59B6', fontSize: 14, fontWeight: 'bold', letterSpacing: 1 },
+
   // Header
   header:             { flexDirection: 'row', alignItems: 'center', padding: 16,
                         borderBottomWidth: 1, borderBottomColor: '#1E2330', gap: 10 },
@@ -501,7 +527,8 @@ const s = StyleSheet.create({
                         textShadowColor: '#2ECC71', textShadowRadius: 8 },
   bolsaLbl:           { color: '#2ECC71', fontSize: 8, letterSpacing: 2, opacity: 0.7 },
   shareBtn:           { width: 36, height: 36, justifyContent: 'center', alignItems: 'center',
-                        backgroundColor: '#15181F', borderRadius: 10, borderWidth: 1, borderColor: '#9B59B655' },
+                        backgroundColor: '#15181F', borderRadius: 10,
+                        borderWidth: 1, borderColor: '#9B59B655' },
   shareBtnTxt:        { fontSize: 18 },
 
   // Resumen
@@ -543,7 +570,7 @@ const s = StyleSheet.create({
   opcionLabel:        { fontSize: 15, fontWeight: 'bold' },
   miPickDot:          { fontSize: 7 },
 
-  // Botón compartir (ancho completo, al pie de los picks)
+  // Botón compartir ancho completo
   shareFullBtn:       { marginTop: 8, backgroundColor: '#13111A', borderRadius: 14,
                         borderWidth: 1, borderColor: '#9B59B655', paddingVertical: 14,
                         alignItems: 'center',
@@ -577,13 +604,11 @@ const s = StyleSheet.create({
   rankAciNum:         { fontSize: 20, fontWeight: 'bold' },
   rankAciLbl:         { color: '#404040', fontSize: 9, letterSpacing: 0.5 },
 
-  // Separador fuera del top
   separador:          { flexDirection: 'row', alignItems: 'center', gap: 8,
                         paddingHorizontal: 14, paddingTop: 8, marginTop: -8 },
   separadorLine:      { flex: 1, height: 1, backgroundColor: '#1E2330' },
   separadorTxt:       { color: '#303030', fontSize: 12, letterSpacing: 3 },
 
-  // Empty ranking
   emptyRank:          { alignItems: 'center', paddingVertical: 40, gap: 10 },
   emptyIcon:          { fontSize: 40 },
   emptyTxt:           { color: '#404040', textAlign: 'center', letterSpacing: 1, fontSize: 13 },

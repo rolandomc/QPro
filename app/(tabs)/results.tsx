@@ -34,7 +34,6 @@ export default function ResultsScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Traer participaciones del usuario con datos de la quiniela
       const { data, error } = await supabase
         .from('participaciones')
         .select(`
@@ -42,14 +41,22 @@ export default function ResultsScreen() {
           quinielas (
             id, titulo, descripcion, precio_entrada, premio_total, estado,
             fecha_cierre, jugadores_minimos, porcentaje_admin,
-            partidos ( id )
+            partidos ( id ),
+            participaciones ( count )
           )
         `)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setParticipaciones(data || []);
+
+      // Enriquecer cada item con jugadores_count y ya_participo=true (el usuario ya participó en todas)
+      const enriquecido = (data || []).map((item: any) => ({
+        ...item,
+        jugadores_count: item.quinielas?.participaciones?.[0]?.count ?? 0,
+      }));
+
+      setParticipaciones(enriquecido);
     } catch (e: any) {
       console.error(e.message);
     } finally {
@@ -60,11 +67,9 @@ export default function ResultsScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, []));
 
-  // En Juego = abierta o cerrada (aún no finalizada)
   const enJuego  = participaciones.filter((p: any) =>
     ['abierta', 'cerrada'].includes(p.quinielas?.estado)
   );
-  // Historial = finalizadas o marcadas como ganador/perdedor
   const historial = participaciones.filter((p: any) =>
     p.quinielas?.estado === 'finalizada' ||
     p.estado === 'ganador' ||
@@ -72,7 +77,6 @@ export default function ResultsScreen() {
   );
   const lista = tab === 'En Juego' ? enJuego : historial;
 
-  // Stats del historial
   const totalJugadas   = historial.length;
   const totalGanadas   = historial.filter((p: any) => p.estado === 'ganador').length;
   const totalInvertido = historial.reduce((acc: number, p: any) =>
@@ -83,7 +87,6 @@ export default function ResultsScreen() {
     ? (((totalGanado - totalInvertido) / totalInvertido) * 100).toFixed(0)
     : '0';
   const roiNum = Number(roi);
-  // % acierto global — aproximación: ganadas / jugadas
   const pctAcierto = totalJugadas > 0 ? Math.round((totalGanadas / totalJugadas) * 100) : 0;
 
   return (
@@ -186,6 +189,8 @@ export default function ResultsScreen() {
                 jugadoresMinimos={q.jugadores_minimos ?? 0}
                 porcentajeAdmin={q.porcentaje_admin ?? 0}
                 modoResultados
+                jugadoresCount={item.jugadores_count}
+                yaParticipo={true}
               />
             );
           }}

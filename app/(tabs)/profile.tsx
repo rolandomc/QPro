@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { StyleSheet, Text, View, ScrollView, Alert, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Alert, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -21,6 +21,7 @@ export default function ProfileScreen() {
   const [displayName,   setDisplayName]   = useState('');
   const [isAdmin,       setIsAdmin]       = useState(false);
   const [loading,       setLoading]       = useState(true);
+  const [refreshing,    setRefreshing]    = useState(false);
   const [signingOut,    setSigningOut]    = useState(false);
   const [notifs,        setNotifs]        = useState<any[]>([]);
   const [notifExpanded, setNotifExpanded] = useState(false);
@@ -118,10 +119,16 @@ export default function ProfileScreen() {
       console.error(e.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useFocusEffect(useCallback(() => { setLoading(true); loadUserData(); }, []));
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadUserData();
+  }, [loadUserData]);
 
   const handleSignOut = async () => {
     Alert.alert('Cerrar Sesión', '¿Estás seguro que quieres salir?', [
@@ -162,6 +169,14 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={false}
         bounces
         overScrollMode="always"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#9B59B6"
+            colors={['#9B59B6']}
+          />
+        }
       >
 
         {/* Avatar + nombre */}

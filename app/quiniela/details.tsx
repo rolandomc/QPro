@@ -15,37 +15,43 @@ type ConfirmState = 'idle' | 'confirming' | 'confirmingEdit' | 'success' | 'succ
 
 const PENDING_KEY = 'qpro_pago_pendiente';
 
+/** Lee localStorage de forma segura antes del primer render */
+function checkPendingPago(quinielaId: string): boolean {
+  if (Platform.OS !== 'web') return false;
+  try {
+    const val = localStorage.getItem(PENDING_KEY);
+    if (val === quinielaId) {
+      localStorage.removeItem(PENDING_KEY);
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
 export default function QuinielaDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
+  // Inicializar confirmState ANTES del primer render revisando localStorage
+  const isPendingPago = useRef(checkPendingPago(id as string));
+
   const [quiniela,        setQuiniela]        = useState<any>(null);
   const [partidos,        setPartidos]        = useState<any[]>([]);
   const [selecciones,     setSelecciones]     = useState<Record<string, 'local' | 'empate' | 'visitante'>>({});
-  const [loading,         setLoading]         = useState(true);
+  const [loading,         setLoading]         = useState(!isPendingPago.current); // si hay pago pendiente no mostramos loader
   const [saving,          setSaving]          = useState(false);
   const [yaParticipo,     setYaParticipo]     = useState(false);
   const [modoEdicion,     setModoEdicion]     = useState(false);
   const [participacionId, setParticipacionId] = useState<string | null>(null);
-  const [confirmState,    setConfirmState]    = useState<ConfirmState>('idle');
+  const [confirmState,    setConfirmState]    = useState<ConfirmState>(
+    isPendingPago.current ? 'success' : 'idle'
+  );
   const [errorMsg,        setErrorMsg]        = useState('');
   const [faltanMsg,       setFaltanMsg]       = useState('');
 
-  // Ref para bloquear doble tap
+  // Ref para bloquear doble tap — persiste entre re-renders
   const openingRef = useRef(false);
   const picksOriginalesRef = useRef<Record<string, 'local' | 'empate' | 'visitante'>>({});
-
-  // Al montar: verificar si volvemos de MP (solo web)
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    try {
-      const pending = localStorage.getItem(PENDING_KEY);
-      if (pending === id) {
-        localStorage.removeItem(PENDING_KEY);
-        setConfirmState('success');
-      }
-    } catch (_) {}
-  }, [id]);
 
   const cargarPicksActuales = useCallback(async (partId: string) => {
     const { data: sels } = await supabase
@@ -61,6 +67,9 @@ export default function QuinielaDetailsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Si venimos de regreso de MP (pago pendiente), NO recargar ni pisar el state
+      if (isPendingPago.current) return;
+
       async function loadData() {
         if (!id) return;
         setLoading(true);
@@ -108,9 +117,7 @@ export default function QuinielaDetailsScreen() {
   const handleCancelarEdicion = useCallback(async () => {
     setModoEdicion(false);
     setFaltanMsg('');
-    if (participacionId) {
-      setSelecciones({ ...picksOriginalesRef.current });
-    }
+    if (participacionId) setSelecciones({ ...picksOriginalesRef.current });
   }, [participacionId]);
 
   const handleGuardarEdicion = async () => {
@@ -118,9 +125,7 @@ export default function QuinielaDetailsScreen() {
     setSaving(true);
     try {
       const rows = Object.entries(selecciones).map(([partido_id, prediccion]) => ({
-        participacion_id: participacionId,
-        partido_id,
-        prediccion,
+        participacion_id: participacionId, partido_id, prediccion,
       }));
       const { error } = await supabase
         .from('selecciones')
@@ -138,29 +143,23 @@ export default function QuinielaDetailsScreen() {
   };
 
   const handleConfirmarEdicionClick = () => {
-    const sinSeleccionar = partidos.filter(p => !selecciones[p.id]);
-    if (sinSeleccionar.length > 0) {
-      setFaltanMsg(`⚠️ Aún te faltan ${sinSeleccionar.length} partido(s) por seleccionar.`);
-      return;
-    }
+    const faltan = partidos.filter(p => !selecciones[p.id]);
+    if (faltan.length > 0) { setFaltanMsg(`⚠️ Aún te faltan ${faltan.length} partido(s).`); return; }
     setFaltanMsg('');
     setConfirmState('confirmingEdit');
   };
 
   const handleConfirmarClick = () => {
     if (yaParticipo) return;
-    const sinSeleccionar = partidos.filter(p => !selecciones[p.id]);
-    if (sinSeleccionar.length > 0) {
-      setFaltanMsg(`⚠️ Aún te faltan ${sinSeleccionar.length} partido(s) por seleccionar.`);
-      return;
-    }
+    const faltan = partidos.filter(p => !selecciones[p.id]);
+    if (faltan.length > 0) { setFaltanMsg(`⚠️ Aún te faltan ${faltan.length} partido(s).`); return; }
     setFaltanMsg('');
     setConfirmState('confirming');
   };
 
   const handleConfirmarFinal = async () => {
-    // Bloquear doble tap
-    if (openingRef.current || saving) return;
+    // Guard doble tap: ref persiste entre re-renders, state no
+    if (openingRef.current) return;
     openingRef.current = true;
     setSaving(true);
 
@@ -168,26 +167,23 @@ export default function QuinielaDetailsScreen() {
       const participacion = await QuinielasService.guardarSelecciones(id, selecciones);
       const partId = participacion.id ?? participacionId;
 
-      const { init_point } = await MercadoPagoService.crearPreferencia(
-        partId!,
-        id as string
-      );
+      const { init_point } = await MercadoPagoService.crearPreferencia(partId!, id as string);
 
       if (Platform.OS === 'web') {
-        // Guardar en localStorage ANTES de salir para detectar el regreso
+        // Persistir antes de salir — al volver el useRef lo detecta en el primer render
         try { localStorage.setItem(PENDING_KEY, id as string); } catch (_) {}
         window.location.href = init_point;
-        // No llamar setSaving(false) ni openingRef = false: la página navega
-        return;
+        return; // la página navega, no continuar
       } else {
         setConfirmState('success');
         Linking.openURL(init_point);
+        // En nativo no reseteamos openingRef para que no se pueda re-abrir
       }
     } catch (e: any) {
+      openingRef.current = false; // solo resetear en error
+      setSaving(false);
       setErrorMsg(e.message);
       setConfirmState('error');
-      openingRef.current = false;
-      setSaving(false);
     }
   };
 
@@ -195,12 +191,31 @@ export default function QuinielaDetailsScreen() {
   const isComplete = totalSeleccionados === partidos.length && partidos.length > 0;
   const puedeEditar = yaParticipo && quiniela?.estado === 'abierta';
 
+  // --- Pantallas de estado ---
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#2ECC71" />
           <Text style={styles.loadingText}>Cargando partidos...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (confirmState === 'success') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>🍀</Text>
+          <Text style={styles.successTitle}>¡Pago en proceso!</Text>
+          <Text style={styles.successSub}>
+            {'Tus picks fueron guardados.\nTu participación se confirmará cuando MP apruebe el pago.'}
+          </Text>
+          <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/results')}>
+            <Text style={styles.successBtnTxt}>Ver mis quinielas</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -221,23 +236,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  if (confirmState === 'success') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centered}>
-          <Text style={{ fontSize: 60, marginBottom: 20 }}>🍀</Text>
-          <Text style={styles.successTitle}>¡Pago en proceso!</Text>
-          <Text style={styles.successSub}>
-            {'Tus picks fueron guardados.\nTu participaci\u00f3n se confirmar\u00e1 cuando MP apruebe el pago.'}
-          </Text>
-          <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/results')}>
-            <Text style={styles.successBtnTxt}>Ver mis quinielas</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   if (confirmState === 'error') {
     return (
       <SafeAreaView style={styles.container}>
@@ -245,7 +243,10 @@ export default function QuinielaDetailsScreen() {
           <Text style={{ fontSize: 50, marginBottom: 20 }}>❌</Text>
           <Text style={styles.successTitle}>Algo salió mal</Text>
           <Text style={styles.successSub}>{errorMsg}</Text>
-          <TouchableOpacity style={[styles.successBtn, { backgroundColor: '#E74C3C' }]} onPress={() => { setConfirmState('idle'); openingRef.current = false; }}>
+          <TouchableOpacity
+            style={[styles.successBtn, { backgroundColor: '#E74C3C' }]}
+            onPress={() => { openingRef.current = false; setConfirmState('idle'); }}
+          >
             <Text style={styles.successBtnTxt}>Reintentar</Text>
           </TouchableOpacity>
         </View>
@@ -263,7 +264,7 @@ export default function QuinielaDetailsScreen() {
             <Text style={styles.confirmLine}>🏆 Quiniela: <Text style={{ color: '#FFF' }}>{quiniela?.titulo}</Text></Text>
             <Text style={styles.confirmLine}>🎯 Picks: <Text style={{ color: '#00E5FF' }}>{totalSeleccionados} selecciones</Text></Text>
             <Text style={[styles.confirmLine, { color: '#F39C12', fontSize: 12, marginTop: 8 }]}>
-              ⚠️ Tus picks anteriores serán reemplazados por los nuevos.
+              ⚠️ Tus picks anteriores serán reemplazados.
             </Text>
           </View>
           <View style={styles.confirmBtns}>
@@ -271,9 +272,7 @@ export default function QuinielaDetailsScreen() {
               <Text style={styles.cancelBtnTxt}>Revisar</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: '#F39C12' }]} onPress={handleGuardarEdicion} disabled={saving}>
-              {saving
-                ? <ActivityIndicator color="#000" />
-                : <Text style={styles.confirmBtnTxt}>Guardar cambios</Text>}
+              {saving ? <ActivityIndicator color="#000" /> : <Text style={styles.confirmBtnTxt}>Guardar cambios</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -300,7 +299,7 @@ export default function QuinielaDetailsScreen() {
               <Text style={styles.cancelBtnTxt}>Revisar</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.confirmBtn, saving && { opacity: 0.6 }]}
+              style={[styles.confirmBtn, (saving || openingRef.current) && { opacity: 0.5 }]}
               onPress={handleConfirmarFinal}
               disabled={saving || openingRef.current}
             >
@@ -314,6 +313,7 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
+  // --- Pantalla principal ---
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -333,7 +333,6 @@ export default function QuinielaDetailsScreen() {
           <Text style={styles.backText}>← Volver</Text>
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>{quiniela?.titulo ?? 'Quiniela'}</Text>
-
         {puedeEditar && !modoEdicion && (
           <TouchableOpacity style={styles.editBtn} onPress={() => setModoEdicion(true)}>
             <Text style={styles.editBtnTxt}>✏️ Editar</Text>
@@ -342,25 +341,21 @@ export default function QuinielaDetailsScreen() {
         {modoEdicion && (
           <TouchableOpacity
             style={styles.cancelEditBtn}
-            onPress={() => {
-              Alert.alert('¿Cancelar edición?', 'Perderás los cambios no guardados.', [
-                { text: 'Seguir editando', style: 'cancel' },
-                { text: 'Cancelar', style: 'destructive', onPress: handleCancelarEdicion },
-              ]);
-            }}
+            onPress={() => Alert.alert('¿Cancelar edición?', 'Perderás los cambios no guardados.', [
+              { text: 'Seguir editando', style: 'cancel' },
+              { text: 'Cancelar', style: 'destructive', onPress: handleCancelarEdicion },
+            ])}
           >
             <Text style={styles.cancelEditBtnTxt}>✕ Cancelar</Text>
           </TouchableOpacity>
         )}
-        {!puedeEditar && <View style={styles.spacer} />}
+        {!puedeEditar && !modoEdicion && <View style={styles.spacer} />}
       </View>
 
       {yaParticipo && !modoEdicion && (
         <View style={puedeEditar ? styles.editableBanner : styles.yaParticipoBar}>
           <Text style={puedeEditar ? styles.editableBannerText : styles.yaParticipoText}>
-            {puedeEditar
-              ? '✏️ Quiniela abierta — puedes editar tus picks'
-              : '✅ Ya registraste tus selecciones — ¡Buena suerte!'}
+            {puedeEditar ? '✏️ Quiniela abierta — puedes editar tus picks' : '✅ Ya registraste tus selecciones — ¡Buena suerte!'}
           </Text>
         </View>
       )}

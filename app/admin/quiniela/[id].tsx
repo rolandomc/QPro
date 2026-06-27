@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { Platform } from 'react-native';
 import { supabase } from '../../../src/config/supabase';
 import { AdminService } from '../../../src/services/admin.service';
 
@@ -14,7 +15,14 @@ const RESULTADO_OPTIONS = [
   { label: '2', value: 'visitante', color: '#3498DB' },
 ];
 
-const FOOTBALL_API_BASE = 'https://api.football-data.org/v4';
+// En web usamos el proxy Vercel para evitar CORS.
+// En nativo podemos llamar directo (no hay CORS en apps nativas).
+function getMatchUrl(fixtureId: string | number): string {
+  if (Platform.OS === 'web') {
+    return `/api/match?id=${fixtureId}`;
+  }
+  return `https://api.football-data.org/v4/matches/${fixtureId}`;
+}
 
 export default function AdminQuinielaDetailScreen() {
   const router = useRouter();
@@ -28,7 +36,7 @@ export default function AdminQuinielaDetailScreen() {
   const [fetchingAuto,  setFetchingAuto]  = useState(false);
   const [autoActivo,    setAutoActivo]    = useState(false);
 
-  // ── Cargar datos ────────────────────────────────────────────────────────────
+  // ── Cargar datos ─────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
     if (!id) return;
     try {
@@ -48,33 +56,34 @@ export default function AdminQuinielaDetailScreen() {
     }
   }, [id]);
 
-  // ── Auto-resultados: se dispara cada vez que la pantalla recibe foco ────────
+  // ── Auto-resultados al enfocar pantalla ───────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
       loadData().then(async (data) => {
         if (!data) return;
         const { quiniela: q, partidos: p } = data;
-        // Solo correr si auto_resultados está activo y hay pendientes
         if (!q?.auto_resultados) return;
         const pendientes = (p || []).filter((pt: any) => !pt.resultado && pt.fixture_id);
         if (pendientes.length === 0) return;
-        await fetchResultadosDesdeAPI(p || [], false); // silencioso (sin Alert)
+        await fetchResultadosDesdeAPI(p || [], false);
       });
     }, [id])
   );
 
-  // ── Core: fetch resultados de football-data.org ─────────────────────────────
+  // ── Fetch resultados via proxy Vercel (web) o directo (nativo) ────────────────
   const fetchResultadosDesdeAPI = async (listaPartidos: any[], mostrarAlert = true) => {
-    const apiKey = process.env.EXPO_PUBLIC_FOOTBALL_API_KEY;
-    if (!apiKey) {
-      if (mostrarAlert) Alert.alert('Error', 'EXPO_PUBLIC_FOOTBALL_API_KEY no configurada.');
+    const pendientes = listaPartidos.filter(p => !p.resultado && p.fixture_id);
+
+    if (pendientes.length === 0) {
+      if (mostrarAlert) Alert.alert('✅ Todo listo', 'Todos los partidos ya tienen resultado.');
       return 0;
     }
 
-    const pendientes = listaPartidos.filter(p => !p.resultado && p.fixture_id);
-    if (pendientes.length === 0) {
-      if (mostrarAlert) Alert.alert('✅ Todo listo', 'Todos los partidos ya tienen resultado.');
+    // En nativo aún necesitamos la key directamente
+    const apiKey = Platform.OS !== 'web' ? process.env.EXPO_PUBLIC_FOOTBALL_API_KEY : undefined;
+    if (Platform.OS !== 'web' && !apiKey) {
+      if (mostrarAlert) Alert.alert('Error', 'EXPO_PUBLIC_FOOTBALL_API_KEY no configurada.');
       return 0;
     }
 
@@ -83,23 +92,30 @@ export default function AdminQuinielaDetailScreen() {
 
     for (const partido of pendientes) {
       try {
-        const res = await fetch(
-          `${FOOTBALL_API_BASE}/matches/${partido.fixture_id}`,
-          { headers: { 'X-Auth-Token': apiKey } }
-        );
-        if (!res.ok) { errores.push(`ID ${partido.fixture_id}: HTTP ${res.status}`); continue; }
+        const url = getMatchUrl(partido.fixture_id);
+        const headers: Record<string, string> = {};
+        if (Platform.OS !== 'web' && apiKey) headers['X-Auth-Token'] = apiKey;
+
+        const res = await fetch(url, { headers });
+        if (!res.ok) {
+          errores.push(`ID ${partido.fixture_id}: HTTP ${res.status}`);
+          continue;
+        }
 
         const json = await res.json();
         const match = json.match ?? json;
 
         if (!['FINISHED', 'AWARDED'].includes(match?.status)) {
-          errores.push(`${partido.equipo_local} vs ${partido.equipo_visitante}: aún no terminado`);
+          errores.push(`${partido.equipo_local} vs ${partido.equipo_visitante}: aún no terminado (${match?.status ?? 'sin estado'})`);
           continue;
         }
 
         const home = match?.score?.fullTime?.home ?? match?.score?.fullTime?.homeTeam ?? null;
         const away = match?.score?.fullTime?.away ?? match?.score?.fullTime?.awayTeam ?? null;
-        if (home === null || away === null) { errores.push(`${partido.equipo_local}: marcador no disponible`); continue; }
+        if (home === null || away === null) {
+          errores.push(`${partido.equipo_local}: marcador no disponible`);
+          continue;
+        }
 
         const resultado: 'local' | 'empate' | 'visitante' =
           home > away ? 'local' : home === away ? 'empate' : 'visitante';
@@ -119,7 +135,10 @@ export default function AdminQuinielaDetailScreen() {
     if (mostrarAlert) {
       let msg = `✅ ${actualizados} partido(s) actualizados.`;
       if (errores.length > 0) msg += `\n\n⚠️ Sin actualizar:\n${errores.join('\n')}`;
-      Alert.alert(actualizados > 0 ? '🎉 Resultados obtenidos' : '⚠️ Sin actualizaciones', msg);
+      Alert.alert(
+        actualizados > 0 ? '🎉 Resultados obtenidos' : '⚠️ Sin actualizaciones',
+        msg
+      );
     }
 
     return actualizados;
@@ -131,7 +150,7 @@ export default function AdminQuinielaDetailScreen() {
     finally { setFetchingAuto(false); }
   };
 
-  // ── Manual ──────────────────────────────────────────────────────────────────
+  // ── Manual ───────────────────────────────────────────────────────────────────
   const handleSetResultado = async (partidoId: string, resultado: string) => {
     setSavingPartido(partidoId);
     try {
@@ -146,7 +165,7 @@ export default function AdminQuinielaDetailScreen() {
     }
   };
 
-  // ── Toggle auto ─────────────────────────────────────────────────────────────
+  // ── Toggle auto ──────────────────────────────────────────────────────────────
   const handleToggleAuto = async (value: boolean) => {
     setAutoActivo(value);
     try {
@@ -241,14 +260,17 @@ export default function AdminQuinielaDetailScreen() {
         </View>
 
         {/* Botón fetch manual */}
-        <TouchableOpacity style={[styles.fetchBtn, fetchingAuto && styles.fetchBtnLoading]}
-          onPress={handleFetchAuto} disabled={fetchingAuto}>
+        <TouchableOpacity
+          style={[styles.fetchBtn, fetchingAuto && styles.fetchBtnLoading]}
+          onPress={handleFetchAuto}
+          disabled={fetchingAuto}
+        >
           {fetchingAuto
             ? <ActivityIndicator color="#FFF" />
             : <Text style={styles.fetchBtnText}>⬇️  Obtener Resultados de la API</Text>}
         </TouchableOpacity>
 
-        {/* Botón ver ganadores si ya está finalizada */}
+        {/* Ganadores si ya finalizada */}
         {quiniela?.estado === 'finalizada' && (
           <TouchableOpacity
             style={styles.ganadoresBtn}
@@ -271,6 +293,9 @@ export default function AdminQuinielaDetailScreen() {
                     📅 {new Date(partido.fecha_partido).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}
                   </Text>
                 )}
+                {partido.fixture_id && (
+                  <Text style={styles.fixtureId}>🔗 fixture_id: {partido.fixture_id}</Text>
+                )}
               </View>
               {partido.resultado && (
                 <View style={styles.resultadoActualBadge}>
@@ -283,12 +308,13 @@ export default function AdminQuinielaDetailScreen() {
             <View style={styles.opcionesRow}>
               {RESULTADO_OPTIONS.map(opt => {
                 const seleccionado = partido.resultado === opt.value;
-                const guardando = savingPartido === partido.id;
+                const guardando    = savingPartido === partido.id;
                 return (
                   <TouchableOpacity key={opt.value}
                     style={[styles.opcionBtn, seleccionado && { backgroundColor: opt.color + '25', borderColor: opt.color }]}
                     onPress={() => handleSetResultado(partido.id, opt.value)}
-                    disabled={guardando || quiniela?.estado === 'abierta'}>
+                    disabled={guardando || quiniela?.estado === 'abierta'}
+                  >
                     {guardando && seleccionado
                       ? <ActivityIndicator size="small" color={opt.color} />
                       : <Text style={[styles.opcionText, seleccionado && { color: opt.color }]}>{opt.label}</Text>}
@@ -306,7 +332,8 @@ export default function AdminQuinielaDetailScreen() {
         {quiniela?.estado === 'cerrada' && (
           <TouchableOpacity
             style={[styles.finalizarBtn, resultadosCompletos && styles.finalizarBtnActive]}
-            onPress={handleFinalizar}>
+            onPress={handleFinalizar}
+          >
             <Text style={styles.finalizarText}>
               {resultadosCompletos
                 ? '🏆 Finalizar Quiniela y Ver Ganadores'
@@ -348,6 +375,7 @@ const styles = StyleSheet.create({
   partidoNum:           { color: '#505050', fontSize: 12, width: 22 },
   partidoEquipos:       { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
   partidoFecha:         { color: '#707070', fontSize: 11, marginTop: 2 },
+  fixtureId:            { color: '#404040', fontSize: 10, marginTop: 2 },
   resultadoActualBadge: { backgroundColor: '#2ECC71', borderRadius: 8, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   resultadoActualText:  { color: '#000', fontWeight: 'bold', fontSize: 14 },
   opcionesRow:          { flexDirection: 'row', gap: 8 },

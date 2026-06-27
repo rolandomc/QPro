@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, ActivityIndicator,
-  TouchableOpacity, RefreshControl,
+  TouchableOpacity, RefreshControl, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -24,7 +24,6 @@ function StatusPill({ estado }: { estado: string }) {
     </View>
   );
 }
-
 const pill = StyleSheet.create({
   wrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 20,
           paddingHorizontal: 10, paddingVertical: 3, gap: 5, alignSelf: 'flex-start' },
@@ -32,6 +31,78 @@ const pill = StyleSheet.create({
   txt:  { fontSize: 10, fontWeight: 'bold', letterSpacing: 1.5 },
 });
 
+// ── Fila del ranking ─────────────────────────────────────────────────────────
+function RankRow({ item, totalPartidos, isLast }: {
+  item: any; totalPartidos: number; isLast?: boolean;
+}) {
+  const flashAnim = useRef(new Animated.Value(0)).current;
+  const prevAciertos = useRef(item.aciertos);
+
+  useEffect(() => {
+    if (item.aciertos !== prevAciertos.current) {
+      prevAciertos.current = item.aciertos;
+      Animated.sequence([
+        Animated.timing(flashAnim, { toValue: 1, duration: 300, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 600, useNativeDriver: false }),
+      ]).start();
+    }
+  }, [item.aciertos]);
+
+  const posColor = item.pos === 1 ? '#FFD700' : item.pos === 2 ? '#C0C0C0' : item.pos === 3 ? '#CD7F32' : '#404060';
+  const medalla  = item.pos === 1 ? '🥇' : item.pos === 2 ? '🥈' : item.pos === 3 ? '🥉' : `#${item.pos}`;
+  const pct      = totalPartidos > 0 ? (item.aciertos ?? 0) / totalPartidos : 0;
+  const barColor = item.isMe ? '#9B59B6' : posColor;
+
+  const flashBg = flashAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['transparent', 'rgba(46,204,113,0.12)'],
+  });
+
+  return (
+    <Animated.View style={[
+      s.rankRow,
+      item.isMe && { borderColor: '#9B59B6', backgroundColor: 'rgba(155,89,182,0.08)' },
+      isLast && { marginBottom: 0 },
+      { backgroundColor: flashBg as any },
+    ]}>
+      {/* Separador antes de "Tú" si estás fuera del top */}
+      {item.separador && (
+        <View style={s.separador}>
+          <View style={s.separadorLine} />
+          <Text style={s.separadorTxt}>···</Text>
+          <View style={s.separadorLine} />
+        </View>
+      )}
+      <View style={s.rankInner}>
+        <Text style={[s.rankPos, { color: posColor, fontSize: item.pos <= 3 ? 22 : 14 }]}>{medalla}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.rankName, item.isMe && { color: '#9B59B6' }]}>
+            {item.username}{item.isMe ? '  (Tú)' : ''}
+          </Text>
+          {/* Barra de progreso */}
+          <View style={s.rankBarWrap}>
+            <View style={[s.rankBarFill, {
+              width: `${Math.round(pct * 100)}%`,
+              backgroundColor: barColor,
+              shadowColor: barColor, shadowOpacity: 0.6, shadowRadius: 4,
+            }]} />
+          </View>
+          {item.estado === 'ganador' && (
+            <Text style={s.rankGanador}>🏆 GANADOR</Text>
+          )}
+        </View>
+        <View style={[s.rankAciBox, { borderColor: posColor + '55' }]}>
+          <Text style={[s.rankAciNum, { color: item.isMe ? '#9B59B6' : posColor }]}>
+            {item.aciertos ?? 0}
+          </Text>
+          <Text style={s.rankAciLbl}>/{totalPartidos}</Text>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+// ── Pantalla principal ────────────────────────────────────────────────────────
 export default function QuinielaDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router  = useRouter();
@@ -41,37 +112,109 @@ export default function QuinielaDetailScreen() {
   const [misSelec,    setMisSelec]    = useState<Record<string, string>>({});
   const [miPart,      setMiPart]      = useState<any>(null);
   const [ranking,     setRanking]     = useState<any[]>([]);
+  const [miPosicion,  setMiPosicion]  = useState<number | null>(null);
+  const [totalParts,  setTotalParts]  = useState(0);
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const [tabActivo,   setTabActivo]   = useState<'picks' | 'ranking'>('picks');
+  const [livePulse,   setLivePulse]   = useState(false);
+  const myUserId = useRef<string | null>(null);
 
+  // ── Cargar ranking (separado para poder llamarlo desde realtime) ────────────
+  const loadRanking = useCallback(async (userId: string, numPartidos: number) => {
+    // 1. Total participantes
+    const { count } = await supabase
+      .from('participaciones')
+      .select('id', { count: 'exact', head: true })
+      .eq('quiniela_id', id!);
+    setTotalParts(count ?? 0);
+
+    // 2. Top 20
+    const { data: rank } = await supabase
+      .from('participaciones')
+      .select('user_id, aciertos, estado')
+      .eq('quiniela_id', id!)
+      .order('aciertos', { ascending: false })
+      .limit(20);
+
+    if (!rank || rank.length === 0) { setRanking([]); return; }
+
+    // 3. Perfiles
+    const uids = rank.map((r: any) => r.user_id);
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', uids);
+    const pm: Record<string, string> = {};
+    (profs || []).forEach((p: any) => { pm[p.id] = p.username; });
+
+    // 4. Posición del usuario y filas con ranking
+    const rows = rank.map((r: any, i: number) => ({
+      ...r,
+      username: pm[r.user_id] ?? 'Usuario',
+      pos: i + 1,
+      isMe: r.user_id === userId,
+    }));
+
+    // 5. ¿Estoy en el top 20?
+    const yoEnTop = rows.find((r: any) => r.isMe);
+    if (!yoEnTop) {
+      // Buscar mi posición real fuera del top
+      const { data: miRow } = await supabase
+        .from('participaciones')
+        .select('user_id, aciertos, estado')
+        .eq('quiniela_id', id!)
+        .eq('user_id', userId)
+        .single();
+
+      if (miRow) {
+        const { count: porDelante } = await supabase
+          .from('participaciones')
+          .select('id', { count: 'exact', head: true })
+          .eq('quiniela_id', id!)
+          .gt('aciertos', miRow.aciertos ?? 0);
+
+        const miPos = (porDelante ?? 0) + 1;
+        setMiPosicion(miPos);
+
+        // Agregar mi fila con separador visual
+        rows.push({
+          ...miRow,
+          username: pm[userId] ?? 'Tú',
+          pos: miPos,
+          isMe: true,
+          separador: true,   // disparador del separador visual
+        });
+      }
+    } else {
+      setMiPosicion(yoEnTop.pos);
+    }
+
+    setRanking(rows);
+    // Flash animado al actualizar
+    setLivePulse(true);
+    setTimeout(() => setLivePulse(false), 800);
+  }, [id]);
+
+  // ── Carga principal ─────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      myUserId.current = user?.id ?? null;
 
-      // Quiniela
-      const { data: q } = await supabase
-        .from('quinielas')
-        .select('*')
-        .eq('id', id)
-        .single();
+      const [{ data: q }, { data: pts }] = await Promise.all([
+        supabase.from('quinielas').select('*').eq('id', id!).single(),
+        supabase.from('partidos').select('*').eq('quiniela_id', id!).order('orden', { ascending: true }),
+      ]);
       setQuiniela(q);
-
-      // Partidos
-      const { data: pts } = await supabase
-        .from('partidos')
-        .select('*')
-        .eq('quiniela_id', id)
-        .order('orden', { ascending: true });
       setPartidos(pts || []);
 
       if (!user) return;
 
-      // Mi participacion + selecciones
       const { data: part } = await supabase
         .from('participaciones')
         .select('id, aciertos, estado, premio_ganado, monto_pagado')
-        .eq('quiniela_id', id)
+        .eq('quiniela_id', id!)
         .eq('user_id', user.id)
         .single();
       setMiPart(part ?? null);
@@ -86,38 +229,34 @@ export default function QuinielaDetailScreen() {
         setMisSelec(map);
       }
 
-      // Ranking top 10
-      const { data: rank } = await supabase
-        .from('participaciones')
-        .select('user_id, aciertos, estado')
-        .eq('quiniela_id', id)
-        .order('aciertos', { ascending: false })
-        .limit(10);
-
-      if (rank && rank.length > 0) {
-        const uids = rank.map((r: any) => r.user_id);
-        const { data: profs } = await supabase
-          .from('profiles')
-          .select('id, username')
-          .in('id', uids);
-        const pm: Record<string, string> = {};
-        (profs || []).forEach((p: any) => { pm[p.id] = p.username; });
-        setRanking(rank.map((r: any, i: number) => ({
-          ...r,
-          username: pm[r.user_id] ?? 'Usuario',
-          pos: i + 1,
-          isMe: r.user_id === user.id,
-        })));
-      }
+      await loadRanking(user.id, (pts || []).length);
     } catch (e: any) {
       console.error(e.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [id]);
+  }, [id, loadRanking]);
 
-  useEffect(() => { load(); }, []);
+  // ── Realtime: escuchar cambios en participaciones ───────────────────────────
+  useEffect(() => {
+    load();
+
+    const channel = supabase
+      .channel(`ranking-${id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` },
+        () => {
+          if (myUserId.current) {
+            loadRanking(myUserId.current, 0);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [id]);
 
   const totalPartidos = partidos.length;
   const conResultado  = partidos.filter(p => p.resultado !== null);
@@ -128,9 +267,7 @@ export default function QuinielaDetailScreen() {
 
   if (loading) return (
     <SafeAreaView style={s.container}>
-      <View style={s.centered}>
-        <ActivityIndicator size="large" color="#9B59B6" />
-      </View>
+      <View style={s.centered}><ActivityIndicator size="large" color="#9B59B6" /></View>
     </SafeAreaView>
   );
 
@@ -154,7 +291,13 @@ export default function QuinielaDetailScreen() {
       <ScrollView
         contentContainerStyle={s.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#9B59B6" />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load(); }}
+            tintColor="#9B59B6"
+          />
+        }
       >
         {/* Mi resumen */}
         {miPart && (
@@ -191,7 +334,6 @@ export default function QuinielaDetailScreen() {
                 </>
               )}
             </View>
-            {/* Barra */}
             <View style={s.barWrap}>
               <View style={[s.barFill, {
                 width: `${pct}%`,
@@ -243,8 +385,6 @@ export default function QuinielaDetailScreen() {
                     </View>
                     <Text style={{ fontSize: 18 }}>{icon}</Text>
                   </View>
-
-                  {/* Opciones 1 X 2 */}
                   <View style={s.opcionesRow}>
                     {['local', 'empate', 'visitante'].map(op => {
                       const isMiPick  = miPick === op;
@@ -276,32 +416,33 @@ export default function QuinielaDetailScreen() {
         {/* TAB: RANKING */}
         {tabActivo === 'ranking' && (
           <View style={s.section}>
+            {/* Header del ranking */}
+            <View style={s.rankHeader}>
+              <View style={s.rankHeaderLeft}>
+                <View style={[s.liveIndicator, livePulse && s.liveIndicatorPulse]} />
+                <Text style={s.rankHeaderTitle}>EN VIVO</Text>
+              </View>
+              <View style={s.rankHeaderRight}>
+                {miPosicion && (
+                  <Text style={s.miPosText}>Tu posición: <Text style={{ color: '#9B59B6' }}>#{miPosicion}</Text></Text>
+                )}
+                <Text style={s.totalPartsText}>{totalParts} participantes</Text>
+              </View>
+            </View>
+
             {ranking.length === 0 ? (
-              <Text style={s.emptyTxt}>Sin participantes aún</Text>
-            ) : ranking.map((r) => {
-              const posColor = r.pos === 1 ? '#FFD700' : r.pos === 2 ? '#C0C0C0' : r.pos === 3 ? '#CD7F32' : '#404040';
-              const medalla  = r.pos === 1 ? '🥇' : r.pos === 2 ? '🥈' : r.pos === 3 ? '🥉' : `#${r.pos}`;
-              return (
-                <View key={r.user_id} style={[
-                  s.rankRow,
-                  r.isMe && { borderColor: '#9B59B6', backgroundColor: 'rgba(155,89,182,0.08)' },
-                ]}>
-                  <Text style={[s.rankPos, { color: posColor, fontSize: r.pos <= 3 ? 22 : 14 }]}>{medalla}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[s.rankName, r.isMe && { color: '#9B59B6' }]}>
-                      {r.username}{r.isMe ? '  (Tú)' : ''}
-                    </Text>
-                    {r.estado === 'ganador' && (
-                      <Text style={s.rankGanador}>🏆 GANADOR</Text>
-                    )}
-                  </View>
-                  <View style={[s.rankAciBox, { borderColor: posColor + '55' }]}>
-                    <Text style={[s.rankAciNum, { color: posColor }]}>{r.aciertos ?? 0}</Text>
-                    <Text style={s.rankAciLbl}>aciertos</Text>
-                  </View>
-                </View>
-              );
-            })}
+              <View style={s.emptyRank}>
+                <Text style={s.emptyIcon}>🏟️</Text>
+                <Text style={s.emptyTxt}>Sin participantes aún</Text>
+              </View>
+            ) : ranking.map((r, i) => (
+              <RankRow
+                key={r.user_id + '_' + r.pos}
+                item={r}
+                totalPartidos={totalPartidos}
+                isLast={i === ranking.length - 1}
+              />
+            ))}
           </View>
         )}
       </ScrollView>
@@ -310,66 +451,93 @@ export default function QuinielaDetailScreen() {
 }
 
 const s = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: '#0A0C10' },
-  centered:       { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scroll:         { padding: 14, paddingBottom: 40 },
+  container:       { flex: 1, backgroundColor: '#0A0C10' },
+  centered:        { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scroll:          { padding: 14, paddingBottom: 40 },
 
-  header:         { flexDirection: 'row', alignItems: 'center', padding: 16,
-                    borderBottomWidth: 1, borderBottomColor: '#1E2330', gap: 12 },
-  backBtn:        { width: 36, height: 36, justifyContent: 'center', alignItems: 'center',
-                    backgroundColor: '#15181F', borderRadius: 10, borderWidth: 1, borderColor: '#2A2D35' },
-  backTxt:        { color: '#9B59B6', fontSize: 18, fontWeight: 'bold' },
-  headerTitle:    { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
-  bolsaBox:       { alignItems: 'flex-end' },
-  bolsaVal:       { color: '#2ECC71', fontSize: 18, fontWeight: 'bold',
-                    textShadowColor: '#2ECC71', textShadowRadius: 8 },
-  bolsaLbl:       { color: '#2ECC71', fontSize: 8, letterSpacing: 2, opacity: 0.7 },
+  header:          { flexDirection: 'row', alignItems: 'center', padding: 16,
+                     borderBottomWidth: 1, borderBottomColor: '#1E2330', gap: 12 },
+  backBtn:         { width: 36, height: 36, justifyContent: 'center', alignItems: 'center',
+                     backgroundColor: '#15181F', borderRadius: 10, borderWidth: 1, borderColor: '#2A2D35' },
+  backTxt:         { color: '#9B59B6', fontSize: 18, fontWeight: 'bold' },
+  headerTitle:     { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
+  bolsaBox:        { alignItems: 'flex-end' },
+  bolsaVal:        { color: '#2ECC71', fontSize: 18, fontWeight: 'bold',
+                     textShadowColor: '#2ECC71', textShadowRadius: 8 },
+  bolsaLbl:        { color: '#2ECC71', fontSize: 8, letterSpacing: 2, opacity: 0.7 },
 
-  resumenCard:    { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 16,
-                    borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                    shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 12, elevation: 4 },
-  resumenNeonLine:{ height: 2, backgroundColor: '#9B59B6',
-                    shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
-  resumenBody:    { flexDirection: 'row', padding: 16, alignItems: 'center' },
-  resumenStat:    { flex: 1, alignItems: 'center' },
-  resumenNum:     { fontSize: 22, fontWeight: 'bold' },
-  resumenLbl:     { color: '#404040', fontSize: 8, letterSpacing: 1.5, marginTop: 3 },
-  resumenDiv:     { width: 1, height: 32, backgroundColor: '#1E2330' },
-  barWrap:        { height: 3, backgroundColor: '#1A1D24', margin: 0 },
-  barFill:        { height: '100%' },
+  resumenCard:     { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 16,
+                     borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
+                     shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 12, elevation: 4 },
+  resumenNeonLine: { height: 2, backgroundColor: '#9B59B6',
+                     shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+  resumenBody:     { flexDirection: 'row', padding: 16, alignItems: 'center' },
+  resumenStat:     { flex: 1, alignItems: 'center' },
+  resumenNum:      { fontSize: 22, fontWeight: 'bold' },
+  resumenLbl:      { color: '#404040', fontSize: 8, letterSpacing: 1.5, marginTop: 3 },
+  resumenDiv:      { width: 1, height: 32, backgroundColor: '#1E2330' },
+  barWrap:         { height: 3, backgroundColor: '#1A1D24' },
+  barFill:         { height: '100%' },
 
-  tabs:           { flexDirection: 'row', backgroundColor: '#0D1117', borderRadius: 12,
-                    padding: 4, marginBottom: 16, borderWidth: 1, borderColor: '#1E2330' },
-  tab:            { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
-  tabActivo:      { backgroundColor: '#1A1D26' },
-  tabTxt:         { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 },
-  tabTxtActivo:   { color: '#9B59B6', textShadowColor: '#9B59B6', textShadowRadius: 6 },
+  tabs:            { flexDirection: 'row', backgroundColor: '#0D1117', borderRadius: 12,
+                     padding: 4, marginBottom: 16, borderWidth: 1, borderColor: '#1E2330' },
+  tab:             { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
+  tabActivo:       { backgroundColor: '#1A1D26' },
+  tabTxt:          { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 },
+  tabTxtActivo:    { color: '#9B59B6', textShadowColor: '#9B59B6', textShadowRadius: 6 },
 
-  section:        { gap: 10 },
+  section:         { gap: 8 },
 
-  partidoCard:    { backgroundColor: '#0D1117', borderRadius: 14,
-                    borderWidth: 1, borderColor: '#1E2330', borderLeftWidth: 3,
-                    padding: 14, shadowOpacity: 0.15, shadowRadius: 8, elevation: 3 },
-  partidoTop:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  partidoNum:     { color: '#303030', fontSize: 11, width: 18, textAlign: 'center' },
-  partidoEquipos: { color: '#FFF', fontSize: 13, fontWeight: '600' },
-  vsText:         { color: '#303030', fontWeight: 'normal' },
-  resultadoTxt:   { fontSize: 11, marginTop: 3 },
-  opcionesRow:    { flexDirection: 'row', gap: 8 },
-  opcion:         { flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1,
-                    alignItems: 'center', justifyContent: 'center', gap: 2 },
-  opcionLabel:    { fontSize: 15, fontWeight: 'bold' },
-  miPickDot:      { fontSize: 7 },
+  // Picks
+  partidoCard:     { backgroundColor: '#0D1117', borderRadius: 14,
+                     borderWidth: 1, borderColor: '#1E2330', borderLeftWidth: 3,
+                     padding: 14, shadowOpacity: 0.15, shadowRadius: 8, elevation: 3 },
+  partidoTop:      { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  partidoNum:      { color: '#303030', fontSize: 11, width: 18, textAlign: 'center' },
+  partidoEquipos:  { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  vsText:          { color: '#303030', fontWeight: 'normal' },
+  resultadoTxt:    { fontSize: 11, marginTop: 3 },
+  opcionesRow:     { flexDirection: 'row', gap: 8 },
+  opcion:          { flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1,
+                     alignItems: 'center', justifyContent: 'center', gap: 2 },
+  opcionLabel:     { fontSize: 15, fontWeight: 'bold' },
+  miPickDot:       { fontSize: 7 },
 
-  rankRow:        { flexDirection: 'row', alignItems: 'center', gap: 12,
-                    backgroundColor: '#0D1117', borderRadius: 14, padding: 14,
-                    borderWidth: 1, borderColor: '#1E2330' },
-  rankPos:        { width: 36, textAlign: 'center', fontWeight: 'bold' },
-  rankName:       { color: '#FFF', fontSize: 14, fontWeight: '600' },
-  rankGanador:    { color: '#FFD700', fontSize: 10, letterSpacing: 1, marginTop: 2 },
-  rankAciBox:     { alignItems: 'center', borderWidth: 1, borderRadius: 10,
-                    paddingHorizontal: 12, paddingVertical: 6 },
-  rankAciNum:     { fontSize: 20, fontWeight: 'bold' },
-  rankAciLbl:     { color: '#404040', fontSize: 8, letterSpacing: 1 },
-  emptyTxt:       { color: '#404040', textAlign: 'center', padding: 30, letterSpacing: 1 },
+  // Ranking header
+  rankHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                     backgroundColor: '#0D1117', borderRadius: 12, padding: 12, marginBottom: 4,
+                     borderWidth: 1, borderColor: '#1E2330' },
+  rankHeaderLeft:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  liveIndicator:   { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2ECC71',
+                     shadowColor: '#2ECC71', shadowOpacity: 0.8, shadowRadius: 4 },
+  liveIndicatorPulse: { shadowOpacity: 1, shadowRadius: 10, shadowColor: '#2ECC71' },
+  rankHeaderTitle: { color: '#2ECC71', fontSize: 11, fontWeight: 'bold', letterSpacing: 2 },
+  rankHeaderRight: { alignItems: 'flex-end', gap: 2 },
+  miPosText:       { color: '#A0A0A0', fontSize: 12 },
+  totalPartsText:  { color: '#505050', fontSize: 10, letterSpacing: 1 },
+
+  // Ranking rows
+  rankRow:         { backgroundColor: '#0D1117', borderRadius: 14, borderWidth: 1,
+                     borderColor: '#1E2330', overflow: 'hidden' },
+  rankInner:       { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  rankPos:         { width: 36, textAlign: 'center', fontWeight: 'bold' },
+  rankName:        { color: '#FFF', fontSize: 14, fontWeight: '600', marginBottom: 6 },
+  rankBarWrap:     { height: 3, backgroundColor: '#1A1D24', borderRadius: 2, overflow: 'hidden' },
+  rankBarFill:     { height: '100%', borderRadius: 2 },
+  rankGanador:     { color: '#FFD700', fontSize: 10, letterSpacing: 1, marginTop: 4 },
+  rankAciBox:      { alignItems: 'center', borderWidth: 1, borderRadius: 10,
+                     paddingHorizontal: 10, paddingVertical: 6, minWidth: 52 },
+  rankAciNum:      { fontSize: 20, fontWeight: 'bold' },
+  rankAciLbl:      { color: '#404040', fontSize: 9, letterSpacing: 0.5 },
+
+  // Separador "fuera del top"
+  separador:       { flexDirection: 'row', alignItems: 'center', gap: 8,
+                     paddingHorizontal: 14, paddingTop: 8, marginTop: -8 },
+  separadorLine:   { flex: 1, height: 1, backgroundColor: '#1E2330' },
+  separadorTxt:    { color: '#303030', fontSize: 12, letterSpacing: 3 },
+
+  // Empty
+  emptyRank:       { alignItems: 'center', paddingVertical: 40, gap: 10 },
+  emptyIcon:       { fontSize: 40 },
+  emptyTxt:        { color: '#404040', textAlign: 'center', letterSpacing: 1, fontSize: 13 },
 });

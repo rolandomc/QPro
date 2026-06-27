@@ -50,10 +50,31 @@ export default function ResultsScreen() {
 
       if (error) throw error;
 
-      // Enriquecer cada item con jugadores_count y ya_participo=true (el usuario ya participó en todas)
+      // Obtener ids de quinielas únicas
+      const quinielaIds = [...new Set(
+        (data || []).map((item: any) => item.quinielas?.id).filter(Boolean)
+      )] as string[];
+
+      // Traer primer partido (por orden) de cada quiniela
+      const primerPartidoMap: Record<string, string> = {};
+      if (quinielaIds.length > 0) {
+        const { data: primerosPartidos } = await supabase
+          .from('partidos')
+          .select('quiniela_id, fecha_partido')
+          .in('quiniela_id', quinielaIds)
+          .order('orden', { ascending: true });
+
+        for (const p of (primerosPartidos || [])) {
+          if (!primerPartidoMap[p.quiniela_id] && p.fecha_partido) {
+            primerPartidoMap[p.quiniela_id] = p.fecha_partido;
+          }
+        }
+      }
+
       const enriquecido = (data || []).map((item: any) => ({
         ...item,
         jugadores_count: item.quinielas?.participaciones?.[0]?.count ?? 0,
+        fecha_primer_partido: primerPartidoMap[item.quinielas?.id] ?? item.quinielas?.fecha_cierre ?? null,
       }));
 
       setParticipaciones(enriquecido);
@@ -185,7 +206,7 @@ export default function ResultsScreen() {
                 premioTotal={Number(q.premio_total)}
                 estado={q.estado}
                 totalPartidos={q.partidos?.length ?? 0}
-                fechaCierre={q.fecha_cierre}
+                fechaCierre={item.fecha_primer_partido}
                 jugadoresMinimos={q.jugadores_minimos ?? 0}
                 porcentajeAdmin={q.porcentaje_admin ?? 0}
                 modoResultados

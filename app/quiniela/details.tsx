@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   StyleSheet, Text, View, ActivityIndicator,
   TouchableOpacity, FlatList, Alert, Linking, Platform,
@@ -13,15 +13,7 @@ import { supabase } from '../../src/config/supabase';
 
 type ConfirmState = 'idle' | 'confirming' | 'confirmingEdit' | 'success' | 'successEdit' | 'error';
 
-/** Abre una URL de forma compatible con iOS Safari, PWA y Android */
-function openExternalURL(url: string) {
-  if (Platform.OS === 'web') {
-    // En iOS Safari / PWA window.location.href es la única forma confiable
-    window.location.href = url;
-  } else {
-    Linking.openURL(url);
-  }
-}
+const PENDING_KEY = 'qpro_pago_pendiente';
 
 export default function QuinielaDetailsScreen() {
   const router = useRouter();
@@ -39,7 +31,21 @@ export default function QuinielaDetailsScreen() {
   const [errorMsg,        setErrorMsg]        = useState('');
   const [faltanMsg,       setFaltanMsg]       = useState('');
 
+  // Ref para bloquear doble tap
+  const openingRef = useRef(false);
   const picksOriginalesRef = useRef<Record<string, 'local' | 'empate' | 'visitante'>>({});
+
+  // Al montar: verificar si volvemos de MP (solo web)
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    try {
+      const pending = localStorage.getItem(PENDING_KEY);
+      if (pending === id) {
+        localStorage.removeItem(PENDING_KEY);
+        setConfirmState('success');
+      }
+    } catch (_) {}
+  }, [id]);
 
   const cargarPicksActuales = useCallback(async (partId: string) => {
     const { data: sels } = await supabase
@@ -153,7 +159,11 @@ export default function QuinielaDetailsScreen() {
   };
 
   const handleConfirmarFinal = async () => {
+    // Bloquear doble tap
+    if (openingRef.current || saving) return;
+    openingRef.current = true;
     setSaving(true);
+
     try {
       const participacion = await QuinielasService.guardarSelecciones(id, selecciones);
       const partId = participacion.id ?? participacionId;
@@ -163,10 +173,12 @@ export default function QuinielaDetailsScreen() {
         id as string
       );
 
-      // En web (iOS Safari / PWA): redirigir en el mismo tab ANTES de cambiar state
-      // En nativo: Linking es fire-and-forget, cambiamos state primero
       if (Platform.OS === 'web') {
+        // Guardar en localStorage ANTES de salir para detectar el regreso
+        try { localStorage.setItem(PENDING_KEY, id as string); } catch (_) {}
         window.location.href = init_point;
+        // No llamar setSaving(false) ni openingRef = false: la página navega
+        return;
       } else {
         setConfirmState('success');
         Linking.openURL(init_point);
@@ -174,7 +186,7 @@ export default function QuinielaDetailsScreen() {
     } catch (e: any) {
       setErrorMsg(e.message);
       setConfirmState('error');
-    } finally {
+      openingRef.current = false;
       setSaving(false);
     }
   };
@@ -233,7 +245,7 @@ export default function QuinielaDetailsScreen() {
           <Text style={{ fontSize: 50, marginBottom: 20 }}>❌</Text>
           <Text style={styles.successTitle}>Algo salió mal</Text>
           <Text style={styles.successSub}>{errorMsg}</Text>
-          <TouchableOpacity style={[styles.successBtn, { backgroundColor: '#E74C3C' }]} onPress={() => setConfirmState('idle')}>
+          <TouchableOpacity style={[styles.successBtn, { backgroundColor: '#E74C3C' }]} onPress={() => { setConfirmState('idle'); openingRef.current = false; }}>
             <Text style={styles.successBtnTxt}>Reintentar</Text>
           </TouchableOpacity>
         </View>
@@ -287,7 +299,11 @@ export default function QuinielaDetailsScreen() {
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
               <Text style={styles.cancelBtnTxt}>Revisar</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmarFinal} disabled={saving}>
+            <TouchableOpacity
+              style={[styles.confirmBtn, saving && { opacity: 0.6 }]}
+              onPress={handleConfirmarFinal}
+              disabled={saving || openingRef.current}
+            >
               {saving
                 ? <ActivityIndicator color="#000" />
                 : <Text style={styles.confirmBtnTxt}>💳 Ir a pagar ${quiniela?.precio_entrada ?? 50}</Text>}

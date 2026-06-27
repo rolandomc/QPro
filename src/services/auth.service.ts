@@ -1,12 +1,53 @@
 import { supabase } from '../config/supabase';
 
+interface SignUpMeta {
+  nombre?: string;
+  apellido?: string;
+  username?: string;
+  display_name?: string;
+}
+
 export const AuthService = {
   /**
-   * Registrar un nuevo usuario
+   * Registrar un nuevo usuario.
+   * Crea la cuenta en Supabase Auth y luego inserta/actualiza
+   * el perfil en public.profiles.
    */
-  async signUp(email: string, password: string) {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+  async signUp(email: string, password: string, meta: SignUpMeta = {}) {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          nombre:       meta.nombre ?? '',
+          apellido:     meta.apellido ?? '',
+          username:     meta.username ?? '',
+          display_name: meta.display_name ?? '',
+        },
+      },
+    });
     if (error) throw error;
+
+    // Insertar perfil en public.profiles si se obtuvo el usuario
+    const userId = data.user?.id;
+    if (userId && meta.username) {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id:           userId,
+          username:     meta.username,
+          nombre:       meta.nombre ?? '',
+          apellido:     meta.apellido ?? '',
+          display_name: meta.display_name ?? '',
+        }, { onConflict: 'id' });
+
+      // No bloqueamos el registro si el upsert falla (p.ej. columna inexistente)
+      // El trigger de Supabase o una migración futura puede completarlo.
+      if (profileError) {
+        console.warn('[AuthService] profiles upsert:', profileError.message);
+      }
+    }
+
     return data;
   },
 

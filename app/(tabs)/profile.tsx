@@ -38,7 +38,6 @@ export default function ProfileScreen() {
       const adminStatus = await AdminService.isAdmin();
       setIsAdmin(adminStatus);
 
-      // Leer perfil: username, display_name, nombre, apellido
       const { data: profile } = await supabase
         .from('profiles')
         .select('username, display_name, nombre, apellido')
@@ -55,7 +54,6 @@ export default function ProfileScreen() {
       setUsername(uname);
       setDisplayName(dname);
 
-      // Traemos todas las participaciones con info de quiniela
       const { data: parts } = await supabase
         .from('participaciones')
         .select(`
@@ -107,7 +105,6 @@ export default function ProfileScreen() {
 
       setStats({ jugadas, ganadas, pctAcierto, roi, invertido, ganado, mejorPos });
 
-      // Notificaciones
       const { data: notifsData } = await supabase
         .from('notificaciones').select('*')
         .eq('user_id', user.id)
@@ -137,7 +134,6 @@ export default function ProfileScreen() {
     ]);
   };
 
-  // Iniciales: primeras 2 letras del displayName o username
   const initials = (displayName || username)
     ? (displayName || username).substring(0, 2).toUpperCase()
     : '?';
@@ -161,7 +157,12 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={st.container} edges={['top']}>
       <Header />
-      <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={st.scroll}
+        showsVerticalScrollIndicator={false}
+        bounces
+        overScrollMode="always"
+      >
 
         {/* Avatar + nombre */}
         <View style={st.heroSection}>
@@ -178,9 +179,7 @@ export default function ProfileScreen() {
             )}
           </View>
 
-          {/* Nombre completo */}
           <Text style={st.nombre}>{displayName || username || 'Usuario'}</Text>
-          {/* @username — siempre visible */}
           {username ? (
             <View style={st.usernamePill}>
               <Text style={st.usernamePillTxt}>@{username}</Text>
@@ -304,7 +303,7 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        {/* Cerrar sesion */}
+        {/* Cerrar sesión */}
         <TouchableOpacity style={st.signOutBtn} onPress={handleSignOut} disabled={signingOut}>
           {signingOut
             ? <ActivityIndicator color="#E74C3C" />
@@ -318,7 +317,7 @@ export default function ProfileScreen() {
 
 const st = StyleSheet.create({
   container:        { flex: 1, backgroundColor: '#0A0C10' },
-  scroll:           { padding: 16, paddingBottom: 50 },
+  scroll:           { padding: 16, paddingBottom: 120 },
   heroSection:      { alignItems: 'center', marginBottom: 24 },
   avatarWrap:       { marginBottom: 14, alignItems: 'center' },
   avatarNeonRing:   { width: 92, height: 92, borderRadius: 46, borderWidth: 2,

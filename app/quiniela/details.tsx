@@ -146,20 +146,16 @@ export default function QuinielaDetailsScreen() {
   const handleConfirmarFinal = async () => {
     setSaving(true);
     try {
-      // 1. Guardar selecciones -> retorna el objeto participacion
       const participacion = await QuinielasService.guardarSelecciones(id, selecciones);
       const partId = participacion.id ?? participacionId;
 
-      // 2. Crear preferencia de pago en Mercado Pago
       const { init_point } = await MercadoPagoService.crearPreferencia(
         partId!,
         id as string
       );
 
-      // 3. Abrir el checkout de MP en el browser
       await WebBrowser.openBrowserAsync(init_point);
 
-      // 4. Mostrar pantalla de exito al volver
       setConfirmState('success');
     } catch (e: any) {
       setErrorMsg(e.message);
@@ -208,7 +204,7 @@ export default function QuinielaDetailsScreen() {
           <Text style={styles.successSub}>
             {'Tus picks fueron guardados.\nTu participaci\u00f3n se confirmar\u00e1 cuando MP apruebe el pago.'}
           </Text>
-          <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/(tabs)/resultados')}>
+          <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/(tabs)/results')}>
             <Text style={styles.successBtnTxt}>Ver mis quinielas</Text>
           </TouchableOpacity>
         </View>

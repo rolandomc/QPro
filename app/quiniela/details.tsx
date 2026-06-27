@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ActivityIndicator,
-  TouchableOpacity, FlatList, Alert, Linking,
+  TouchableOpacity, FlatList, Alert, Linking, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -12,6 +12,16 @@ import { MercadoPagoService } from '../../src/services/mercadopago.service';
 import { supabase } from '../../src/config/supabase';
 
 type ConfirmState = 'idle' | 'confirming' | 'confirmingEdit' | 'success' | 'successEdit' | 'error';
+
+/** Abre una URL de forma compatible con iOS Safari, PWA y Android */
+function openExternalURL(url: string) {
+  if (Platform.OS === 'web') {
+    // En iOS Safari / PWA window.location.href es la única forma confiable
+    window.location.href = url;
+  } else {
+    Linking.openURL(url);
+  }
+}
 
 export default function QuinielaDetailsScreen() {
   const router = useRouter();
@@ -145,22 +155,22 @@ export default function QuinielaDetailsScreen() {
   const handleConfirmarFinal = async () => {
     setSaving(true);
     try {
-      // 1. Guardar selecciones
       const participacion = await QuinielasService.guardarSelecciones(id, selecciones);
       const partId = participacion.id ?? participacionId;
 
-      // 2. Crear preferencia MP
       const { init_point } = await MercadoPagoService.crearPreferencia(
         partId!,
         id as string
       );
 
-      // 3. Mostrar pantalla de exito ANTES de abrir MP
-      //    (en iOS Linking es fire-and-forget, no bloquea)
-      setConfirmState('success');
-
-      // 4. Abrir MP: Linking funciona en iOS nativo, iOS Safari y Android
-      await Linking.openURL(init_point);
+      // En web (iOS Safari / PWA): redirigir en el mismo tab ANTES de cambiar state
+      // En nativo: Linking es fire-and-forget, cambiamos state primero
+      if (Platform.OS === 'web') {
+        window.location.href = init_point;
+      } else {
+        setConfirmState('success');
+        Linking.openURL(init_point);
+      }
     } catch (e: any) {
       setErrorMsg(e.message);
       setConfirmState('error');
@@ -204,11 +214,11 @@ export default function QuinielaDetailsScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
           <Text style={{ fontSize: 60, marginBottom: 20 }}>🍀</Text>
-          <Text style={styles.successTitle}>¡Redirigiendo a MP!</Text>
+          <Text style={styles.successTitle}>¡Pago en proceso!</Text>
           <Text style={styles.successSub}>
-            {'Tus picks fueron guardados.\nSe abrir\u00e1 Mercado Pago para completar el pago.'}
+            {'Tus picks fueron guardados.\nTu participaci\u00f3n se confirmar\u00e1 cuando MP apruebe el pago.'}
           </Text>
-          <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/(tabs)/results')}>
+          <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/results')}>
             <Text style={styles.successBtnTxt}>Ver mis quinielas</Text>
           </TouchableOpacity>
         </View>

@@ -59,7 +59,6 @@ export default function QuinielasScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.listContent, quinielas.length === 0 && { flex: 1 }]}
         showsVerticalScrollIndicator={false}
-        // Cuando no hay quinielas muestra la pantalla enriquecida
         ListEmptyComponent={<EmptyQuinielas />}
         refreshControl={
           <RefreshControl
@@ -86,6 +85,8 @@ export default function QuinielasScreen() {
             fechaCierre={item.fecha_cierre}
             jugadoresMinimos={item.jugadores_minimos ?? 0}
             porcentajeAdmin={item.porcentaje_admin ?? 0}
+            jugadoresCount={item.jugadores_count ?? 0}
+            yaParticipo={item.ya_participo ?? false}
           />
         )}
       />

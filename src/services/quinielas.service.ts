@@ -3,13 +3,32 @@ import { supabase } from '../config/supabase';
 export const QuinielasService = {
 
   async getQuinielasAbiertas() {
+    const { data: { user } } = await supabase.auth.getUser();
+
     const { data, error } = await supabase
       .from('quinielas')
-      .select('*, partidos(count)')
+      .select('*, partidos(count), participaciones(count)')
       .eq('estado', 'abierta')
       .order('created_at', { ascending: false });
     if (error) throw error;
-    return data;
+
+    if (!user || !data) return data;
+
+    // Verificar en una sola query cuáles ya tiene el usuario
+    const ids = data.map((q: any) => q.id);
+    const { data: misParticipaciones } = await supabase
+      .from('participaciones')
+      .select('quiniela_id')
+      .eq('user_id', user.id)
+      .in('quiniela_id', ids);
+
+    const yaParticipo = new Set((misParticipaciones || []).map((p: any) => p.quiniela_id));
+
+    return data.map((q: any) => ({
+      ...q,
+      jugadores_count: q.participaciones?.[0]?.count ?? 0,
+      ya_participo: yaParticipo.has(q.id),
+    }));
   },
 
   async getFinalizadas() {
@@ -22,7 +41,6 @@ export const QuinielasService = {
     if (error) throw error;
 
     const resultado = await Promise.all((data || []).map(async (q: any) => {
-      // Top 3 por aciertos (ganadores primero, luego resto)
       const { data: tops } = await supabase
         .from('participaciones')
         .select('user_id, aciertos, estado, monto_pagado')

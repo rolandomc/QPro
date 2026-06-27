@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../config/supabase';
 import { colors } from '../theme/colors';
@@ -15,8 +15,28 @@ interface Props {
   fechaCierre?: string;
   jugadoresMinimos?: number;
   porcentajeAdmin?: number;
-  /** Modo resultados: oculta lógica de participar, siempre va a [id] */
   modoResultados?: boolean;
+  // Props precargados desde el service (evitan queries extras)
+  jugadoresCount?: number;
+  yaParticipo?: boolean;
+}
+
+// Bloque skeleton animado
+function SkeletonBlock({ width, height = 18, style }: { width: number | string; height?: number; style?: any }) {
+  const anim = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [anim]);
+  return (
+    <Animated.View
+      style={[{ width, height, borderRadius: 6, backgroundColor: '#2A2D35', opacity: anim }, style]}
+    />
+  );
 }
 
 export function QuinielaCard({
@@ -31,15 +51,44 @@ export function QuinielaCard({
   jugadoresMinimos = 0,
   porcentajeAdmin  = 0,
   modoResultados   = false,
+  jugadoresCount,
+  yaParticipo: yaParticipoInit,
 }: Props) {
   const router = useRouter();
-  const [jugadoresPagados, setJugadoresPagados] = useState(0);
-  const [yaParticipo,      setYaParticipo]      = useState(false);
+
+  // Si vienen precargados del service, usarlos directamente; si no, iniciar en null para mostrar skeleton
+  const [jugadoresPagados, setJugadoresPagados] = React.useState<number | null>(
+    jugadoresCount !== undefined ? jugadoresCount : null
+  );
+  const [yaParticipo, setYaParticipo] = React.useState<boolean | null>(
+    yaParticipoInit !== undefined ? yaParticipoInit : null
+  );
 
   useEffect(() => {
     if (!id) return;
-    let channel: any;
+    // Solo lanzar query si no vinieron precargados
+    const needsCount = jugadoresCount === undefined;
+    const needsParticipo = yaParticipoInit === undefined;
+    if (!needsCount && !needsParticipo) {
+      // Todo precargado, solo suscribirse a cambios en tiempo real
+      const channel = supabase
+        .channel(`pozo-${id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` },
+          async () => {
+            const { count } = await supabase
+              .from('participaciones')
+              .select('*', { count: 'exact', head: true })
+              .eq('quiniela_id', id)
+              .in('estado', ['pagado', 'ganador', 'perdedor', 'pendiente']);
+            setJugadoresPagados(count ?? 0);
+          }
+        )
+        .subscribe();
+      return () => { supabase.removeChannel(channel); };
+    }
 
+    // Fallback: cargar por cuenta propia si no vinieron precargados
+    let channel: any;
     const cargar = async () => {
       const { count } = await supabase
         .from('participaciones')
@@ -57,38 +106,38 @@ export function QuinielaCard({
           .eq('user_id', user.id)
           .maybeSingle();
         setYaParticipo(!!part);
+      } else {
+        setYaParticipo(false);
       }
     };
 
     cargar();
     channel = supabase
       .channel(`pozo-${id}`)
-      .on('postgres_changes', {
-        event: '*', schema: 'public', table: 'participaciones',
-        filter: `quiniela_id=eq.${id}`,
-      }, cargar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` }, cargar)
       .subscribe();
     return () => { if (channel) supabase.removeChannel(channel); };
-  }, [id]);
+  }, [id, jugadoresCount, yaParticipoInit]);
 
   const tieneMinimo     = jugadoresMinimos > 0;
-  const pozoActual      = jugadoresPagados * precioEntrada;
+  const jug             = jugadoresPagados ?? 0;
+  const pozoActual      = jug * precioEntrada;
   const premioCalculado = tieneMinimo && porcentajeAdmin > 0
     ? pozoActual * (1 - porcentajeAdmin / 100)
     : premioTotal;
-  const minimoAlcanzado = tieneMinimo ? jugadoresPagados >= jugadoresMinimos : true;
-  const faltanJugadores = Math.max(0, jugadoresMinimos - jugadoresPagados);
+  const minimoAlcanzado = tieneMinimo ? jug >= jugadoresMinimos : true;
+  const faltanJugadores = Math.max(0, jugadoresMinimos - jug);
   const premioVisible   = !tieneMinimo || minimoAlcanzado;
+
+  const isLoading = jugadoresPagados === null || yaParticipo === null;
 
   const estadoColor = estado === 'abierta' ? '#2ECC71' : estado === 'cerrada' ? '#F39C12' : '#9B59B6';
   const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🟡 Cerrada' : '✅ Finalizada';
 
   const handlePress = () => {
     if (!modoResultados && estado === 'abierta' && !yaParticipo) {
-      // Quiniela abierta y no ha participado → pantalla de selecciones
       router.push(`/quiniela/details?id=${id}`);
     } else {
-      // Ya participó, cerrada, finalizada, o modo resultados → picks/ranking
       router.push(`/quiniela/${id}`);
     }
   };
@@ -103,8 +152,6 @@ export function QuinielaCard({
 
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress} activeOpacity={0.85}>
-
-      {/* Header */}
       <View style={styles.cardHeader}>
         <Text style={styles.title}>🏆 {titulo}</Text>
         <View style={[styles.estadoBadge, { borderColor: estadoColor }]}>
@@ -114,7 +161,6 @@ export function QuinielaCard({
 
       {descripcion ? <Text style={styles.descripcion}>{descripcion}</Text> : null}
 
-      {/* Stats */}
       <View style={styles.statsRow}>
         <View style={styles.stat}>
           <Text style={styles.statValue}>{totalPartidos}</Text>
@@ -127,7 +173,9 @@ export function QuinielaCard({
         </View>
         <View style={styles.statDivider} />
         <View style={styles.stat}>
-          {premioVisible ? (
+          {isLoading ? (
+            <SkeletonBlock width={52} height={20} style={{ marginBottom: 4 }} />
+          ) : premioVisible ? (
             <Text style={[styles.statValue, { color: '#2ECC71' }]}>
               ${premioCalculado > 0 ? premioCalculado.toFixed(0) : '---'}
             </Text>
@@ -138,15 +186,20 @@ export function QuinielaCard({
         </View>
         <View style={styles.statDivider} />
         <View style={styles.stat}>
-          <Text style={[styles.statValue, { color: '#00E5FF' }]}>{jugadoresPagados}</Text>
+          {isLoading ? (
+            <SkeletonBlock width={32} height={20} style={{ marginBottom: 4 }} />
+          ) : (
+            <Text style={[styles.statValue, { color: '#00E5FF' }]}>{jug}</Text>
+          )}
           <Text style={styles.statLabel}>Jugadores</Text>
         </View>
       </View>
 
-      {/* Barra de progreso hacia mínimo */}
       {tieneMinimo && (
         <View style={styles.pozoBox}>
-          {!minimoAlcanzado ? (
+          {isLoading ? (
+            <SkeletonBlock width="70%" height={12} style={{ marginBottom: 8 }} />
+          ) : !minimoAlcanzado ? (
             <Text style={styles.faltanText}>
               ⏳ Faltan {faltanJugadores} jugador{faltanJugadores !== 1 ? 'es' : ''} para activar el pozo
             </Text>
@@ -155,18 +208,25 @@ export function QuinielaCard({
           )}
           <View style={styles.progressRow}>
             <View style={styles.progressTrack}>
-              <View style={[
-                styles.progressFill,
-                { width: `${Math.min((jugadoresPagados / jugadoresMinimos) * 100, 100)}%` },
-                minimoAlcanzado && styles.progressFillGreen,
-              ]} />
+              {isLoading ? (
+                <SkeletonBlock width="40%" height={5} style={{ borderRadius: 3 }} />
+              ) : (
+                <View style={[
+                  styles.progressFill,
+                  { width: `${Math.min((jug / jugadoresMinimos) * 100, 100)}%` },
+                  minimoAlcanzado && styles.progressFillGreen,
+                ]} />
+              )}
             </View>
-            <Text style={styles.progressLabel}>{jugadoresPagados}/{jugadoresMinimos}</Text>
+            {isLoading ? (
+              <SkeletonBlock width={28} height={10} />
+            ) : (
+              <Text style={styles.progressLabel}>{jug}/{jugadoresMinimos}</Text>
+            )}
           </View>
         </View>
       )}
 
-      {/* Botón */}
       <TouchableOpacity
         style={[styles.button, !botonActivo && styles.buttonDisabled]}
         onPress={handlePress}
@@ -175,7 +235,6 @@ export function QuinielaCard({
           {botonLabel}
         </Text>
       </TouchableOpacity>
-
     </TouchableOpacity>
   );
 }
@@ -190,7 +249,7 @@ const styles = StyleSheet.create({
   estadoText:        { fontSize: 11, fontWeight: 'bold' },
   descripcion:       { color: colors.textMuted, fontSize: 13, marginBottom: 15 },
   statsRow:          { flexDirection: 'row', backgroundColor: '#1C1F26', borderRadius: 12, padding: 12, marginBottom: 12, alignItems: 'center' },
-  stat:              { flex: 1, alignItems: 'center' },
+  stat:              { flex: 1, alignItems: 'center', minHeight: 40, justifyContent: 'center' },
   statValue:         { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   statLabel:         { color: colors.textMuted, fontSize: 11, marginTop: 2 },
   statDivider:       { width: 1, height: 30, backgroundColor: '#2A2D35' },

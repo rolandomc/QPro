@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Animated } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, Animated, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../config/supabase';
 import { colors } from '../theme/colors';
@@ -16,12 +16,11 @@ interface Props {
   jugadoresMinimos?: number;
   porcentajeAdmin?: number;
   modoResultados?: boolean;
-  // Props precargados desde el service (evitan queries extras)
   jugadoresCount?: number;
   yaParticipo?: boolean;
 }
 
-// Bloque skeleton animado
+// ─── Skeleton ───────────────────────────────────────────────────────────────
 function SkeletonBlock({ width, height = 18, style }: { width: number | string; height?: number; style?: any }) {
   const anim = useRef(new Animated.Value(0.3)).current;
   useEffect(() => {
@@ -32,13 +31,44 @@ function SkeletonBlock({ width, height = 18, style }: { width: number | string; 
       ])
     ).start();
   }, [anim]);
-  return (
-    <Animated.View
-      style={[{ width, height, borderRadius: 6, backgroundColor: '#2A2D35', opacity: anim }, style]}
-    />
-  );
+  return <Animated.View style={[{ width, height, borderRadius: 6, backgroundColor: '#2A2D35', opacity: anim }, style]} />;
 }
 
+// ─── Countdown hook ──────────────────────────────────────────────────────────
+function useCountdown(fechaCierre?: string, estado?: string) {
+  const [label, setLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!fechaCierre || estado !== 'abierta') { setLabel(null); return; }
+
+    const calc = () => {
+      const diff = new Date(fechaCierre).getTime() - Date.now();
+      if (diff <= 0) { setLabel('⏰ Cerrando...'); return; }
+
+      const totalSecs = Math.floor(diff / 1000);
+      const days  = Math.floor(totalSecs / 86400);
+      const hours = Math.floor((totalSecs % 86400) / 3600);
+      const mins  = Math.floor((totalSecs % 3600) / 60);
+      const secs  = totalSecs % 60;
+
+      if (days > 0) {
+        setLabel(`⏱ Cierra en ${days}d ${hours}h`);
+      } else if (hours > 0) {
+        setLabel(`⏱ Cierra en ${hours}h ${String(mins).padStart(2,'0')}m`);
+      } else {
+        setLabel(`⏱ Cierra en ${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`);
+      }
+    };
+
+    calc();
+    const interval = setInterval(calc, 1000);
+    return () => clearInterval(interval);
+  }, [fechaCierre, estado]);
+
+  return label;
+}
+
+// ─── Componente principal ────────────────────────────────────────────────────
 export function QuinielaCard({
   id,
   titulo,
@@ -55,22 +85,21 @@ export function QuinielaCard({
   yaParticipo: yaParticipoInit,
 }: Props) {
   const router = useRouter();
+  const countdown = useCountdown(fechaCierre, estado);
 
-  // Si vienen precargados del service, usarlos directamente; si no, iniciar en null para mostrar skeleton
-  const [jugadoresPagados, setJugadoresPagados] = React.useState<number | null>(
+  const [jugadoresPagados, setJugadoresPagados] = useState<number | null>(
     jugadoresCount !== undefined ? jugadoresCount : null
   );
-  const [yaParticipo, setYaParticipo] = React.useState<boolean | null>(
+  const [yaParticipo, setYaParticipo] = useState<boolean | null>(
     yaParticipoInit !== undefined ? yaParticipoInit : null
   );
 
   useEffect(() => {
     if (!id) return;
-    // Solo lanzar query si no vinieron precargados
-    const needsCount = jugadoresCount === undefined;
+    const needsCount    = jugadoresCount === undefined;
     const needsParticipo = yaParticipoInit === undefined;
+
     if (!needsCount && !needsParticipo) {
-      // Todo precargado, solo suscribirse a cambios en tiempo real
       const channel = supabase
         .channel(`pozo-${id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` },
@@ -87,7 +116,6 @@ export function QuinielaCard({
       return () => { supabase.removeChannel(channel); };
     }
 
-    // Fallback: cargar por cuenta propia si no vinieron precargados
     let channel: any;
     const cargar = async () => {
       const { count } = await supabase
@@ -128,8 +156,7 @@ export function QuinielaCard({
   const minimoAlcanzado = tieneMinimo ? jug >= jugadoresMinimos : true;
   const faltanJugadores = Math.max(0, jugadoresMinimos - jug);
   const premioVisible   = !tieneMinimo || minimoAlcanzado;
-
-  const isLoading = jugadoresPagados === null || yaParticipo === null;
+  const isLoading       = jugadoresPagados === null || yaParticipo === null;
 
   const estadoColor = estado === 'abierta' ? '#2ECC71' : estado === 'cerrada' ? '#F39C12' : '#9B59B6';
   const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🟡 Cerrada' : '✅ Finalizada';
@@ -142,6 +169,23 @@ export function QuinielaCard({
     }
   };
 
+  const handleShare = async () => {
+    const premioTexto = premioVisible && premioCalculado > 0
+      ? `$${premioCalculado.toFixed(0)} en juego`
+      : `Entrada $${precioEntrada}`;
+    const countdownTexto = countdown ? `\n${countdown}` : '';
+    try {
+      await Share.share({
+        title: `🏆 ${titulo} — QPro`,
+        message:
+          `🏆 ${titulo}\n` +
+          `${premioTexto} · ${totalPartidos} partidos${countdownTexto}\n\n` +
+          `¡Únete y demuestra que sabes de fútbol! 👇\n` +
+          `qpro://quiniela/${id}`,
+      });
+    } catch (_) {}
+  };
+
   const botonLabel = modoResultados
     ? (estado === 'finalizada' ? 'Ver resultado →' : 'Ver mis picks →')
     : estado === 'abierta'
@@ -152,15 +196,30 @@ export function QuinielaCard({
 
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress} activeOpacity={0.85}>
+
+      {/* Header: título + badge estado + share */}
       <View style={styles.cardHeader}>
         <Text style={styles.title}>🏆 {titulo}</Text>
-        <View style={[styles.estadoBadge, { borderColor: estadoColor }]}>
-          <Text style={[styles.estadoText, { color: estadoColor }]}>{estadoLabel}</Text>
+        <View style={styles.headerRight}>
+          <View style={[styles.estadoBadge, { borderColor: estadoColor }]}>
+            <Text style={[styles.estadoText, { color: estadoColor }]}>{estadoLabel}</Text>
+          </View>
+          <TouchableOpacity onPress={handleShare} style={styles.shareBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={styles.shareIcon}>⬆️</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
       {descripcion ? <Text style={styles.descripcion}>{descripcion}</Text> : null}
 
+      {/* Countdown — solo cuando está abierta y hay fecha */}
+      {countdown && (
+        <View style={styles.countdownRow}>
+          <Text style={styles.countdownText}>{countdown}</Text>
+        </View>
+      )}
+
+      {/* Stats */}
       <View style={styles.statsRow}>
         <View style={styles.stat}>
           <Text style={styles.statValue}>{totalPartidos}</Text>
@@ -195,6 +254,7 @@ export function QuinielaCard({
         </View>
       </View>
 
+      {/* Barra de progreso */}
       {tieneMinimo && (
         <View style={styles.pozoBox}>
           {isLoading ? (
@@ -235,6 +295,7 @@ export function QuinielaCard({
           {botonLabel}
         </Text>
       </TouchableOpacity>
+
     </TouchableOpacity>
   );
 }
@@ -245,9 +306,14 @@ const styles = StyleSheet.create({
   card:              { backgroundColor: colors.card, borderRadius: 16, padding: 20, marginBottom: 15, borderWidth: 1, borderColor: colors.border },
   cardHeader:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   title:             { color: colors.text, fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 10 },
+  headerRight:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
   estadoBadge:       { borderWidth: 1, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
   estadoText:        { fontSize: 11, fontWeight: 'bold' },
-  descripcion:       { color: colors.textMuted, fontSize: 13, marginBottom: 15 },
+  shareBtn:          { padding: 2 },
+  shareIcon:         { fontSize: 16 },
+  countdownRow:      { backgroundColor: 'rgba(243,156,18,0.10)', borderWidth: 1, borderColor: 'rgba(243,156,18,0.3)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 12, alignSelf: 'flex-start' },
+  countdownText:     { color: '#F39C12', fontSize: 12, fontWeight: '600', letterSpacing: 0.3 },
+  descripcion:       { color: colors.textMuted, fontSize: 13, marginBottom: 12 },
   statsRow:          { flexDirection: 'row', backgroundColor: '#1C1F26', borderRadius: 12, padding: 12, marginBottom: 12, alignItems: 'center' },
   stat:              { flex: 1, alignItems: 'center', minHeight: 40, justifyContent: 'center' },
   statValue:         { color: '#FFF', fontSize: 16, fontWeight: 'bold' },

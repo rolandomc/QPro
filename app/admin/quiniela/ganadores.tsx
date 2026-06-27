@@ -37,15 +37,15 @@ export default function GanadoresScreen() {
       if (errQ) throw errQ;
       if (errP) throw errP;
 
-      const userIds = (parts || []).map(p => p.user_id).filter(Boolean);
+      const userIds = (parts || []).map((p: any) => p.user_id).filter(Boolean);
       let usernameMap: Record<string, string> = {};
       if (userIds.length > 0) {
         const { data: profiles } = await supabase.from('profiles').select('id, username').in('id', userIds);
-        usernameMap = Object.fromEntries((profiles || []).map(pr => [pr.id, pr.username]));
+        usernameMap = Object.fromEntries((profiles || []).map((pr: any) => [pr.id, pr.username]));
       }
 
       setQuiniela(q);
-      setParticipantes((parts || []).map(p => ({
+      setParticipantes((parts || []).map((p: any) => ({
         ...p,
         aciertos:      p.aciertos ?? 0,
         premio_ganado: p.premio_ganado ?? 0,
@@ -57,6 +57,22 @@ export default function GanadoresScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Calcula el premio real: usa premio_total de BD si > 0,
+  // si no lo calcula desde participantes pagados x precio_entrada x (1 - admin%)
+  const calcularPremioReal = () => {
+    if (!quiniela) return 0;
+    const premioGuardado = Number(quiniela.premio_total ?? 0);
+    if (premioGuardado > 0) return premioGuardado;
+
+    // Contar pagados (o pendientes si no hay sistema de pago aún)
+    const pagados = participantes.filter(
+      (p: any) => p.estado === 'pagado' || p.estado === 'pendiente'
+    ).length;
+    const pozo      = pagados * Number(quiniela.precio_entrada ?? 0);
+    const adminPct  = Number(quiniela.porcentaje_admin ?? 0);
+    return Math.round(pozo * (1 - adminPct / 100));
   };
 
   const handleRecalcular = async () => {
@@ -81,22 +97,23 @@ export default function GanadoresScreen() {
       Alert.alert('⚠️ Sin aciertos', 'Presiona "Recalcular Aciertos" primero.');
       return;
     }
-    const premioTotal = quiniela.premio_total ?? 0;
-    if (premioTotal <= 0) {
-      Alert.alert('⚠️ Pozo vacío', 'El premio_total es 0. Actualiza la quiniela con el monto del pozo.');
+
+    const premioReal = calcularPremioReal();
+    if (premioReal <= 0) {
+      Alert.alert('⚠️ Pozo vacío', 'No hay participantes o el precio de entrada es 0.');
       return;
     }
 
     const maxAciertos     = participantes[0].aciertos;
-    const ganadores       = participantes.filter(p => p.aciertos === maxAciertos);
-    const montoPorGanador = Math.round(premioTotal / ganadores.length);
+    const ganadores       = participantes.filter((p: any) => p.aciertos === maxAciertos);
+    const montoPorGanador = Math.round(premioReal / ganadores.length);
 
     const msg = ganadores.length === 1
       ? `🏆 @${ganadores[0].username} — ${maxAciertos} aciertos\nPremio: $${montoPorGanador.toLocaleString()} (100% del pozo)`
       : `🥇 Empate entre ${ganadores.length} jugadores con ${maxAciertos} aciertos\nPremio: $${montoPorGanador.toLocaleString()} c/u`;
 
     Alert.alert('💰 Distribuir Premio',
-      `Premio total: $${premioTotal.toLocaleString()}\n\n${msg}\n\n¿Confirmar?`,
+      `Premio total: $${premioReal.toLocaleString()}\n\n${msg}\n\n¿Confirmar?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -123,7 +140,7 @@ export default function GanadoresScreen() {
                 });
               }
 
-              const perdedores = participantes.filter(p => !ganadoresIds.includes(p.id));
+              const perdedores = participantes.filter((p: any) => !ganadoresIds.includes(p.id));
               for (const p of perdedores) {
                 const { error } = await supabase
                   .from('participaciones')
@@ -139,9 +156,10 @@ export default function GanadoresScreen() {
                 });
               }
 
+              // Actualizar premio_total en la quiniela con el valor real calculado
               const { error: errFin } = await supabase
                 .from('quinielas')
-                .update({ estado: 'finalizada' })
+                .update({ estado: 'finalizada', premio_total: premioReal })
                 .eq('id', id);
               if (errFin) throw errFin;
 
@@ -167,8 +185,8 @@ export default function GanadoresScreen() {
     );
   };
 
-  const premioYaDistribuido = participantes.some(p => p.estado === 'ganador');
-  const premioTotal = quiniela?.premio_total ?? 0;
+  const premioYaDistribuido = participantes.some((p: any) => p.estado === 'ganador');
+  const premioReal = calcularPremioReal();
 
   if (loading) return (
     <SafeAreaView style={styles.container}>
@@ -193,7 +211,7 @@ export default function GanadoresScreen() {
             <Text style={styles.resumenLabel}>Participantes</Text>
           </View>
           <View style={[styles.resumenBox, styles.resumenBorder]}>
-            <Text style={[styles.resumenVal, { color: '#F39C12' }]}>${premioTotal.toLocaleString()}</Text>
+            <Text style={[styles.resumenVal, { color: '#F39C12' }]}>${premioReal.toLocaleString()}</Text>
             <Text style={styles.resumenLabel}>Premio Total</Text>
           </View>
           <View style={[styles.resumenBox, styles.resumenBorder]}>
@@ -241,11 +259,12 @@ export default function GanadoresScreen() {
         </View>
 
         <Text style={styles.sectionTitle}>Tabla de Posiciones</Text>
-        {participantes.map((part, index) => {
+        {participantes.map((part: any, index: number) => {
           const aciertos   = part.aciertos ?? 0;
           const porcentaje = totalPartidos > 0 ? Math.round((aciertos / totalPartidos) * 100) : 0;
           const esGanador  = part.estado === 'ganador';
           const esPerdedor = part.estado === 'perdedor';
+          const esPagado   = part.estado === 'pagado';
           return (
             <View key={part.id} style={[
               styles.rankCard,
@@ -266,7 +285,8 @@ export default function GanadoresScreen() {
                 )}
                 {esGanador  && <Text style={styles.rankBadgeGanador}>🏆 GANADOR</Text>}
                 {esPerdedor && <Text style={styles.rankBadgePerdedor}>PERDEDOR</Text>}
-                {!esGanador && !esPerdedor && <Text style={styles.rankBadgePendiente}>PENDIENTE</Text>}
+                {esPagado   && <Text style={styles.rankBadgePagado}>✅ PAGADO</Text>}
+                {!esGanador && !esPerdedor && !esPagado && <Text style={styles.rankBadgePendiente}>PENDIENTE</Text>}
               </View>
             </View>
           );
@@ -333,6 +353,9 @@ const styles = StyleSheet.create({
   rankBadgeGanador:   { color: '#2ECC71', fontSize: 11, fontWeight: 'bold' },
   rankBadgePerdedor:  { color: '#505050', fontSize: 10, fontWeight: 'bold',
                         borderWidth: 1, borderColor: '#505050', borderRadius: 4,
+                        paddingHorizontal: 6, paddingVertical: 2 },
+  rankBadgePagado:    { color: '#3498DB', fontSize: 10, fontWeight: 'bold',
+                        borderWidth: 1, borderColor: '#3498DB', borderRadius: 4,
                         paddingHorizontal: 6, paddingVertical: 2 },
   rankBadgePendiente: { color: '#F39C12', fontSize: 10, fontWeight: 'bold',
                         borderWidth: 1, borderColor: '#F39C12', borderRadius: 4,

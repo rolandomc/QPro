@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, ViewStyle, TextStyle } from 'react-native';
+import * as Haptics from 'expo-haptics';
 
 interface Props {
   title: string;
@@ -7,12 +8,29 @@ interface Props {
   style?: ViewStyle | ViewStyle[];
   textStyle?: TextStyle | TextStyle[];
   isNeon?: boolean;
+  haptic?: 'none' | 'light' | 'medium' | 'heavy';
 }
 
-export default function AnimatedButton({ title, onPress, style, textStyle, isNeon = false }: Props) {
+export default function AnimatedButton({
+  title,
+  onPress,
+  style,
+  textStyle,
+  isNeon = false,
+  haptic,
+}: Props) {
+  const handlePress = () => {
+    // Si se pasa haptic explícito úsalo; si no, neon=medium, normal=none
+    const level = haptic ?? (isNeon ? 'medium' : 'none');
+    if (level === 'light')  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (level === 'medium') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (level === 'heavy')  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    onPress();
+  };
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       style={({ pressed }) => [
         styles.button,
         isNeon && styles.neonBtn,

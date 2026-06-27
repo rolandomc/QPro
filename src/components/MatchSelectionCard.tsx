@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View, Pressable } from 'react-native';
+import * as Haptics from 'expo-haptics';
 
 interface Partido {
   id: string;
@@ -21,10 +22,21 @@ export default function MatchSelectionCard({ partido, index, seleccionActual, on
     : 'Fecha por confirmar';
 
   const opciones: { key: 'local' | 'empate' | 'visitante'; label: string; sublabel: string }[] = [
-    { key: 'local', label: '1', sublabel: partido.equipo_local },
-    { key: 'empate', label: 'X', sublabel: 'Empate' },
+    { key: 'local',     label: '1', sublabel: partido.equipo_local },
+    { key: 'empate',    label: 'X', sublabel: 'Empate' },
     { key: 'visitante', label: '2', sublabel: partido.equipo_visitante },
   ];
+
+  const handleSelect = (opcion: 'local' | 'empate' | 'visitante') => {
+    // Vibración distinta si es cambio de pick o primer pick
+    if (seleccionActual === opcion) return; // misma opción, no hacer nada
+    Haptics.impactAsync(
+      seleccionActual === null
+        ? Haptics.ImpactFeedbackStyle.Light   // primer pick: suave
+        : Haptics.ImpactFeedbackStyle.Medium  // cambio de pick: media
+    );
+    onSelect(opcion);
+  };
 
   return (
     <View style={styles.card}>
@@ -59,7 +71,7 @@ export default function MatchSelectionCard({ partido, index, seleccionActual, on
           return (
             <Pressable
               key={op.key}
-              onPress={() => onSelect(op.key)}
+              onPress={() => handleSelect(op.key)}
               style={({ pressed }) => [
                 styles.optionBtn,
                 isSelected && styles.optionBtnSelected,
@@ -98,8 +110,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     marginRight: 8,
   },
-  numText: { color: '#A0A0A0', fontSize: 11, fontWeight: 'bold' },
-  fecha: { color: '#707070', fontSize: 12, flex: 1 },
+  numText:    { color: '#A0A0A0', fontSize: 11, fontWeight: 'bold' },
+  fecha:      { color: '#707070', fontSize: 12, flex: 1 },
   checkBadge: {
     width: 22, height: 22, borderRadius: 11,
     backgroundColor: '#2ECC71',
@@ -113,23 +125,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 8,
   },
-  teamName: {
-    flex: 1,
-    color: '#A0A0A0',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  teamRight: { textAlign: 'right' },
+  teamName:     { flex: 1, color: '#A0A0A0', fontSize: 14, fontWeight: '600' },
+  teamRight:    { textAlign: 'right' },
   teamSelected: { color: '#2ECC71' },
-  vsText: {
-    color: '#505050',
-    fontSize: 12,
-    fontWeight: 'bold',
-    paddingHorizontal: 4,
-  },
+  vsText:       { color: '#505050', fontSize: 12, fontWeight: 'bold', paddingHorizontal: 4 },
 
-  optionsRow: { flexDirection: 'row', gap: 8 },
-  optionBtn: {
+  optionsRow:        { flexDirection: 'row', gap: 8 },
+  optionBtn:         {
     flex: 1,
     backgroundColor: '#1C1F26',
     paddingVertical: 10,
@@ -138,22 +140,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#2A2D35',
   },
-  optionBtnSelected: {
-    backgroundColor: 'rgba(46,204,113,0.12)',
-    borderColor: '#2ECC71',
-  },
-  optionBtnPressed: { opacity: 0.7 },
-  optionKey: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
+  optionBtnSelected: { backgroundColor: 'rgba(46,204,113,0.12)', borderColor: '#2ECC71' },
+  optionBtnPressed:  { opacity: 0.7 },
+  optionKey:         { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 2 },
   optionKeySelected: { color: '#2ECC71' },
-  optionSub: {
-    color: '#707070',
-    fontSize: 9,
-    textAlign: 'center',
-  },
+  optionSub:         { color: '#707070', fontSize: 9, textAlign: 'center' },
   optionSubSelected: { color: '#2ECC71' },
 });

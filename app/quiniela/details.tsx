@@ -1,11 +1,10 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ActivityIndicator,
-  TouchableOpacity, FlatList, Alert,
+  TouchableOpacity, FlatList, Alert, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import ProgressBar from '../../src/components/ProgressBar';
 import MatchSelectionCard from '../../src/components/MatchSelectionCard';
 import { QuinielasService } from '../../src/services/quinielas.service';
@@ -146,17 +145,22 @@ export default function QuinielaDetailsScreen() {
   const handleConfirmarFinal = async () => {
     setSaving(true);
     try {
+      // 1. Guardar selecciones
       const participacion = await QuinielasService.guardarSelecciones(id, selecciones);
       const partId = participacion.id ?? participacionId;
 
+      // 2. Crear preferencia MP
       const { init_point } = await MercadoPagoService.crearPreferencia(
         partId!,
         id as string
       );
 
-      await WebBrowser.openBrowserAsync(init_point);
-
+      // 3. Mostrar pantalla de exito ANTES de abrir MP
+      //    (en iOS Linking es fire-and-forget, no bloquea)
       setConfirmState('success');
+
+      // 4. Abrir MP: Linking funciona en iOS nativo, iOS Safari y Android
+      await Linking.openURL(init_point);
     } catch (e: any) {
       setErrorMsg(e.message);
       setConfirmState('error');
@@ -200,9 +204,9 @@ export default function QuinielaDetailsScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
           <Text style={{ fontSize: 60, marginBottom: 20 }}>🍀</Text>
-          <Text style={styles.successTitle}>¡Pago en proceso!</Text>
+          <Text style={styles.successTitle}>¡Redirigiendo a MP!</Text>
           <Text style={styles.successSub}>
-            {'Tus picks fueron guardados.\nTu participaci\u00f3n se confirmar\u00e1 cuando MP apruebe el pago.'}
+            {'Tus picks fueron guardados.\nSe abrir\u00e1 Mercado Pago para completar el pago.'}
           </Text>
           <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/(tabs)/results')}>
             <Text style={styles.successBtnTxt}>Ver mis quinielas</Text>

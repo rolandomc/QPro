@@ -89,7 +89,7 @@ export default function AdminDashboardScreen() {
         .in('id', userIds);
       const profsMap: Record<string, string> = {};
       (profs || []).forEach((p: any) => { profsMap[p.id] = p.username; });
-      setUsuarios((parts || []).map((p: any) => ({ ...p, username: profsMap[p.user_id] ?? p.user_id })));
+      setUsuarios((parts || []).map((p: any) => ({ ...p, username: profsMap[p.user_id] ?? 'usuario' })));
     } catch (e: any) {
       Alert.alert('Error', e.message);
       setUsuariosModal(false);
@@ -154,7 +154,6 @@ export default function AdminDashboardScreen() {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); }} tintColor="#9B59B6" />}
       >
-        {/* Stats */}
         <View style={styles.statsContainer}>
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{quinielas.length}</Text>
@@ -166,7 +165,6 @@ export default function AdminDashboardScreen() {
           </View>
         </View>
 
-        {/* Config proxima quiniela */}
         <TouchableOpacity style={styles.configHeader} onPress={() => setConfigExpanded(v => !v)}>
           <Text style={styles.configHeaderText}>⏰ Configurar Próxima Quiniela</Text>
           <Text style={styles.configChevron}>{configExpanded ? '▲' : '▼'}</Text>
@@ -290,7 +288,7 @@ export default function AdminDashboardScreen() {
                   <View style={styles.userRow}>
                     <Text style={styles.userRank}>#{index + 1}</Text>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.userEmail}>{item.username}</Text>
+                      <Text style={styles.userEmail}>@{item.username}</Text>
                       <Text style={styles.userMeta}>Aciertos: {item.aciertos ?? 0}</Text>
                     </View>
                     <View style={[styles.estadoBadge, { borderColor: getEstadoPartColor(item.estado) }]}>

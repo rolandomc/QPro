@@ -52,6 +52,7 @@ function RankRow({ item, totalPartidos, isLast }: { item: any; totalPartidos: nu
   const pct = totalPartidos > 0 ? (item.aciertos ?? 0) / totalPartidos : 0;
   const barColor = item.isMe ? '#9B59B6' : posColor;
   const flashBg = flashAnim.interpolate({ inputRange: [0, 1], outputRange: ['transparent', 'rgba(46,204,113,0.12)'] });
+  const displayName = `@${item.username}`;
 
   return (
     <Animated.View style={[
@@ -70,7 +71,7 @@ function RankRow({ item, totalPartidos, isLast }: { item: any; totalPartidos: nu
       <View style={s.rankInner}>
         <Text style={[s.rankPos, { color: posColor, fontSize: item.pos <= 3 ? 22 : 14 }]}>{medalla}</Text>
         <View style={{ flex: 1 }}>
-          <Text style={[s.rankName, item.isMe && { color: '#9B59B6' }]}>{item.username}{item.isMe ? '  (Tú)' : ''}</Text>
+          <Text style={[s.rankName, item.isMe && { color: '#9B59B6' }]}>{displayName}{item.isMe ? '  (Tú)' : ''}</Text>
           <View style={s.rankBarWrap}>
             <View style={[s.rankBarFill, { width: `${Math.round(pct * 100)}%`, backgroundColor: barColor, shadowColor: barColor, shadowOpacity: 0.6, shadowRadius: 4 }]} />
           </View>
@@ -110,14 +111,12 @@ export default function QuinielaDetailScreen() {
   const compartirImagen = useCallback(async () => {
     if (!quiniela || partidos.length === 0) return;
 
-    // En web no existe expo-sharing de archivos, descargamos directamente
     if (Platform.OS === 'web') {
       setSharing(true);
       setShowCard(true);
       setTimeout(async () => {
         try {
           const dataUrl = await captureView(cardViewRef);
-          // Descarga automática en el browser
           const a = document.createElement('a');
           a.href = dataUrl;
           a.download = `${quiniela?.titulo ?? 'quiniela'}.png`;
@@ -132,7 +131,6 @@ export default function QuinielaDetailScreen() {
       return;
     }
 
-    // Nativo (iOS / Android)
     const canShare = await Sharing.isAvailableAsync();
     if (!canShare) {
       Alert.alert('No disponible', 'Tu dispositivo no soporta compartir archivos.');
@@ -178,7 +176,7 @@ export default function QuinielaDetailScreen() {
     const pm: Record<string, string> = {};
     (profs || []).forEach((p: any) => { pm[p.id] = p.username; });
 
-    const rows = rank.map((r: any, i: number) => ({ ...r, username: pm[r.user_id] ?? 'Usuario', pos: i + 1, isMe: r.user_id === userId }));
+    const rows = rank.map((r: any, i: number) => ({ ...r, username: pm[r.user_id] ?? 'usuario', pos: i + 1, isMe: r.user_id === userId }));
     const yoEnTop = rows.find((r: any) => r.isMe);
 
     if (!yoEnTop) {
@@ -191,7 +189,7 @@ export default function QuinielaDetailScreen() {
           .eq('quiniela_id', id!).gt('aciertos', miRow.aciertos ?? 0);
         const miPos = (porDelante ?? 0) + 1;
         setMiPosicion(miPos);
-        rows.push({ ...miRow, username: pm[userId] ?? 'Tú', pos: miPos, isMe: true, separador: true });
+        rows.push({ ...miRow, username: pm[userId] ?? 'usuario', pos: miPos, isMe: true, separador: true });
       }
     } else {
       setMiPosicion(yoEnTop.pos);
@@ -217,7 +215,7 @@ export default function QuinielaDetailScreen() {
       if (!user) return;
 
       const { data: myProf } = await supabase.from('profiles').select('username').eq('id', user.id).single();
-      myUsername.current = myProf?.username ?? 'Jugador';
+      myUsername.current = myProf?.username ?? 'jugador';
 
       const { data: part } = await supabase
         .from('participaciones').select('id, aciertos, estado, premio_ganado, monto_pagado')

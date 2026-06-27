@@ -31,17 +31,11 @@ export default function ResultCard({
 }: Props) {
   const [expandido, setExpandido] = useState(false);
 
-  // Total de selecciones de esta participacion (denominador real)
   const sels      = selecciones.filter(s => s.partidos != null);
-  const totalSels = sels.length; // todos los partidos de la quiniela
-
-  // Solo los que ya tienen resultado cargado
+  const totalSels = sels.length;
   const conRes    = sels.filter(s => s.partidos!.resultado !== null);
-  // Aciertos sobre los que ya tienen resultado
   const aciertos  = conRes.filter(s => s.prediccion === s.partidos!.resultado).length;
-  // Pendientes = selecciones sin resultado aun
   const pendientes = totalSels - conRes.length;
-  // % de acierto solo sobre partidos ya jugados
   const pct        = conRes.length > 0 ? Math.round((aciertos / conRes.length) * 100) : 0;
 
   const esGanador  = participacion.estado === 'ganador';
@@ -69,7 +63,6 @@ export default function ResultCard({
             <Text style={c.fecha}>{fecha}</Text>
           </View>
 
-          {/* Aciertos: X / totalSels (total partidos de la participacion) */}
           {modo === 'historial' ? (
             <View style={c.aciBox}>
               <Text style={[c.aciNum, {
@@ -86,7 +79,6 @@ export default function ResultCard({
           <Text style={c.chevron}>{expandido ? '▲' : '▼'}</Text>
         </View>
 
-        {/* HISTORIAL: posicion + barra + ganador */}
         {modo === 'historial' && (
           <View style={c.histMeta}>
             {posicion != null && (
@@ -113,7 +105,6 @@ export default function ResultCard({
               </View>
             )}
 
-            {/* Barra % acierto sobre partidos ya jugados */}
             <View style={c.barTrack}>
               <View style={[c.barFill, {
                 width: `${pct}%`,
@@ -133,7 +124,7 @@ export default function ResultCard({
                 <Text style={c.ganadorLbl}>🏆 Ganó: </Text>
                 <Text style={[c.ganadorNombre, {
                   color: '#FFD700', textShadowColor: '#FFD700', textShadowRadius: 6,
-                }]}>{ganador.username}</Text>
+                }]}>@{ganador.username}</Text>
                 <Text style={c.ganadorAci}> ({ganador.aciertos} aciertos)</Text>
               </View>
             )}
@@ -141,114 +132,82 @@ export default function ResultCard({
             <View style={c.finRow}>
               <Text style={c.finItem}>Entrada: <Text style={c.finVal}>${pagado.toLocaleString()}</Text></Text>
               <Text style={c.finSep}>│</Text>
-              <Text style={c.finItem}>Ganado: <Text style={[
-                c.finVal, { color: premio > 0 ? '#2ECC71' : '#505050' },
-              ]}>${premio.toLocaleString()}</Text></Text>
-              <Text style={c.finSep}>│</Text>
-              <Text style={c.finItem}>Neto: <Text style={[
-                c.finVal, { color: (premio - pagado) >= 0 ? '#2ECC71' : '#E91E63' },
-              ]}>{(premio - pagado) >= 0 ? '+' : ''}${(premio - pagado).toLocaleString()}</Text></Text>
+              <Text style={c.finItem}>Ganado: <Text style={[c.finVal, { color: premio > 0 ? '#FFD700' : '#404040' }]}>${premio.toLocaleString()}</Text></Text>
             </View>
           </View>
         )}
       </TouchableOpacity>
 
-      {/* Desglose partidos */}
       {expandido && (
-        <View style={c.desglose}>
-          <Text style={c.desgloseTitle}>PARTIDOS</Text>
-          {sels.map((s, i) => {
-            const p         = s.partidos!;
-            const tieneRes  = p.resultado !== null;
-            const esAcierto = tieneRes && s.prediccion === p.resultado;
-            const esFallo   = tieneRes && s.prediccion !== p.resultado;
-            const neonPart  = esAcierto ? '#2ECC71' : esFallo ? '#E91E63' : '#00E5FF';
+        <View style={c.body}>
+          {sels.map((sel) => {
+            const p = sel.partidos!;
+            const tieneRes = p.resultado !== null;
+            const esAcierto = tieneRes && sel.prediccion === p.resultado;
+            const esFallo   = tieneRes && sel.prediccion !== p.resultado;
+            const neon = esAcierto ? '#2ECC71' : esFallo ? '#E91E63' : '#404040';
             return (
-              <View key={s.partido_id} style={[c.partidoRow, { borderLeftColor: neonPart, borderLeftWidth: 2 }]}>
-                <Text style={c.partidoNum}>{i + 1}</Text>
+              <View key={sel.partido_id} style={[c.selRow, { borderLeftColor: neon }]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={c.partidoEquipos} numberOfLines={1}>
-                    {p.equipo_local} <Text style={{ color: '#404040' }}>vs</Text> {p.equipo_visitante}
+                  <Text style={c.selEquipos} numberOfLines={1}>
+                    {p.equipo_local} <Text style={c.selVs}>vs</Text> {p.equipo_visitante}
                   </Text>
+                  {tieneRes && (
+                    <Text style={[c.selRes, { color: neon }]}>
+                      {esAcierto ? '✅' : '❌'} Resultado: {LABEL[p.resultado!]}
+                    </Text>
+                  )}
                 </View>
-                <View style={[c.pickBadge, {
-                  borderColor: neonPart + '88',
-                  backgroundColor: esAcierto ? 'rgba(46,204,113,0.08)'
-                    : esFallo ? 'rgba(233,30,99,0.08)' : 'rgba(0,229,255,0.06)',
-                }]}>
-                  <Text style={[c.pickTxt, { color: neonPart }]}>{LABEL[s.prediccion]}</Text>
+                <View style={[c.pickBadge, { borderColor: neon, backgroundColor: neon + '18' }]}>
+                  <Text style={[c.pickLbl, { color: neon }]}>{LABEL[sel.prediccion]}</Text>
                 </View>
-                <Text style={{ fontSize: 14, marginLeft: 4 }}>
-                  {tieneRes ? (esAcierto ? '✅' : '❌') : '⏳'}
-                </Text>
               </View>
             );
           })}
         </View>
       )}
-
-      <TouchableOpacity style={c.footer} onPress={toggle}>
-        <Text style={[c.footerTxt, { color: neonBorder }]}>
-          {expandido ? 'OCULTAR PARTIDOS  ▲' : 'VER PARTIDOS  ▼'}
-        </Text>
-      </TouchableOpacity>
     </View>
   );
 }
 
 const c = StyleSheet.create({
-  card:             { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 16,
-                      borderWidth: 1, overflow: 'hidden',
-                      shadowOpacity: 0.2, shadowRadius: 12, elevation: 5 },
-  neonLine:         { height: 2, shadowOpacity: 1, shadowRadius: 8 },
-  headerTouch:      { padding: 14 },
-  row:              { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
-  titulo:           { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
-  fecha:            { color: '#404040', fontSize: 11, marginTop: 1 },
-  aciBox:           { flexDirection: 'row', alignItems: 'baseline' },
-  aciNum:           { fontSize: 24, fontWeight: 'bold' },
-  aciDen:           { color: '#404040', fontSize: 13, marginLeft: 1 },
-  pendBox:          { alignItems: 'center' },
-  pendNum:          { color: '#00E5FF', fontSize: 22, fontWeight: 'bold',
-                      textShadowColor: '#00E5FF', textShadowRadius: 8 },
-  pendLbl:          { color: '#404040', fontSize: 9, letterSpacing: 1 },
-  chevron:          { color: '#303030', fontSize: 11 },
-  histMeta:         { marginTop: 10, gap: 8 },
-  posBadge:         { flexDirection: 'row', alignItems: 'baseline', alignSelf: 'flex-start',
-                      borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 3 },
-  posNum:           { fontSize: 16, fontWeight: 'bold' },
-  posDen:           { fontSize: 11 },
-  badgeGanador:     { alignSelf: 'flex-start', backgroundColor: 'rgba(255,215,0,0.1)',
-                      borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3,
-                      borderWidth: 1, borderColor: 'rgba(255,215,0,0.5)',
-                      shadowColor: '#FFD700', shadowOpacity: 0.4, shadowRadius: 8 },
-  badgeGanadorTxt:  { color: '#FFD700', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 },
-  badgePerdedor:    { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.03)',
-                      borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3,
-                      borderWidth: 1, borderColor: '#2A2D35' },
-  badgePerdedorTxt: { color: '#404040', fontSize: 10, letterSpacing: 1 },
-  barTrack:         { height: 4, backgroundColor: '#1A1D24', borderRadius: 2, overflow: 'hidden' },
-  barFill:          { height: '100%', borderRadius: 2 },
-  pctTxt:           { color: '#404040', fontSize: 10, letterSpacing: 0.5 },
-  ganadorRow:       { flexDirection: 'row', alignItems: 'center' },
-  ganadorLbl:       { color: '#606060', fontSize: 12 },
-  ganadorNombre:    { fontSize: 12, fontWeight: 'bold' },
-  ganadorAci:       { color: '#404040', fontSize: 11 },
-  finRow:           { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  finItem:          { color: '#505050', fontSize: 11 },
-  finVal:           { color: '#FFF', fontWeight: 'bold' },
-  finSep:           { color: '#2A2D35', fontSize: 11 },
-  desglose:         { borderTopWidth: 1, borderTopColor: '#1E2330',
-                      paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6, gap: 8 },
-  desgloseTitle:    { color: '#303030', fontSize: 9, fontWeight: 'bold', letterSpacing: 3, marginBottom: 4 },
-  partidoRow:       { flexDirection: 'row', alignItems: 'center', gap: 8,
-                      backgroundColor: '#111520', borderRadius: 10, padding: 10, paddingLeft: 12 },
-  partidoNum:       { color: '#303030', fontSize: 11, width: 16, textAlign: 'right' },
-  partidoEquipos:   { color: '#909090', fontSize: 12 },
-  pickBadge:        { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 7,
-                      borderWidth: 1, minWidth: 30, alignItems: 'center' },
-  pickTxt:          { fontWeight: 'bold', fontSize: 13 },
-  footer:           { paddingVertical: 10, alignItems: 'center',
-                      borderTopWidth: 1, borderTopColor: '#1E2330', backgroundColor: '#0A0D14' },
-  footerTxt:        { fontSize: 10, fontWeight: 'bold', letterSpacing: 2, textShadowRadius: 6 },
+  card:           { backgroundColor: '#0D1117', borderRadius: 16, borderWidth: 1, marginBottom: 12, overflow: 'hidden', shadowOpacity: 0.2, shadowRadius: 10, elevation: 4 },
+  neonLine:       { height: 2, shadowOpacity: 0.8, shadowRadius: 6 },
+  headerTouch:    { padding: 14 },
+  row:            { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  titulo:         { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  fecha:          { color: '#404040', fontSize: 11, marginTop: 2 },
+  aciBox:         { alignItems: 'center', minWidth: 40 },
+  aciNum:         { fontSize: 22, fontWeight: 'bold' },
+  aciDen:         { color: '#404040', fontSize: 11 },
+  pendBox:        { alignItems: 'center', minWidth: 40 },
+  pendNum:        { color: '#00E5FF', fontSize: 22, fontWeight: 'bold' },
+  pendLbl:        { color: '#404040', fontSize: 10 },
+  chevron:        { color: '#404040', fontSize: 12, marginLeft: 4 },
+  histMeta:       { marginTop: 12, gap: 8 },
+  posBadge:       { flexDirection: 'row', alignItems: 'baseline', borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', gap: 1 },
+  posNum:         { fontSize: 16, fontWeight: 'bold' },
+  posDen:         { fontSize: 11 },
+  badgeGanador:   { backgroundColor: 'rgba(255,215,0,0.1)', borderWidth: 1, borderColor: '#FFD700', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
+  badgeGanadorTxt:{ color: '#FFD700', fontWeight: 'bold', fontSize: 12, letterSpacing: 0.5 },
+  badgePerdedor:  { backgroundColor: 'rgba(100,100,100,0.1)', borderWidth: 1, borderColor: '#404040', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
+  badgePerdedorTxt:{ color: '#606060', fontSize: 11, letterSpacing: 1 },
+  barTrack:       { height: 3, backgroundColor: '#1A1D24', borderRadius: 2, overflow: 'hidden' },
+  barFill:        { height: '100%', borderRadius: 2 },
+  pctTxt:         { color: '#505050', fontSize: 10, letterSpacing: 0.5 },
+  ganadorRow:     { flexDirection: 'row', alignItems: 'center' },
+  ganadorLbl:     { color: '#505050', fontSize: 12 },
+  ganadorNombre:  { fontSize: 13, fontWeight: 'bold' },
+  ganadorAci:     { color: '#505050', fontSize: 12 },
+  finRow:         { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  finItem:        { color: '#505050', fontSize: 11 },
+  finVal:         { color: '#FFF', fontWeight: '600' },
+  finSep:         { color: '#2A2D35' },
+  body:           { borderTopWidth: 1, borderTopColor: '#1A1D24', padding: 14, gap: 10 },
+  selRow:         { flexDirection: 'row', alignItems: 'center', gap: 10, borderLeftWidth: 2, paddingLeft: 10 },
+  selEquipos:     { color: '#CCC', fontSize: 12, fontWeight: '600' },
+  selVs:          { color: '#404040', fontWeight: 'normal' },
+  selRes:         { fontSize: 10, marginTop: 2 },
+  pickBadge:      { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, minWidth: 28, alignItems: 'center' },
+  pickLbl:        { fontSize: 13, fontWeight: 'bold' },
 });

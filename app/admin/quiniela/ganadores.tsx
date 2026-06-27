@@ -49,7 +49,7 @@ export default function GanadoresScreen() {
         ...p,
         aciertos:      p.aciertos ?? 0,
         premio_ganado: p.premio_ganado ?? 0,
-        username:      usernameMap[p.user_id] ?? 'Usuario',
+        username:      usernameMap[p.user_id] ?? 'usuario',
       })));
       setTotalPartidos(count || 0);
     } catch (e: any) {
@@ -92,7 +92,7 @@ export default function GanadoresScreen() {
     const montoPorGanador = Math.round(premioTotal / ganadores.length);
 
     const msg = ganadores.length === 1
-      ? `🏆 ${ganadores[0].username} — ${maxAciertos} aciertos\nPremio: $${montoPorGanador.toLocaleString()} (100% del pozo)`
+      ? `🏆 @${ganadores[0].username} — ${maxAciertos} aciertos\nPremio: $${montoPorGanador.toLocaleString()} (100% del pozo)`
       : `🥇 Empate entre ${ganadores.length} jugadores con ${maxAciertos} aciertos\nPremio: $${montoPorGanador.toLocaleString()} c/u`;
 
     Alert.alert('💰 Distribuir Premio',
@@ -107,7 +107,6 @@ export default function GanadoresScreen() {
               const notificaciones: any[] = [];
               const ganadoresIds: string[] = [];
 
-              // ─ Ganadores
               for (const g of ganadores) {
                 const { error } = await supabase
                   .from('participaciones')
@@ -124,7 +123,6 @@ export default function GanadoresScreen() {
                 });
               }
 
-              // ─ Perdedores
               const perdedores = participantes.filter(p => !ganadoresIds.includes(p.id));
               for (const p of perdedores) {
                 const { error } = await supabase
@@ -141,7 +139,6 @@ export default function GanadoresScreen() {
                 });
               }
 
-              // ─ Marcar quiniela como finalizada
               const { error: errFin } = await supabase
                 .from('quinielas')
                 .update({ estado: 'finalizada' })
@@ -156,7 +153,7 @@ export default function GanadoresScreen() {
               Alert.alert(
                 '🎉 ¡Premio distribuido!',
                 ganadores.length === 1
-                  ? `${ganadores[0].username} recibe $${montoPorGanador.toLocaleString()}.`
+                  ? `@${ganadores[0].username} recibe $${montoPorGanador.toLocaleString()}.`
                   : `${ganadores.length} ganadores reciben $${montoPorGanador.toLocaleString()} c/u.`,
               );
             } catch (e: any) {
@@ -170,10 +167,7 @@ export default function GanadoresScreen() {
     );
   };
 
-  // ── Premio ya distribuido SOLO si hay participaciones con estado 'ganador'
-  // (no depende de quiniela.estado para evitar que se bloquee si ya se finalizó antes)
   const premioYaDistribuido = participantes.some(p => p.estado === 'ganador');
-
   const premioTotal = quiniela?.premio_total ?? 0;
 
   if (loading) return (
@@ -193,7 +187,6 @@ export default function GanadoresScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {/* Resumen */}
         <View style={styles.resumenRow}>
           <View style={styles.resumenBox}>
             <Text style={styles.resumenVal}>{participantes.length}</Text>
@@ -209,7 +202,6 @@ export default function GanadoresScreen() {
           </View>
         </View>
 
-        {/* Badge estado */}
         {quiniela?.estado === 'finalizada' && (
           <View style={styles.finalizadaBadge}>
             <Text style={styles.finalizadaText}>✅ Quiniela finalizada</Text>
@@ -242,14 +234,12 @@ export default function GanadoresScreen() {
           </View>
         )}
 
-        {/* Regla */}
         <View style={styles.reglaBox}>
           <Text style={styles.reglaTitle}>Regla</Text>
           <Text style={styles.reglaItem}>🏆 El jugador con más aciertos gana el 100% del pozo</Text>
           <Text style={styles.reglaNote}>En caso de empate, el pozo se divide entre los empatados</Text>
         </View>
 
-        {/* Ranking */}
         <Text style={styles.sectionTitle}>Tabla de Posiciones</Text>
         {participantes.map((part, index) => {
           const aciertos   = part.aciertos ?? 0;
@@ -266,7 +256,7 @@ export default function GanadoresScreen() {
               <View style={styles.rankLeft}>
                 <Text style={styles.rankPos}>{MEDALS[index] ?? `#${index + 1}`}</Text>
                 <View>
-                  <Text style={styles.rankUsername}>{part.username}</Text>
+                  <Text style={styles.rankUsername}>@{part.username}</Text>
                   <Text style={styles.rankSub}>{aciertos}/{totalPartidos} aciertos · {porcentaje}%</Text>
                 </View>
               </View>

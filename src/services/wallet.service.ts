@@ -11,26 +11,59 @@ export const WalletService = {
     return Number(data ?? 0);
   },
 
-  /** Últimas N transacciones del usuario */
-  async getTransacciones(limit = 20) {
-    const { data, error } = await supabase
+  /** Últimas N transacciones del usuario incluyendo retiros pendientes */
+  async getTransacciones(limit = 30) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+
+    // Transacciones normales de wallet
+    const { data: txs, error } = await supabase
       .from('wallet_transactions')
       .select('*')
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
-    return data ?? [];
-  },
 
-  /** Historial de retiros solicitados */
-  async getRetiros() {
-    const { data, error } = await supabase
+    // Retiros solicitados (pendientes/procesados/rechazados)
+    const { data: retiros } = await supabase
       .from('retiro_solicitudes')
       .select('*')
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(10);
-    if (error) throw error;
-    return data ?? [];
+
+    // Mapear retiros como movimientos para mostrar en historial
+    const retirosComoTx = (retiros ?? []).map((r: any) => ({
+      id: `retiro-${r.id}`,
+      user_id: r.user_id,
+      tipo: 'retiro',
+      monto: -Math.abs(r.monto),
+      descripcion: `Retiro ${r.metodo.toUpperCase()} · ${r.estado}`,
+      referencia_id: r.id,
+      created_at: r.created_at,
+      estado: r.estado,
+    }));
+
+    // Combinar y ordenar por fecha
+    const todos = [...(txs ?? []), ...retirosComoTx]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, limit);
+
+    return todos;
+  },
+
+  /** Verificar si hay retiro pendiente */
+  async tienePendiente(): Promise<boolean> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+    const { data } = await supabase
+      .from('retiro_solicitudes')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('estado', 'pendiente')
+      .limit(1);
+    return (data ?? []).length > 0;
   },
 
   /** Enviar solicitud de retiro via Edge Function */
@@ -43,8 +76,11 @@ export const WalletService = {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('No autenticado');
 
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) throw new Error('Configuración incompleta');
+
     const res = await fetch(
-      `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/notify-retiro`,
+      `${supabaseUrl}/functions/v1/notify-retiro`,
       {
         method: 'POST',
         headers: {
@@ -54,8 +90,10 @@ export const WalletService = {
         body: JSON.stringify(params),
       }
     );
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error ?? 'Error al solicitar retiro');
+
+    let json: any = {};
+    try { json = await res.json(); } catch (_) {}
+    if (!res.ok) throw new Error(json.error ?? `Error ${res.status}`);
     return json;
   },
 };

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, Pressable,
   Modal, TouchableOpacity, TouchableWithoutFeedback,
@@ -9,9 +9,9 @@ import { WalletService } from '../services/wallet.service';
 export type Deporte = 'futbol' | 'beisbol' | 'basquet';
 
 const DEPORTES: { key: Deporte; label: string; emoji: string; proximamente?: boolean }[] = [
-  { key: 'futbol',  label: 'F\u00fatbol',     emoji: '\u26bd' },
-  { key: 'beisbol', label: 'B\u00e9isbol',    emoji: '\u26be', proximamente: true },
-  { key: 'basquet', label: 'B\u00e1squetbol', emoji: '\ud83c\udfc0', proximamente: true },
+  { key: 'futbol',  label: 'Fútbol',     emoji: '⚽' },
+  { key: 'beisbol', label: 'Béisbol',    emoji: '⚾', proximamente: true },
+  { key: 'basquet', label: 'Básquetbol', emoji: '🏀', proximamente: true },
 ];
 
 interface Props {
@@ -23,23 +23,28 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
   const router = useRouter();
   const [menuVisible, setMenuVisible] = useState(false);
   const [saldo, setSaldo] = useState<number | null>(null);
+  const cachedSaldo = useRef<number | null>(null);
 
-  // Recargar saldo cada vez que cualquier pantalla que use Header gana foco
   useFocusEffect(useCallback(() => {
+    // Mostrar saldo cacheado inmediatamente mientras recarga
+    if (cachedSaldo.current !== null) setSaldo(cachedSaldo.current);
+
     WalletService.getSaldo()
-      .then(s => setSaldo(s))
-      .catch(() => setSaldo(null));
+      .then(s => {
+        cachedSaldo.current = s;
+        setSaldo(s);
+      })
+      .catch(() => {});
   }, []));
 
   const deporteLabel = DEPORTES.find(d => d.key === deporteActivo);
 
   const saldoLabel = saldo === null
-    ? '...' 
+    ? '...'
     : `$${saldo.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
 
   return (
     <View style={styles.header}>
-      {/* Logo + dropdown */}
       <Pressable style={styles.logoRow} onPress={() => setMenuVisible(true)}>
         <Text style={styles.headerTitle}>
           <Text style={styles.neonTextGreen}>Q</Text>
@@ -49,16 +54,14 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
           <Text style={styles.deportePillText}>
             {deporteLabel?.emoji} {deporteLabel?.label}
           </Text>
-          <Text style={styles.chevron}>\u25be</Text>
+          <Text style={styles.chevron}>▾</Text>
         </View>
       </Pressable>
 
-      {/* Balance — navega a wallet al presionar */}
       <Pressable style={styles.balanceButton} onPress={() => router.push('/wallet')}>
         <Text style={styles.balanceText}>{saldoLabel}</Text>
       </Pressable>
 
-      {/* Dropdown modal */}
       <Modal
         visible={menuVisible}
         transparent
@@ -96,11 +99,11 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
                     </Text>
                     {d.proximamente && (
                       <View style={styles.proximamenteBadge}>
-                        <Text style={styles.proximamenteText}>Pr\u00f3ximamente</Text>
+                        <Text style={styles.proximamenteText}>Próximamente</Text>
                       </View>
                     )}
                     {deporteActivo === d.key && !d.proximamente && (
-                      <Text style={styles.checkmark}>\u2713</Text>
+                      <Text style={styles.checkmark}>✓</Text>
                     )}
                   </TouchableOpacity>
                 ))}
@@ -114,27 +117,27 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
 }
 
 const styles = StyleSheet.create({
-  header:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15 },
-  logoRow:            { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerTitle:        { fontSize: 22, fontWeight: 'bold' },
-  neonTextGreen:      { color: '#2ECC71', fontWeight: 'bold', textShadowColor: 'rgba(46,204,113,0.8)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10 },
-  logoWhite:          { color: '#FFFFFF', fontWeight: 'bold' },
-  deportePill:        { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1F26', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#2A2D35', gap: 4 },
-  deportePillText:    { color: '#E0E0E0', fontSize: 13, fontWeight: '600' },
-  chevron:            { color: '#A0A0A0', fontSize: 11 },
-  balanceButton:      { backgroundColor: '#1C1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#2ECC71' },
-  balanceText:        { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
-  overlay:            { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-start', paddingTop: 90, paddingHorizontal: 20 },
-  dropdown:           { backgroundColor: '#15181F', borderRadius: 16, borderWidth: 1, borderColor: '#2A2D35', paddingVertical: 8, overflow: 'hidden' },
-  dropdownTitle:      { color: '#606060', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
-  dropdownItem:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: '#1E2028' },
-  dropdownItemActive: { backgroundColor: 'rgba(46,204,113,0.08)' },
+  header:              { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15 },
+  logoRow:             { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerTitle:         { fontSize: 22, fontWeight: 'bold' },
+  neonTextGreen:       { color: '#2ECC71', fontWeight: 'bold', textShadowColor: 'rgba(46,204,113,0.8)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10 },
+  logoWhite:           { color: '#FFFFFF', fontWeight: 'bold' },
+  deportePill:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1F26', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#2A2D35', gap: 4 },
+  deportePillText:     { color: '#E0E0E0', fontSize: 13, fontWeight: '600' },
+  chevron:             { color: '#A0A0A0', fontSize: 11 },
+  balanceButton:       { backgroundColor: '#1C1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#2ECC71' },
+  balanceText:         { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
+  overlay:             { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-start', paddingTop: 90, paddingHorizontal: 20 },
+  dropdown:            { backgroundColor: '#15181F', borderRadius: 16, borderWidth: 1, borderColor: '#2A2D35', paddingVertical: 8, overflow: 'hidden' },
+  dropdownTitle:       { color: '#606060', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
+  dropdownItem:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: '#1E2028' },
+  dropdownItemActive:  { backgroundColor: 'rgba(46,204,113,0.08)' },
   dropdownItemDisabled:{ opacity: 0.5 },
-  dropdownEmoji:      { fontSize: 20 },
-  dropdownLabel:      { color: '#E0E0E0', fontSize: 15, fontWeight: '600', flex: 1 },
-  dropdownLabelActive:{ color: '#2ECC71' },
+  dropdownEmoji:       { fontSize: 20 },
+  dropdownLabel:       { color: '#E0E0E0', fontSize: 15, fontWeight: '600', flex: 1 },
+  dropdownLabelActive: { color: '#2ECC71' },
   dropdownLabelDisabled:{ color: '#606060' },
-  proximamenteBadge:  { backgroundColor: 'rgba(243,156,18,0.15)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: '#F39C12' },
-  proximamenteText:   { color: '#F39C12', fontSize: 10, fontWeight: '700' },
-  checkmark:          { color: '#2ECC71', fontSize: 16, fontWeight: 'bold' },
+  proximamenteBadge:   { backgroundColor: 'rgba(243,156,18,0.15)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: '#F39C12' },
+  proximamenteText:    { color: '#F39C12', fontSize: 10, fontWeight: '700' },
+  checkmark:           { color: '#2ECC71', fontSize: 16, fontWeight: 'bold' },
 });

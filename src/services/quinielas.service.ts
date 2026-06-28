@@ -83,9 +83,16 @@ export const QuinielasService = {
         };
       }));
 
+      const totalJugadores = q.participaciones?.[0]?.count ?? 0;
+      // Si premio_total es igual o menor al precio de entrada, recalcular
+      const premioReal = q.premio_total > q.precio_entrada
+        ? q.premio_total
+        : totalJugadores * q.precio_entrada;
+
       return {
         ...q,
-        total_jugadores: q.participaciones?.[0]?.count ?? 0,
+        total_jugadores: totalJugadores,
+        premio_total: premioReal,
         top3,
       };
     }));

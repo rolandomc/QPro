@@ -106,7 +106,7 @@ function QuinielaCard({ q }: { q: any }) {
               {j.estado === 'ganador' && (
                 <View style={card.premioNeon}>
                   <Text style={card.premioNeonVal}>
-                    ${Number(j.monto_pagado || bolsa).toLocaleString()}
+                    ${Number(j.monto_pagado > 0 ? j.monto_pagado : bolsa).toLocaleString()}
                   </Text>
                   <Text style={card.premioNeonLbl}>💰 COBRADO</Text>
                 </View>

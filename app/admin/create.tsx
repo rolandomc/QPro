@@ -1,26 +1,26 @@
 import React, { useState, useMemo } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator,
+  TextInput, Alert, ActivityIndicator, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import CustomDropdown from '../../src/components/CustomDropdown';
 import { AdminService, CompetitionCode, MatchStatus } from '../../src/services/admin.service';
 
-// ─── Ligas soportadas por football-data.org (tier gratuito) ───────────────────
+// ─── Ligas soportadas por football-data.org (tier gratuito) ──────────────────
 const LIGAS_MAP: Record<string, CompetitionCode | null> = {
-  '🇪🇸 La Liga':            'PD',
-  '🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League':    'PL',
-  '⭐ Champions League':     'CL',
-  '🌍 Mundial FIFA':         'WC',
-  '🇩🇪 Bundesliga':          'BL1',
-  '🇮🇹 Serie A':             'SA',
-  '🇫🇷 Ligue 1':             'FL1',
-  '🇧🇷 Brasileirão':         'BSA',
-  '🇲🇽 Liga MX (manual)':   null, // No soportada por API – usar partidos manuales
+  '🇪🇸 La Liga':           'PD',
+  '🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League':   'PL',
+  '⭐ Champions League':    'CL',
+  '🌍 Mundial FIFA':        'WC',
+  '🇩🇪 Bundesliga':         'BL1',
+  '🇮🇹 Serie A':            'SA',
+  '🇫🇷 Ligue 1':            'FL1',
+  '🇧🇷 Brasileirão':        'BSA',
+  '🇲🇽 Liga MX (manual)':  null,
 };
-const LIGAS_DISPONIBLES = Object.keys(LIGAS_MAP);
+const LIGAS_DISPONIBLES  = Object.keys(LIGAS_MAP);
 const LIGAS_NO_SOPORTADAS = Object.keys(LIGAS_MAP).filter(k => LIGAS_MAP[k] === null);
 
 const STATUS_OPTIONS: { label: string; value: MatchStatus }[] = [
@@ -34,7 +34,6 @@ const STATUS_LABELS = STATUS_OPTIONS.map(s => s.label);
 const hoy    = () => new Date().toISOString().slice(0, 10);
 const hace30 = () => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); };
 
-// Partidos creados manualmente (sin API)
 interface PartidoManual {
   id: string;
   local: string;
@@ -47,42 +46,57 @@ type OpenDropdown = 'liga' | 'status' | null;
 export default function CreateQuinielaScreen() {
   const router = useRouter();
 
-  const [titulo,         setTitulo]        = useState('');
-  const [liga,           setLiga]          = useState(LIGAS_DISPONIBLES[0]);
-  const [precio,         setPrecio]        = useState('50');
-  const [fechaCierre,    setFechaCierre]   = useState('');
-  const [jugMinimos,     setJugMinimos]    = useState('5');
-  const [pctAdmin,       setPctAdmin]      = useState('10');
+  const [titulo,          setTitulo]         = useState('');
+  const [liga,            setLiga]           = useState(LIGAS_DISPONIBLES[0]);
+  const [precio,          setPrecio]         = useState('50');
+  const [fechaCierre,     setFechaCierre]    = useState('');
+  const [jugMinimos,      setJugMinimos]     = useState('5');
+  const [pctAdmin,        setPctAdmin]       = useState('10');
 
-  const [statusLabel,    setStatusLabel]   = useState(STATUS_LABELS[0]);
-  const [jornada,        setJornada]       = useState('');
-  const [dateFrom,       setDateFrom]      = useState('');
-  const [dateTo,         setDateTo]        = useState('');
-  const [modoFiltro,     setModoFiltro]    = useState<'status' | 'fecha'>('status');
+  const [statusLabel,     setStatusLabel]    = useState(STATUS_LABELS[0]);
+  const [jornada,         setJornada]        = useState('');
+  const [dateFrom,        setDateFrom]       = useState('');
+  const [dateTo,          setDateTo]         = useState('');
+  const [modoFiltro,      setModoFiltro]     = useState<'status' | 'fecha'>('status');
 
-  // Control de qué dropdown está abierto (solo uno a la vez)
-  const [openDropdown,   setOpenDropdown]  = useState<OpenDropdown>(null);
+  // ─── Cierre automático ───────────────────────────────────────────────────────
+  const [cierreAuto,      setCierreAuto]     = useState(true);
+
+  // ─── Dropdown control ────────────────────────────────────────────────────────
+  const [openDropdown,    setOpenDropdown]   = useState<OpenDropdown>(null);
   const toggleDropdown = (name: OpenDropdown) =>
     setOpenDropdown(prev => prev === name ? null : name);
 
-  const [partidosApi,    setPartidosApi]   = useState<any[]>([]);
-  const [seleccionados,  setSeleccionados] = useState<Set<string>>(new Set());
-  const [loadingApi,     setLoadingApi]    = useState(false);
-  const [loadingPublish, setLoadingPublish]= useState(false);
+  const [partidosApi,     setPartidosApi]    = useState<any[]>([]);
+  const [seleccionados,   setSeleccionados]  = useState<Set<string>>(new Set());
+  const [loadingApi,      setLoadingApi]     = useState(false);
+  const [loadingPublish,  setLoadingPublish] = useState(false);
 
-  // Modo manual para ligas sin soporte de API
+  // ─── Partidos manuales ───────────────────────────────────────────────────────
   const [partidosManuales, setPartidosManuales] = useState<PartidoManual[]>([]);
-  const [manualLocal,     setManualLocal]   = useState('');
-  const [manualVisitante, setManualVisitante] = useState('');
-  const [manualFecha,     setManualFecha]   = useState('');
+  const [manualLocal,      setManualLocal]      = useState('');
+  const [manualVisitante,  setManualVisitante]  = useState('');
+  const [manualFecha,      setManualFecha]      = useState('');
 
-  const ligaEsManual = LIGAS_NO_SOPORTADAS.includes(liga);
-  const competitionCode = LIGAS_MAP[liga] as CompetitionCode | undefined;
+  const ligaEsManual     = LIGAS_NO_SOPORTADAS.includes(liga);
+  const competitionCode  = LIGAS_MAP[liga] as CompetitionCode | undefined;
 
-  const precioNum   = parseFloat(precio)   || 0;
-  const pctAdminNum = parseFloat(pctAdmin)  || 0;
-  const jugMinNum   = parseInt(jugMinimos)  || 0;
+  const precioNum    = parseFloat(precio)   || 0;
+  const pctAdminNum  = parseFloat(pctAdmin)  || 0;
+  const jugMinNum    = parseInt(jugMinimos)  || 0;
 
+  // ─── Primer partido seleccionado (para cierre automático) ────────────────────
+  const primerPartidoISO = useMemo(() => {
+    const partidos = ligaEsManual
+      ? partidosManuales.map(p => p.fecha).filter(Boolean)
+      : partidosApi
+          .filter(p => seleccionados.has(String(p.external_id)) && p.fecha_partido)
+          .map(p => p.fecha_partido as string);
+    if (!partidos.length) return null;
+    return partidos.sort()[0]; // el más temprano
+  }, [ligaEsManual, partidosManuales, partidosApi, seleccionados]);
+
+  // ─── Preview pozo ────────────────────────────────────────────────────────────
   const previsualizacion = useMemo(() => {
     const pozoMinimo  = precioNum * jugMinNum;
     const comisionMin = pozoMinimo * (pctAdminNum / 100);
@@ -90,12 +104,12 @@ export default function CreateQuinielaScreen() {
     return { pozoMinimo, comisionMin, premioMin };
   }, [precioNum, pctAdminNum, jugMinNum]);
 
-  // ─── Buscar partidos vía API ───────────────────────────────────────────────
+  // ─── Buscar partidos via API ──────────────────────────────────────────────────
   const handleBuscarPartidos = async () => {
     if (ligaEsManual || !competitionCode) {
       Alert.alert(
         '⚠️ Liga sin soporte de API',
-        `"${liga}" no está disponible en la API.\n\nUsa el modo Manual debajo para agregar los partidos tú mismo.`,
+        `"${liga}" no está disponible en la API.\n\nUsa el modo Manual para agregar los partidos.`,
       );
       return;
     }
@@ -125,17 +139,17 @@ export default function CreateQuinielaScreen() {
     }
   };
 
-  // ─── Partidos manuales ────────────────────────────────────────────────────
+  // ─── Partidos manuales ───────────────────────────────────────────────────────
   const agregarPartidoManual = () => {
     if (!manualLocal.trim() || !manualVisitante.trim()) {
       Alert.alert('Faltan datos', 'Escribe el equipo local y visitante.');
       return;
     }
     const nuevo: PartidoManual = {
-      id:         `manual_${Date.now()}`,
-      local:      manualLocal.trim(),
-      visitante:  manualVisitante.trim(),
-      fecha:      manualFecha || new Date().toISOString(),
+      id:        `manual_${Date.now()}`,
+      local:     manualLocal.trim(),
+      visitante: manualVisitante.trim(),
+      fecha:     manualFecha || new Date().toISOString(),
     };
     setPartidosManuales(prev => [...prev, nuevo]);
     setManualLocal('');
@@ -146,7 +160,7 @@ export default function CreateQuinielaScreen() {
   const eliminarPartidoManual = (id: string) =>
     setPartidosManuales(prev => prev.filter(p => p.id !== id));
 
-  // ─── Selección de API partidos ────────────────────────────────────────────
+  // ─── Selección API partidos ───────────────────────────────────────────────────
   const togglePartido = (id: string) => {
     setSeleccionados(prev => {
       const next = new Set(prev);
@@ -163,7 +177,7 @@ export default function CreateQuinielaScreen() {
     );
   };
 
-  // ─── Publicar ────────────────────────────────────────────────────────────
+  // ─── Publicar ────────────────────────────────────────────────────────────────
   const handlePublicar = async () => {
     if (!titulo.trim()) { Alert.alert('Falta el título', 'Escribe un título.'); return; }
 
@@ -181,6 +195,14 @@ export default function CreateQuinielaScreen() {
     if (jugMinNum < 2)                 { Alert.alert('J. mínimos inválido', 'Mínimo 2 jugadores.'); return; }
     if (pctAdminNum < 0 || pctAdminNum > 50) { Alert.alert('% Admin inválido', 'Debe estar entre 0 y 50%.'); return; }
 
+    // Aviso si cierre automático pero no hay fecha de primer partido
+    if (cierreAuto && !primerPartidoISO) {
+      Alert.alert(
+        '⚠️ Sin fecha de cierre automático',
+        'Los partidos seleccionados no tienen fecha. Se usará cierre manual.',
+      );
+    }
+
     setLoadingPublish(true);
     try {
       await AdminService.createQuinielaConPartidos(
@@ -191,10 +213,15 @@ export default function CreateQuinielaScreen() {
         partidosElegidos,
         jugMinNum,
         pctAdminNum,
+        cierreAuto,
+        primerPartidoISO ?? null,
       );
       Alert.alert(
         '🎉 Quiniela Publicada',
-        `"${titulo}" creada con ${partidosElegidos.length} partido(s).`,
+        `"${titulo}" creada con ${partidosElegidos.length} partido(s).\n\n` +
+        (cierreAuto && primerPartidoISO
+          ? `⏱️ Cierre automático: ${new Date(primerPartidoISO).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`
+          : '🔒 Cierre manual.'),
         [{ text: 'OK', onPress: () => router.back() }]
       );
     } catch (error: any) {
@@ -226,7 +253,6 @@ export default function CreateQuinielaScreen() {
       <ScrollView
         contentContainerStyle={[styles.content, showFab && { paddingBottom: 120 }]}
         keyboardShouldPersistTaps="handled"
-        // Cierra dropdowns al hacer scroll
         onScrollBeginDrag={() => setOpenDropdown(null)}
       >
         {/* 1. Detalles */}
@@ -287,10 +313,35 @@ export default function CreateQuinielaScreen() {
           </View>
         )}
 
+        {/* 2b. Cierre automático */}
+        <View style={styles.cierreBox}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cierreTitle}>⏱️ Cierre Automático</Text>
+            <Text style={styles.cierreDesc}>
+              {cierreAuto
+                ? 'La quiniela se cerrará cuando empiece el primer partido'
+                : 'El admin cerrará la quiniela manualmente'}
+            </Text>
+            {cierreAuto && primerPartidoISO && (
+              <Text style={styles.cierreFecha}>
+                📅 Cierre: {new Date(primerPartidoISO).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}
+              </Text>
+            )}
+            {cierreAuto && !primerPartidoISO && (
+              <Text style={styles.cierreWarning}>⚠️ Selecciona partidos para calcular la fecha de cierre</Text>
+            )}
+          </View>
+          <Switch
+            value={cierreAuto}
+            onValueChange={setCierreAuto}
+            trackColor={{ false: '#2A2D35', true: 'rgba(52,152,219,0.4)' }}
+            thumbColor={cierreAuto ? '#3498DB' : '#505050'}
+          />
+        </View>
+
         {/* 3. Buscar */}
         <Text style={styles.sectionTitle}>3. Buscar Partidos</Text>
 
-        {/* Dropdown Liga — zIndex alto cuando está abierto */}
         <View style={[styles.dropdownRow, openDropdown === 'liga' && { zIndex: 200 }]}>
           <CustomDropdown
             label="Liga"
@@ -302,7 +353,6 @@ export default function CreateQuinielaScreen() {
           />
         </View>
 
-        {/* Aviso si la liga no tiene soporte de API */}
         {ligaEsManual && (
           <View style={styles.warningBox}>
             <Text style={styles.warningText}>
@@ -312,7 +362,6 @@ export default function CreateQuinielaScreen() {
           </View>
         )}
 
-        {/* Filtros solo cuando hay soporte de API */}
         {!ligaEsManual && (
           <>
             <View style={styles.toggleRow}>
@@ -364,39 +413,19 @@ export default function CreateQuinielaScreen() {
           </>
         )}
 
-        {/* ─── Partidos manuales (ligas sin API) ──────────────────────────── */}
+        {/* Partidos manuales */}
         {ligaEsManual && (
           <View style={styles.manualBox}>
             <Text style={styles.manualTitle}>✏️ Agregar partido manualmente</Text>
-
             <Text style={styles.label}>Equipo Local</Text>
-            <TextInput
-              style={[styles.input, { marginBottom: 10 }]}
-              placeholder="Ej: Club América"
-              placeholderTextColor="#505050"
-              value={manualLocal}
-              onChangeText={setManualLocal}
-            />
+            <TextInput style={[styles.input, { marginBottom: 10 }]} placeholder="Ej: Club América" placeholderTextColor="#505050" value={manualLocal} onChangeText={setManualLocal} />
             <Text style={styles.label}>Equipo Visitante</Text>
-            <TextInput
-              style={[styles.input, { marginBottom: 10 }]}
-              placeholder="Ej: Chivas"
-              placeholderTextColor="#505050"
-              value={manualVisitante}
-              onChangeText={setManualVisitante}
-            />
+            <TextInput style={[styles.input, { marginBottom: 10 }]} placeholder="Ej: Chivas" placeholderTextColor="#505050" value={manualVisitante} onChangeText={setManualVisitante} />
             <Text style={styles.label}>Fecha (YYYY-MM-DD, opcional)</Text>
-            <TextInput
-              style={[styles.input, { marginBottom: 12 }]}
-              placeholder={hoy()}
-              placeholderTextColor="#505050"
-              value={manualFecha}
-              onChangeText={setManualFecha}
-            />
+            <TextInput style={[styles.input, { marginBottom: 12 }]} placeholder={hoy()} placeholderTextColor="#505050" value={manualFecha} onChangeText={setManualFecha} />
             <TouchableOpacity style={styles.addManualBtn} onPress={agregarPartidoManual}>
               <Text style={styles.addManualTxt}>+ Agregar partido</Text>
             </TouchableOpacity>
-
             {partidosManuales.length > 0 && (
               <View style={{ marginTop: 16, gap: 8 }}>
                 <Text style={[styles.label, { marginBottom: 4 }]}>Partidos agregados ({partidosManuales.length}):</Text>
@@ -416,7 +445,7 @@ export default function CreateQuinielaScreen() {
           </View>
         )}
 
-        {/* 4. Lista de partidos de API */}
+        {/* Lista partidos API */}
         {partidosApi.length > 0 && (
           <View style={{ marginTop: 20 }}>
             <View style={styles.listHeader}>
@@ -427,7 +456,6 @@ export default function CreateQuinielaScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
-
             {partidosApi.map((partido) => {
               const pid        = String(partido.external_id);
               const isSelected = seleccionados.has(pid);
@@ -448,9 +476,7 @@ export default function CreateQuinielaScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <View style={styles.matchRow}>
-                      <Text style={styles.matchTeams} numberOfLines={1}>
-                        {partido.equipo_local} vs {partido.equipo_visitante}
-                      </Text>
+                      <Text style={styles.matchTeams} numberOfLines={1}>{partido.equipo_local} vs {partido.equipo_visitante}</Text>
                       {marcador && <Text style={styles.marcadorText}>{marcador}</Text>}
                     </View>
                     <View style={styles.matchMeta}>
@@ -467,7 +493,6 @@ export default function CreateQuinielaScreen() {
         )}
       </ScrollView>
 
-      {/* FAB Publicar */}
       {showFab && (
         <TouchableOpacity
           style={[styles.fab, totalPartidos > 0 ? styles.fabActive : styles.fabInactive]}
@@ -475,13 +500,11 @@ export default function CreateQuinielaScreen() {
           disabled={totalPartidos === 0 || loadingPublish}
           activeOpacity={0.85}
         >
-          {loadingPublish ? (
-            <ActivityIndicator color="#000" size="small" />
-          ) : (
-            <Text style={[styles.fabText, totalPartidos === 0 && { color: '#505050' }]}>
-              🚀 Publicar {totalPartidos > 0 ? `${totalPartidos} partido${totalPartidos !== 1 ? 's' : ''}` : ''}
-            </Text>
-          )}
+          {loadingPublish
+            ? <ActivityIndicator color="#000" size="small" />
+            : <Text style={[styles.fabText, totalPartidos === 0 && { color: '#505050' }]}>
+                🚀 Publicar {totalPartidos > 0 ? `${totalPartidos} partido${totalPartidos !== 1 ? 's' : ''}` : ''}
+              </Text>}
         </TouchableOpacity>
       )}
     </SafeAreaView>
@@ -489,89 +512,75 @@ export default function CreateQuinielaScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:          { flex: 1, backgroundColor: '#0A0C10' },
-  header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                        padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
-  backButton:         { width: 60 },
-  backText:           { color: '#9B59B6', fontSize: 16 },
-  title:              { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  content:            { padding: 15, paddingBottom: 40 },
-  sectionTitle:       { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginTop: 20, marginBottom: 10 },
-  formRow:            { flexDirection: 'row', gap: 15, marginBottom: 15 },
-  inputContainer:     { flex: 1, marginBottom: 15 },
-  label:              { color: '#A0A0A0', fontSize: 12, marginBottom: 5 },
-  hint:               { color: '#505050', fontSize: 10, marginTop: 4 },
-  input:              { backgroundColor: '#15181F', color: '#FFF', padding: 12, borderRadius: 8,
-                        borderWidth: 1, borderColor: '#2A2D35', fontSize: 15, height: 48 },
-  dropdownRow:        { marginBottom: 14, zIndex: 10 },
-  toggleRow:          { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  toggleBtn:          { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1,
-                        borderColor: '#2A2D35', alignItems: 'center', backgroundColor: '#15181F' },
-  toggleBtnActive:    { borderColor: '#3498DB', backgroundColor: 'rgba(52,152,219,0.12)' },
-  toggleText:         { color: '#707070', fontSize: 13, fontWeight: '600' },
-  toggleTextActive:   { color: '#3498DB' },
-  warningBox:         { backgroundColor: 'rgba(243,156,18,0.08)', borderRadius: 10, borderWidth: 1,
-                        borderColor: '#F39C12', padding: 12, marginBottom: 14 },
-  warningText:        { color: '#F39C12', fontSize: 13, lineHeight: 20 },
-  previewBox:         { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 10,
-                        borderWidth: 1.5, borderColor: '#F39C12' },
-  previewTitle:       { color: '#F39C12', fontWeight: 'bold', fontSize: 13, marginBottom: 12 },
-  previewRow:         { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  previewRowTotal:    { borderTopWidth: 1, borderTopColor: '#2A2D35', paddingTop: 8, marginTop: 4 },
-  previewLabel:       { color: '#A0A0A0', fontSize: 13 },
-  previewVal:         { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
-  previewLabelTotal:  { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
-  previewValTotal:    { color: '#F39C12', fontSize: 18, fontWeight: 'bold' },
-  previewNote:        { color: '#505050', fontSize: 10, marginTop: 8, textAlign: 'center' },
-  fetchBtn:           { backgroundColor: '#15181F', padding: 15, borderRadius: 12,
-                        alignItems: 'center', marginTop: 10, borderWidth: 1.5 },
-  neonBorderBlue:     { borderColor: '#3498DB', shadowColor: '#3498DB', shadowOpacity: 0.5, shadowRadius: 8, elevation: 5 },
-  fetchBtnText:       { color: '#3498DB', fontWeight: 'bold', fontSize: 16 },
-  // Partidos manuales
-  manualBox:          { backgroundColor: '#15181F', borderRadius: 12, padding: 14, marginTop: 10,
-                        borderWidth: 1, borderColor: '#F39C12' },
-  manualTitle:        { color: '#F39C12', fontWeight: 'bold', fontSize: 14, marginBottom: 12 },
-  addManualBtn:       { backgroundColor: 'rgba(46,204,113,0.12)', borderRadius: 10, borderWidth: 1,
-                        borderColor: '#2ECC71', padding: 12, alignItems: 'center' },
-  addManualTxt:       { color: '#2ECC71', fontWeight: 'bold', fontSize: 14 },
-  manualCard:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1F26',
-                        borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2A2D35' },
-  manualCardTeams:    { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
-  manualCardFecha:    { color: '#707070', fontSize: 11, marginTop: 2 },
-  deleteBtn:          { padding: 6 },
-  deleteBtnTxt:       { color: '#E74C3C', fontWeight: 'bold', fontSize: 16 },
+  container:           { flex: 1, backgroundColor: '#0A0C10' },
+  header:              { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
+  backButton:          { width: 60 },
+  backText:            { color: '#9B59B6', fontSize: 16 },
+  title:               { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  content:             { padding: 15, paddingBottom: 40 },
+  sectionTitle:        { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginTop: 20, marginBottom: 10 },
+  formRow:             { flexDirection: 'row', gap: 15, marginBottom: 15 },
+  inputContainer:      { flex: 1, marginBottom: 15 },
+  label:               { color: '#A0A0A0', fontSize: 12, marginBottom: 5 },
+  hint:                { color: '#505050', fontSize: 10, marginTop: 4 },
+  input:               { backgroundColor: '#15181F', color: '#FFF', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#2A2D35', fontSize: 15, height: 48 },
+  // Cierre automático
+  cierreBox:           { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 16, borderWidth: 1.5, borderColor: '#3498DB', gap: 12 },
+  cierreTitle:         { color: '#FFF', fontWeight: 'bold', fontSize: 14, marginBottom: 3 },
+  cierreDesc:          { color: '#707070', fontSize: 11, lineHeight: 16 },
+  cierreFecha:         { color: '#3498DB', fontSize: 11, marginTop: 4, fontWeight: '600' },
+  cierreWarning:       { color: '#F39C12', fontSize: 11, marginTop: 4 },
+  // Dropdowns
+  dropdownRow:         { marginBottom: 14, zIndex: 10 },
+  toggleRow:           { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  toggleBtn:           { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2A2D35', alignItems: 'center', backgroundColor: '#15181F' },
+  toggleBtnActive:     { borderColor: '#3498DB', backgroundColor: 'rgba(52,152,219,0.12)' },
+  toggleText:          { color: '#707070', fontSize: 13, fontWeight: '600' },
+  toggleTextActive:    { color: '#3498DB' },
+  warningBox:          { backgroundColor: 'rgba(243,156,18,0.08)', borderRadius: 10, borderWidth: 1, borderColor: '#F39C12', padding: 12, marginBottom: 14 },
+  warningText:         { color: '#F39C12', fontSize: 13, lineHeight: 20 },
+  // Preview
+  previewBox:          { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 10, borderWidth: 1.5, borderColor: '#F39C12' },
+  previewTitle:        { color: '#F39C12', fontWeight: 'bold', fontSize: 13, marginBottom: 12 },
+  previewRow:          { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  previewRowTotal:     { borderTopWidth: 1, borderTopColor: '#2A2D35', paddingTop: 8, marginTop: 4 },
+  previewLabel:        { color: '#A0A0A0', fontSize: 13 },
+  previewVal:          { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
+  previewLabelTotal:   { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  previewValTotal:     { color: '#F39C12', fontSize: 18, fontWeight: 'bold' },
+  previewNote:         { color: '#505050', fontSize: 10, marginTop: 8, textAlign: 'center' },
+  // Fetch
+  fetchBtn:            { backgroundColor: '#15181F', padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 10, borderWidth: 1.5 },
+  neonBorderBlue:      { borderColor: '#3498DB', shadowColor: '#3498DB', shadowOpacity: 0.5, shadowRadius: 8, elevation: 5 },
+  fetchBtnText:        { color: '#3498DB', fontWeight: 'bold', fontSize: 16 },
+  // Manual
+  manualBox:           { backgroundColor: '#15181F', borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: '#F39C12' },
+  manualTitle:         { color: '#F39C12', fontWeight: 'bold', fontSize: 14, marginBottom: 12 },
+  addManualBtn:        { backgroundColor: 'rgba(46,204,113,0.12)', borderRadius: 10, borderWidth: 1, borderColor: '#2ECC71', padding: 12, alignItems: 'center' },
+  addManualTxt:        { color: '#2ECC71', fontWeight: 'bold', fontSize: 14 },
+  manualCard:          { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1F26', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2A2D35' },
+  manualCardTeams:     { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
+  manualCardFecha:     { color: '#707070', fontSize: 11, marginTop: 2 },
+  deleteBtn:           { padding: 6 },
+  deleteBtnTxt:        { color: '#E74C3C', fontWeight: 'bold', fontSize: 16 },
   // Lista API
-  listHeader:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  selectAllBtn:       { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#3498DB',
-                        borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  selectAllText:      { color: '#3498DB', fontSize: 12, fontWeight: 'bold' },
-  matchCard:          { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15181F',
-                        padding: 14, borderRadius: 12, marginBottom: 10,
-                        borderWidth: 1, borderColor: '#2A2D35' },
-  matchCardSelected:  { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
-  checkbox:           { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#707070',
-                        marginRight: 14, alignItems: 'center', justifyContent: 'center' },
-  checkboxSelected:   { backgroundColor: '#2ECC71', borderColor: '#2ECC71' },
-  checkmark:          { color: '#000', fontWeight: 'bold', fontSize: 14 },
-  matchRow:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  matchTeams:         { color: '#FFF', fontSize: 14, fontWeight: 'bold', flex: 1 },
-  marcadorText:       { color: '#2ECC71', fontWeight: 'bold', fontSize: 14, marginLeft: 8 },
-  matchMeta:          { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  matchDate:          { color: '#707070', fontSize: 11 },
-  statusBadge:        { fontSize: 11, fontWeight: '600' },
-  fab: {
-    position: 'absolute', bottom: 30, alignSelf: 'center',
-    paddingHorizontal: 28, paddingVertical: 14, borderRadius: 50,
-    minWidth: 200, alignItems: 'center', justifyContent: 'center',
-  },
-  fabActive: {
-    backgroundColor: '#2ECC71',
-    shadowColor: '#2ECC71', shadowOpacity: 0.8, shadowRadius: 18,
-    shadowOffset: { width: 0, height: 4 }, elevation: 12,
-  },
-  fabInactive: {
-    backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35',
-    shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
-  },
-  fabText: { color: '#000', fontWeight: 'bold', fontSize: 16, letterSpacing: 0.5 },
+  listHeader:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  selectAllBtn:        { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#3498DB', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  selectAllText:       { color: '#3498DB', fontSize: 12, fontWeight: 'bold' },
+  matchCard:           { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15181F', padding: 14, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#2A2D35' },
+  matchCardSelected:   { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
+  checkbox:            { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#707070', marginRight: 14, alignItems: 'center', justifyContent: 'center' },
+  checkboxSelected:    { backgroundColor: '#2ECC71', borderColor: '#2ECC71' },
+  checkmark:           { color: '#000', fontWeight: 'bold', fontSize: 14 },
+  matchRow:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  matchTeams:          { color: '#FFF', fontSize: 14, fontWeight: 'bold', flex: 1 },
+  marcadorText:        { color: '#2ECC71', fontWeight: 'bold', fontSize: 14, marginLeft: 8 },
+  matchMeta:           { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  matchDate:           { color: '#707070', fontSize: 11 },
+  statusBadge:         { fontSize: 11, fontWeight: '600' },
+  // FAB
+  fab:                 { position: 'absolute', bottom: 30, alignSelf: 'center', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 50, minWidth: 200, alignItems: 'center', justifyContent: 'center' },
+  fabActive:           { backgroundColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.8, shadowRadius: 18, shadowOffset: { width: 0, height: 4 }, elevation: 12 },
+  fabInactive:         { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 8, elevation: 6 },
+  fabText:             { color: '#000', fontWeight: 'bold', fontSize: 16, letterSpacing: 0.5 },
 });

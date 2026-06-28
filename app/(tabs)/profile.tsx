@@ -1,8 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { StyleSheet, Text, View, ScrollView, Alert, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import {
+  StyleSheet, Text, View, ScrollView, Alert, TouchableOpacity,
+  ActivityIndicator, RefreshControl, Modal, TextInput,
+  TouchableWithoutFeedback, Image, Platform,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import Header from '../../src/components/Header';
 import Badge from '../../src/components/Badge';
 import { AuthService } from '../../src/services/auth.service';
@@ -19,12 +23,22 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [username,      setUsername]      = useState('');
   const [displayName,   setDisplayName]   = useState('');
+  const [fullName,      setFullName]      = useState<string | null>(null);
+  const [avatarUrl,     setAvatarUrl]     = useState<string | null>(null);
   const [isAdmin,       setIsAdmin]       = useState(false);
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
   const [signingOut,    setSigningOut]    = useState(false);
   const [notifs,        setNotifs]        = useState<any[]>([]);
   const [notifExpanded, setNotifExpanded] = useState(false);
+  const [userId,        setUserId]        = useState<string>('');
+
+  // Modal editar perfil
+  const [editModal,     setEditModal]     = useState(false);
+  const [editFullName,  setEditFullName]  = useState('');
+  const [editUsername,  setEditUsername]  = useState('');
+  const [editAvatar,    setEditAvatar]    = useState<string | null>(null);
+  const [saving,        setSaving]        = useState(false);
 
   const [stats, setStats] = useState({
     jugadas: 0, ganadas: 0, pctAcierto: 0,
@@ -35,13 +49,14 @@ export default function ProfileScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setUserId(user.id);
 
       const adminStatus = await AdminService.isAdmin();
       setIsAdmin(adminStatus);
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('username, display_name, nombre, apellido')
+        .select('username, display_name, nombre, apellido, full_name, avatar_url')
         .eq('id', user.id)
         .single();
 
@@ -54,6 +69,8 @@ export default function ProfileScreen() {
 
       setUsername(uname);
       setDisplayName(dname);
+      setFullName(profile?.full_name ?? null);
+      setAvatarUrl(profile?.avatar_url ?? null);
 
       const { data: parts } = await supabase
         .from('participaciones')
@@ -141,6 +158,83 @@ export default function ProfileScreen() {
     ]);
   };
 
+  const abrirEditModal = () => {
+    setEditFullName(fullName ?? '');
+    setEditUsername(username);
+    setEditAvatar(avatarUrl);
+    setEditModal(true);
+  };
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para cambiar la foto.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+      base64: false,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setEditAvatar(result.assets[0].uri);
+    }
+  };
+
+  const handleGuardarPerfil = async () => {
+    if (!editFullName.trim()) {
+      Alert.alert('Campo requerido', 'El nombre completo es necesario para procesar retiros.');
+      return;
+    }
+    setSaving(true);
+    try {
+      let newAvatarUrl = avatarUrl;
+
+      // Subir imagen si cambió
+      if (editAvatar && editAvatar !== avatarUrl) {
+        const ext      = editAvatar.split('.').pop()?.toLowerCase() ?? 'jpg';
+        const fileName = `${userId}_${Date.now()}.${ext}`;
+        const response = await fetch(editAvatar);
+        const blob     = await response.blob();
+        const arrayBuf = await blob.arrayBuffer();
+
+        const { error: upErr } = await supabase.storage
+          .from('avatars')
+          .upload(fileName, arrayBuf, { contentType: `image/${ext}`, upsert: true });
+
+        if (upErr) throw upErr;
+
+        const { data: urlData } = supabase.storage
+          .from('avatars')
+          .getPublicUrl(fileName);
+        newAvatarUrl = urlData.publicUrl;
+      }
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name:  editFullName.trim(),
+          username:   editUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') || username,
+          avatar_url: newAvatarUrl,
+        })
+        .eq('id', userId);
+
+      if (error) throw error;
+
+      setFullName(editFullName.trim());
+      setUsername(editUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') || username);
+      setAvatarUrl(newAvatarUrl);
+      setEditModal(false);
+      Alert.alert('✅ Perfil actualizado', 'Tus datos han sido guardados correctamente.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const initials = (displayName || username)
     ? (displayName || username).substring(0, 2).toUpperCase()
     : '?';
@@ -178,14 +272,17 @@ export default function ProfileScreen() {
           />
         }
       >
-
         {/* Avatar + nombre */}
         <View style={st.heroSection}>
           <View style={st.avatarWrap}>
             <View style={st.avatarNeonRing}>
-              <View style={st.avatar}>
-                <Text style={st.avatarTxt}>{initials}</Text>
-              </View>
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={st.avatarImg} />
+              ) : (
+                <View style={st.avatar}>
+                  <Text style={st.avatarTxt}>{initials}</Text>
+                </View>
+              )}
             </View>
             {isAdmin && (
               <View style={st.adminPill}>
@@ -200,6 +297,18 @@ export default function ProfileScreen() {
               <Text style={st.usernamePillTxt}>@{username}</Text>
             </View>
           ) : null}
+
+          {/* Botón editar perfil */}
+          <TouchableOpacity style={st.editBtn} onPress={abrirEditModal}>
+            <Text style={st.editBtnTxt}>✏️ Editar perfil</Text>
+          </TouchableOpacity>
+
+          {/* Alerta si no tiene full_name */}
+          {!fullName && (
+            <TouchableOpacity style={st.alertaRetiro} onPress={abrirEditModal}>
+              <Text style={st.alertaRetiroTxt}>⚠️ Agrega tu nombre completo para poder realizar retiros</Text>
+            </TouchableOpacity>
+          )}
 
           <View style={st.nivelBox}>
             <View style={st.nivelRow}>
@@ -326,87 +435,211 @@ export default function ProfileScreen() {
         </TouchableOpacity>
 
       </ScrollView>
+
+      {/* ─── Modal Editar Perfil ─── */}
+      <Modal visible={editModal} transparent animationType="slide" onRequestClose={() => setEditModal(false)}>
+        <TouchableWithoutFeedback onPress={() => setEditModal(false)}>
+          <View style={st.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={st.modalCard}>
+                <Text style={st.modalTitle}>✏️ Editar Perfil</Text>
+
+                {/* Foto de perfil */}
+                <View style={st.avatarEditRow}>
+                  <TouchableOpacity onPress={pickImage} style={st.avatarEditWrap}>
+                    {editAvatar ? (
+                      <Image source={{ uri: editAvatar }} style={st.avatarEditImg} />
+                    ) : (
+                      <View style={st.avatarEditPlaceholder}>
+                        <Text style={st.avatarEditInitials}>{initials}</Text>
+                      </View>
+                    )}
+                    <View style={st.avatarEditOverlay}>
+                      <Text style={st.avatarEditCamara}>📷</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.avatarEditHint}>Toca la foto para cambiarla</Text>
+                    <Text style={st.avatarEditSub}>Imagen cuadrada recomendada</Text>
+                  </View>
+                </View>
+
+                {/* Nombre completo */}
+                <Text style={st.inputLabel}>NOMBRE COMPLETO <Text style={{ color: '#E74C3C' }}>*</Text></Text>
+                <TextInput
+                  style={st.input}
+                  placeholder="Ej. Juan Pérez García"
+                  placeholderTextColor="#404050"
+                  value={editFullName}
+                  onChangeText={setEditFullName}
+                  autoCapitalize="words"
+                />
+                <Text style={st.inputHint}>Requerido para procesar retiros 💸</Text>
+
+                {/* Username */}
+                <Text style={[st.inputLabel, { marginTop: 14 }]}>USUARIO</Text>
+                <View style={st.inputUsernameWrap}>
+                  <Text style={st.inputPrefix}>@</Text>
+                  <TextInput
+                    style={[st.input, { flex: 1, marginBottom: 0 }]}
+                    placeholder="tu_usuario"
+                    placeholderTextColor="#404050"
+                    value={editUsername}
+                    onChangeText={v => setEditUsername(v.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                    autoCapitalize="none"
+                  />
+                </View>
+
+                {/* Botones */}
+                <View style={st.modalBtns}>
+                  <TouchableOpacity
+                    style={st.cancelBtn}
+                    onPress={() => setEditModal(false)}
+                    disabled={saving}
+                  >
+                    <Text style={st.cancelBtnTxt}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[st.saveBtn, saving && { opacity: 0.6 }]}
+                    onPress={handleGuardarPerfil}
+                    disabled={saving}
+                  >
+                    {saving
+                      ? <ActivityIndicator color="#000" />
+                      : <Text style={st.saveBtnTxt}>Guardar</Text>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const st = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#0A0C10' },
-  scroll:           { padding: 16, paddingBottom: 120 },
-  heroSection:      { alignItems: 'center', marginBottom: 24 },
-  avatarWrap:       { marginBottom: 14, alignItems: 'center' },
-  avatarNeonRing:   { width: 92, height: 92, borderRadius: 46, borderWidth: 2,
-                      borderColor: '#9B59B6', justifyContent: 'center', alignItems: 'center',
-                      shadowColor: '#9B59B6', shadowOpacity: 0.6, shadowRadius: 16, elevation: 8 },
-  avatar:           { width: 80, height: 80, borderRadius: 40,
-                      backgroundColor: '#15181F', justifyContent: 'center', alignItems: 'center' },
-  avatarTxt:        { color: '#FFF', fontSize: 28, fontWeight: 'bold',
-                      textShadowColor: '#9B59B6', textShadowRadius: 10 },
-  adminPill:        { marginTop: 8, backgroundColor: 'rgba(255,215,0,0.1)',
-                      borderRadius: 20, paddingHorizontal: 12, paddingVertical: 3,
-                      borderWidth: 1, borderColor: '#FFD700' },
-  adminPillTxt:     { color: '#FFD700', fontWeight: 'bold', fontSize: 11, letterSpacing: 1 },
-  nombre:           { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 6 },
-  usernamePill:     { backgroundColor: 'rgba(155,89,182,0.12)', borderRadius: 20,
-                      paddingHorizontal: 14, paddingVertical: 4, marginBottom: 16,
-                      borderWidth: 1, borderColor: '#9B59B655' },
-  usernamePillTxt:  { color: '#9B59B6', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
-  nivelBox:         { width: '100%', backgroundColor: '#0D1117', borderRadius: 14, padding: 14,
-                      borderWidth: 1, borderColor: '#1E2330' },
-  nivelRow:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  nivelLabel:       { color: '#404040', fontSize: 10, letterSpacing: 2 },
-  nivelNombre:      { color: '#9B59B6', fontSize: 15, fontWeight: 'bold' },
-  xpTrack:          { height: 6, backgroundColor: '#1A1D24', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
-  xpFill:           { height: '100%', backgroundColor: '#9B59B6',
-                      shadowColor: '#9B59B6', shadowOpacity: 0.8, shadowRadius: 4 },
-  xpTxt:            { color: '#303030', fontSize: 10, textAlign: 'right', letterSpacing: 1 },
-  statsCard:        { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 20,
-                      borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                      shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 14, elevation: 5 },
-  statsNeonLine:    { height: 2, backgroundColor: '#9B59B6',
-                      shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
-  statsTitle:       { color: '#303030', fontSize: 9, fontWeight: 'bold', letterSpacing: 3,
-                      textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
-  statsGrid:        { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 16, alignItems: 'center' },
-  statItem:         { flex: 1, alignItems: 'center' },
-  statVal:          { fontSize: 22, fontWeight: 'bold' },
-  statLbl:          { color: '#303030', fontSize: 8, letterSpacing: 1.5, marginTop: 3 },
-  statDiv:          { width: 1, height: 32, backgroundColor: '#1E2330' },
-  statsBottomRow:   { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
-  statsFinBox:      { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  statsFinLbl:      { color: '#303030', fontSize: 8, letterSpacing: 2, marginBottom: 4 },
-  statsFinVal:      { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
-  sectionHeader:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  sectionLine:      { flex: 1, height: 1, backgroundColor: '#1E2330' },
-  sectionTitle:     { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3 },
-  adminCard:        { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 20,
-                      borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                      shadowColor: '#FFD700', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
-  adminCardNeonLine:{ height: 2, backgroundColor: '#FFD700',
-                      shadowColor: '#FFD700', shadowOpacity: 1, shadowRadius: 8 },
-  adminCardBody:    { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
-  adminCardTitle:   { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  adminCardSub:     { color: '#404040', fontSize: 12, marginTop: 2 },
-  adminCardArrow:   { color: '#FFD700', fontSize: 24 },
-  notifToggle:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0D1117',
-                      borderRadius: 12, padding: 14, marginBottom: 10,
-                      borderWidth: 1, borderColor: '#1E2330', gap: 8 },
-  notifToggleTxt:   { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, flex: 1 },
-  notifDot:         { backgroundColor: '#E74C3C', borderRadius: 10, minWidth: 20, height: 20,
-                      alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  notifDotTxt:      { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  notifChevron:     { color: '#303030', fontSize: 11 },
-  notifCard:        { flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-                      backgroundColor: '#0D1117', borderRadius: 12, padding: 12,
-                      borderWidth: 1, borderColor: '#1E2330' },
-  notifTitulo:      { color: '#606060', fontWeight: 'bold', fontSize: 13, marginBottom: 2 },
-  notifMsg:         { color: '#404040', fontSize: 12, lineHeight: 17 },
-  notifFecha:       { color: '#303030', fontSize: 10, marginTop: 4 },
-  dotUnread:        { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
-  emptyTxt:         { color: '#404040', textAlign: 'center', padding: 20, letterSpacing: 1 },
-  signOutBtn:       { marginTop: 8, padding: 15, borderRadius: 14,
-                      borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)',
-                      alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)',
-                      shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
-  signOutTxt:       { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
+  container:           { flex: 1, backgroundColor: '#0A0C10' },
+  scroll:              { padding: 16, paddingBottom: 120 },
+  heroSection:         { alignItems: 'center', marginBottom: 24 },
+  avatarWrap:          { marginBottom: 14, alignItems: 'center' },
+  avatarNeonRing:      { width: 92, height: 92, borderRadius: 46, borderWidth: 2,
+                         borderColor: '#9B59B6', justifyContent: 'center', alignItems: 'center',
+                         shadowColor: '#9B59B6', shadowOpacity: 0.6, shadowRadius: 16, elevation: 8,
+                         overflow: 'hidden' },
+  avatar:              { width: 86, height: 86, borderRadius: 43,
+                         backgroundColor: '#15181F', justifyContent: 'center', alignItems: 'center' },
+  avatarImg:           { width: 86, height: 86, borderRadius: 43 },
+  avatarTxt:           { color: '#FFF', fontSize: 28, fontWeight: 'bold',
+                         textShadowColor: '#9B59B6', textShadowRadius: 10 },
+  adminPill:           { marginTop: 8, backgroundColor: 'rgba(255,215,0,0.1)',
+                         borderRadius: 20, paddingHorizontal: 12, paddingVertical: 3,
+                         borderWidth: 1, borderColor: '#FFD700' },
+  adminPillTxt:        { color: '#FFD700', fontWeight: 'bold', fontSize: 11, letterSpacing: 1 },
+  nombre:              { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 6 },
+  usernamePill:        { backgroundColor: 'rgba(155,89,182,0.12)', borderRadius: 20,
+                         paddingHorizontal: 14, paddingVertical: 4, marginBottom: 10,
+                         borderWidth: 1, borderColor: '#9B59B655' },
+  usernamePillTxt:     { color: '#9B59B6', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
+  editBtn:             { flexDirection: 'row', alignItems: 'center', gap: 6,
+                         backgroundColor: 'rgba(155,89,182,0.1)', borderRadius: 20,
+                         paddingHorizontal: 16, paddingVertical: 7, marginBottom: 12,
+                         borderWidth: 1, borderColor: '#9B59B655' },
+  editBtnTxt:          { color: '#9B59B6', fontSize: 13, fontWeight: '600' },
+  alertaRetiro:        { backgroundColor: 'rgba(243,156,18,0.1)', borderRadius: 12,
+                         borderWidth: 1, borderColor: '#F39C12',
+                         paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14,
+                         width: '100%' },
+  alertaRetiroTxt:     { color: '#F39C12', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  nivelBox:            { width: '100%', backgroundColor: '#0D1117', borderRadius: 14, padding: 14,
+                         borderWidth: 1, borderColor: '#1E2330' },
+  nivelRow:            { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  nivelLabel:          { color: '#404040', fontSize: 10, letterSpacing: 2 },
+  nivelNombre:         { color: '#9B59B6', fontSize: 15, fontWeight: 'bold' },
+  xpTrack:             { height: 6, backgroundColor: '#1A1D24', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
+  xpFill:              { height: '100%', backgroundColor: '#9B59B6',
+                         shadowColor: '#9B59B6', shadowOpacity: 0.8, shadowRadius: 4 },
+  xpTxt:               { color: '#303030', fontSize: 10, textAlign: 'right', letterSpacing: 1 },
+  statsCard:           { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 20,
+                         borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
+                         shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 14, elevation: 5 },
+  statsNeonLine:       { height: 2, backgroundColor: '#9B59B6',
+                         shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+  statsTitle:          { color: '#303030', fontSize: 9, fontWeight: 'bold', letterSpacing: 3,
+                         textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
+  statsGrid:           { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 16, alignItems: 'center' },
+  statItem:            { flex: 1, alignItems: 'center' },
+  statVal:             { fontSize: 22, fontWeight: 'bold' },
+  statLbl:             { color: '#303030', fontSize: 8, letterSpacing: 1.5, marginTop: 3 },
+  statDiv:             { width: 1, height: 32, backgroundColor: '#1E2330' },
+  statsBottomRow:      { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
+  statsFinBox:         { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  statsFinLbl:         { color: '#303030', fontSize: 8, letterSpacing: 2, marginBottom: 4 },
+  statsFinVal:         { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
+  sectionHeader:       { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  sectionLine:         { flex: 1, height: 1, backgroundColor: '#1E2330' },
+  sectionTitle:        { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3 },
+  adminCard:           { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 20,
+                         borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
+                         shadowColor: '#FFD700', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
+  adminCardNeonLine:   { height: 2, backgroundColor: '#FFD700',
+                         shadowColor: '#FFD700', shadowOpacity: 1, shadowRadius: 8 },
+  adminCardBody:       { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
+  adminCardTitle:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  adminCardSub:        { color: '#404040', fontSize: 12, marginTop: 2 },
+  adminCardArrow:      { color: '#FFD700', fontSize: 24 },
+  notifToggle:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0D1117',
+                         borderRadius: 12, padding: 14, marginBottom: 10,
+                         borderWidth: 1, borderColor: '#1E2330', gap: 8 },
+  notifToggleTxt:      { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, flex: 1 },
+  notifDot:            { backgroundColor: '#E74C3C', borderRadius: 10, minWidth: 20, height: 20,
+                         alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  notifDotTxt:         { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+  notifChevron:        { color: '#303030', fontSize: 11 },
+  notifCard:           { flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+                         backgroundColor: '#0D1117', borderRadius: 12, padding: 12,
+                         borderWidth: 1, borderColor: '#1E2330' },
+  notifTitulo:         { color: '#606060', fontWeight: 'bold', fontSize: 13, marginBottom: 2 },
+  notifMsg:            { color: '#404040', fontSize: 12, lineHeight: 17 },
+  notifFecha:          { color: '#303030', fontSize: 10, marginTop: 4 },
+  dotUnread:           { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
+  emptyTxt:            { color: '#404040', textAlign: 'center', padding: 20, letterSpacing: 1 },
+  signOutBtn:          { marginTop: 8, padding: 15, borderRadius: 14,
+                         borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)',
+                         alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)',
+                         shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
+  signOutTxt:          { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
+  // Modal
+  modalOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
+  modalCard:           { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+                         padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 2 },
+  modalTitle:          { color: '#FFF', fontSize: 19, fontWeight: 'bold', marginBottom: 18 },
+  avatarEditRow:       { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
+  avatarEditWrap:      { position: 'relative', width: 72, height: 72, borderRadius: 36,
+                         overflow: 'hidden', borderWidth: 2, borderColor: '#9B59B6' },
+  avatarEditImg:       { width: 72, height: 72 },
+  avatarEditPlaceholder: { width: 72, height: 72, backgroundColor: '#1C1F28',
+                           justifyContent: 'center', alignItems: 'center' },
+  avatarEditInitials:  { color: '#FFF', fontSize: 22, fontWeight: 'bold' },
+  avatarEditOverlay:   { position: 'absolute', bottom: 0, left: 0, right: 0,
+                         backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', paddingVertical: 4 },
+  avatarEditCamara:    { fontSize: 14 },
+  avatarEditHint:      { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  avatarEditSub:       { color: '#606070', fontSize: 11, marginTop: 3 },
+  inputLabel:          { color: '#606070', fontSize: 10, letterSpacing: 1.5, fontWeight: '700', marginBottom: 6 },
+  input:               { backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1,
+                         borderColor: '#2A2D35', color: '#FFF', padding: 12,
+                         fontSize: 15, marginBottom: 4 },
+  inputHint:           { color: '#F39C1288', fontSize: 11, marginBottom: 4 },
+  inputUsernameWrap:   { flexDirection: 'row', alignItems: 'center',
+                         backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1,
+                         borderColor: '#2A2D35', paddingLeft: 12, marginBottom: 4 },
+  inputPrefix:         { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
+  modalBtns:           { flexDirection: 'row', gap: 12, marginTop: 20 },
+  cancelBtn:           { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center',
+                         backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
+  cancelBtnTxt:        { color: '#A0A0A0', fontWeight: 'bold' },
+  saveBtn:             { flex: 1, padding: 14, borderRadius: 12,
+                         alignItems: 'center', backgroundColor: '#9B59B6' },
+  saveBtnTxt:          { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
 });

@@ -28,15 +28,22 @@ export default function AdminDashboardScreen() {
   const [savingFecha,          setSavingFecha]          = useState(false);
   const [configExpanded,       setConfigExpanded]       = useState(false);
   const [pickerVisible,        setPickerVisible]        = useState(false);
+  const [retirosPendientes,    setRetirosPendientes]    = useState(0);
 
   const loadQuinielas = useCallback(async () => {
     try {
-      const [data, fecha] = await Promise.all([
+      const [data, fecha, { count }] = await Promise.all([
         AdminService.getQuinielas(),
         QuinielasService.getProximaFecha(),
+        supabase
+          .from('retiro_solicitudes')
+          .select('id', { count: 'exact', head: true })
+          .eq('estado', 'pendiente')
+          .then(r => ({ count: r.count ?? 0 })),
       ]);
       setQuinielas(data || []);
       setProximaFecha(fecha ?? '');
+      setRetirosPendientes(count);
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -154,6 +161,7 @@ export default function AdminDashboardScreen() {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); }} tintColor="#9B59B6" />}
       >
+        {/* Stats */}
         <View style={styles.statsContainer}>
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{quinielas.length}</Text>
@@ -165,6 +173,33 @@ export default function AdminDashboardScreen() {
           </View>
         </View>
 
+        {/* Acceso rápido retiros */}
+        <TouchableOpacity
+          style={styles.retirosBtn}
+          onPress={() => router.push('/admin/retiros')}
+        >
+          <View style={styles.retirosBtnLeft}>
+            <Text style={styles.retirosEmoji}>💸</Text>
+            <View>
+              <Text style={styles.retirosBtnTitle}>Gestionar Retiros</Text>
+              <Text style={styles.retirosBtnSub}>
+                {retirosPendientes > 0
+                  ? `${retirosPendientes} solicitud${retirosPendientes > 1 ? 'es' : ''} pendiente${retirosPendientes > 1 ? 's' : ''}`
+                  : 'Sin solicitudes pendientes'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.retirosBtnRight}>
+            {retirosPendientes > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeCount}>{retirosPendientes}</Text>
+              </View>
+            )}
+            <Text style={styles.retirosChevron}>›</Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Configurar próxima quiniela */}
         <TouchableOpacity style={styles.configHeader} onPress={() => setConfigExpanded(v => !v)}>
           <Text style={styles.configHeaderText}>⏰ Configurar Próxima Quiniela</Text>
           <Text style={styles.configChevron}>{configExpanded ? '▲' : '▼'}</Text>
@@ -182,21 +217,11 @@ export default function AdminDashboardScreen() {
               </View>
               <Text style={styles.datePickerArrow}>›</Text>
             </TouchableOpacity>
-
             <View style={styles.configBtns}>
-              <TouchableOpacity
-                style={[styles.configBtn, styles.configBtnSave]}
-                onPress={handleGuardarFecha}
-                disabled={savingFecha || !proximaFecha}
-              >
-                {savingFecha
-                  ? <ActivityIndicator size="small" color="#000" />
-                  : <Text style={styles.configBtnSaveText}>Guardar</Text>}
+              <TouchableOpacity style={[styles.configBtn, styles.configBtnSave]} onPress={handleGuardarFecha} disabled={savingFecha || !proximaFecha}>
+                {savingFecha ? <ActivityIndicator size="small" color="#000" /> : <Text style={styles.configBtnSaveText}>Guardar</Text>}
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.configBtn, styles.configBtnClear]}
-                onPress={handleLimpiar}
-              >
+              <TouchableOpacity style={[styles.configBtn, styles.configBtnClear]} onPress={handleLimpiar}>
                 <Text style={styles.configBtnClearText}>Limpiar</Text>
               </TouchableOpacity>
             </View>
@@ -218,13 +243,13 @@ export default function AdminDashboardScreen() {
           <TouchableOpacity key={q.id} style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
-              <View style={[styles.badge, { borderColor: getEstadoColor(q.estado) }]}>
-                <Text style={[styles.badgeText, { color: getEstadoColor(q.estado) }]}>{q.estado.toUpperCase()}</Text>
+              <View style={[styles.estadoBadge, { borderColor: getEstadoColor(q.estado) }]}>
+                <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado.toUpperCase()}</Text>
               </View>
               <Text style={styles.cardArrow}>›</Text>
             </View>
             <View style={styles.cardInfo}>
-              <Text style={styles.infoText}>🎪 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
+              <Text style={styles.infoText}>🎦 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
               <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada}</Text></Text>
             </View>
             <View style={styles.cardInfo}>
@@ -291,8 +316,8 @@ export default function AdminDashboardScreen() {
                       <Text style={styles.userEmail}>@{item.username}</Text>
                       <Text style={styles.userMeta}>Aciertos: {item.aciertos ?? 0}</Text>
                     </View>
-                    <View style={[styles.estadoBadge, { borderColor: getEstadoPartColor(item.estado) }]}>
-                      <Text style={[styles.estadoBadgeText, { color: getEstadoPartColor(item.estado) }]}>{item.estado?.toUpperCase()}</Text>
+                    <View style={[styles.partEstadoBadge, { borderColor: getEstadoPartColor(item.estado) }]}>
+                      <Text style={[styles.partEstadoBadgeText, { color: getEstadoPartColor(item.estado) }]}>{item.estado?.toUpperCase()}</Text>
                     </View>
                     <Text style={styles.userMonto}>${item.monto_pagado ?? 0}</Text>
                   </View>
@@ -307,63 +332,78 @@ export default function AdminDashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:          { flex: 1, backgroundColor: '#0A0C10' },
-  header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
-  backButton:         { width: 60 },
-  backText:           { color: '#9B59B6', fontSize: 16 },
-  title:              { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  content:            { padding: 15, paddingBottom: 40 },
-  statsContainer:     { flexDirection: 'row', backgroundColor: '#15181F', borderRadius: 12, paddingVertical: 20, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
-  statBox:            { flex: 1, alignItems: 'center' },
-  statValue:          { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
-  statLabel:          { color: '#A0A0A0', fontSize: 12 },
-  configHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 10, padding: 14, marginBottom: 4, borderWidth: 1, borderColor: '#F39C12' },
-  configHeaderText:   { color: '#F39C12', fontWeight: 'bold', fontSize: 14 },
-  configChevron:      { color: '#F39C12', fontSize: 12 },
-  configBox:          { backgroundColor: '#15181F', borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
-  datePickerBtn:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1F26', borderRadius: 10, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#F39C12', gap: 10 },
-  datePickerIcon:     { fontSize: 24 },
-  datePickerLabel:    { color: '#A0A0A0', fontSize: 11, marginBottom: 2 },
-  datePickerValue:    { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
-  datePickerArrow:    { color: '#F39C12', fontSize: 22 },
-  configBtns:         { flexDirection: 'row', gap: 10 },
-  configBtn:          { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  configBtnSave:      { backgroundColor: '#F39C12' },
-  configBtnSaveText:  { color: '#000', fontWeight: 'bold', fontSize: 14 },
-  configBtnClear:     { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
-  configBtnClearText: { color: '#A0A0A0', fontSize: 14 },
-  createBtn:          { backgroundColor: '#1C1F26', padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 16, marginBottom: 24, borderWidth: 1.5 },
-  neonBorderPurple:   { borderColor: '#9B59B6', shadowColor: '#9B59B6', shadowOpacity: 0.6, shadowRadius: 10, elevation: 5 },
-  createBtnText:      { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
-  sectionTitle:       { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 15 },
-  emptyBox:           { alignItems: 'center', padding: 30 },
-  emptyText:          { color: '#A0A0A0', fontSize: 14, textAlign: 'center' },
-  card:               { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: '#2A2D35' },
-  cardHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  cardTitle:          { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1, marginRight: 8 },
-  cardArrow:          { color: '#9B59B6', fontSize: 22, marginLeft: 4 },
-  badge:              { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  badgeText:          { fontSize: 10, fontWeight: 'bold' },
-  cardInfo:           { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#1C1F26', padding: 10, borderRadius: 8, marginBottom: 8 },
-  infoText:           { color: '#A0A0A0', fontSize: 12 },
-  cardActions:        { flexDirection: 'row', gap: 8, marginTop: 4 },
-  actionBtn:          { flex: 1, backgroundColor: '#1C1F26', paddingVertical: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
-  actionText:         { color: '#FFF', fontSize: 12, fontWeight: '600' },
-  dangerBtn:          { borderColor: '#E91E63', backgroundColor: 'rgba(233,30,99,0.1)' },
-  dangerText:         { color: '#E91E63', fontSize: 12, fontWeight: 'bold' },
-  disabledBtn:        { opacity: 0.35 },
-  modalOverlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalBox:           { backgroundColor: '#15181F', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '75%' },
-  modalHeader:        { marginBottom: 15 },
-  modalTitle:         { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  modalSubtitle:      { color: '#A0A0A0', fontSize: 13, marginTop: 2 },
-  modalClose:         { position: 'absolute', right: 0, top: 0, padding: 5 },
-  modalCloseText:     { color: '#FFF', fontSize: 20 },
-  userRow:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35', gap: 8 },
-  userRank:           { color: '#F39C12', fontWeight: 'bold', width: 28, fontSize: 14 },
-  userEmail:          { color: '#FFF', fontSize: 14, fontWeight: '600' },
-  userMeta:           { color: '#A0A0A0', fontSize: 12, marginTop: 2 },
-  estadoBadge:        { borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  estadoBadgeText:    { fontSize: 9, fontWeight: 'bold' },
-  userMonto:          { color: '#2ECC71', fontWeight: 'bold', fontSize: 13, minWidth: 40, textAlign: 'right' },
+  container:            { flex: 1, backgroundColor: '#0A0C10' },
+  header:               { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
+  backButton:           { width: 60 },
+  backText:             { color: '#9B59B6', fontSize: 16 },
+  title:                { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  content:              { padding: 15, paddingBottom: 40 },
+
+  statsContainer:       { flexDirection: 'row', backgroundColor: '#15181F', borderRadius: 12, paddingVertical: 20, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
+  statBox:              { flex: 1, alignItems: 'center' },
+  statValue:            { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
+  statLabel:            { color: '#A0A0A0', fontSize: 12 },
+
+  retirosBtn:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1.5, borderColor: '#F39C12' },
+  retirosBtnLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  retirosEmoji:         { fontSize: 28 },
+  retirosBtnTitle:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  retirosBtnSub:        { color: '#A0A0A0', fontSize: 12, marginTop: 2 },
+  retirosBtnRight:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  badge:                { backgroundColor: '#E74C3C', borderRadius: 12, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
+  badgeCount:           { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+  retirosChevron:       { color: '#F39C12', fontSize: 24 },
+
+  configHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 10, padding: 14, marginBottom: 4, borderWidth: 1, borderColor: '#F39C12' },
+  configHeaderText:     { color: '#F39C12', fontWeight: 'bold', fontSize: 14 },
+  configChevron:        { color: '#F39C12', fontSize: 12 },
+  configBox:            { backgroundColor: '#15181F', borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
+  datePickerBtn:        { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1F26', borderRadius: 10, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#F39C12', gap: 10 },
+  datePickerIcon:       { fontSize: 24 },
+  datePickerLabel:      { color: '#A0A0A0', fontSize: 11, marginBottom: 2 },
+  datePickerValue:      { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
+  datePickerArrow:      { color: '#F39C12', fontSize: 22 },
+  configBtns:           { flexDirection: 'row', gap: 10 },
+  configBtn:            { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  configBtnSave:        { backgroundColor: '#F39C12' },
+  configBtnSaveText:    { color: '#000', fontWeight: 'bold', fontSize: 14 },
+  configBtnClear:       { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
+  configBtnClearText:   { color: '#A0A0A0', fontSize: 14 },
+
+  createBtn:            { backgroundColor: '#1C1F26', padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 12, marginBottom: 24, borderWidth: 1.5 },
+  neonBorderPurple:     { borderColor: '#9B59B6' },
+  createBtnText:        { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
+  sectionTitle:         { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 15 },
+  emptyBox:             { alignItems: 'center', padding: 30 },
+  emptyText:            { color: '#A0A0A0', fontSize: 14, textAlign: 'center' },
+
+  card:                 { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: '#2A2D35' },
+  cardHeader:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  cardTitle:            { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1, marginRight: 8 },
+  cardArrow:            { color: '#9B59B6', fontSize: 22, marginLeft: 4 },
+  estadoBadge:          { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  estadoBadgeText:      { fontSize: 10, fontWeight: 'bold' },
+  cardInfo:             { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#1C1F26', padding: 10, borderRadius: 8, marginBottom: 8 },
+  infoText:             { color: '#A0A0A0', fontSize: 12 },
+  cardActions:          { flexDirection: 'row', gap: 8, marginTop: 4 },
+  actionBtn:            { flex: 1, backgroundColor: '#1C1F26', paddingVertical: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
+  actionText:           { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  dangerBtn:            { borderColor: '#E91E63', backgroundColor: 'rgba(233,30,99,0.1)' },
+  dangerText:           { color: '#E91E63', fontSize: 12, fontWeight: 'bold' },
+  disabledBtn:          { opacity: 0.35 },
+
+  modalOverlay:         { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalBox:             { backgroundColor: '#15181F', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '75%' },
+  modalHeader:          { marginBottom: 15 },
+  modalTitle:           { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  modalSubtitle:        { color: '#A0A0A0', fontSize: 13, marginTop: 2 },
+  modalClose:           { position: 'absolute', right: 0, top: 0, padding: 5 },
+  modalCloseText:       { color: '#FFF', fontSize: 20 },
+  userRow:              { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35', gap: 8 },
+  userRank:             { color: '#F39C12', fontWeight: 'bold', width: 28, fontSize: 14 },
+  userEmail:            { color: '#FFF', fontSize: 14, fontWeight: '600' },
+  userMeta:             { color: '#A0A0A0', fontSize: 12, marginTop: 2 },
+  partEstadoBadge:      { borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  partEstadoBadgeText:  { fontSize: 9, fontWeight: 'bold' },
+  userMonto:            { color: '#2ECC71', fontWeight: 'bold', fontSize: 13, minWidth: 40, textAlign: 'right' },
 });

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, Alert, TouchableOpacity,
   ActivityIndicator, RefreshControl, Modal, TextInput,
@@ -19,6 +19,9 @@ const TIPO_CONFIG: Record<string, { icon: string; color: string }> = {
   info:     { icon: '📢', color: '#00E5FF' },
 };
 
+// Tiempo en ms antes de borrar una notificación leída al hacer tap
+const AUTO_DELETE_MS = 5000;
+
 export default function ProfileScreen() {
   const router = useRouter();
   const [username,      setUsername]      = useState('');
@@ -32,6 +35,9 @@ export default function ProfileScreen() {
   const [notifs,        setNotifs]        = useState<any[]>([]);
   const [notifExpanded, setNotifExpanded] = useState(false);
   const [userId,        setUserId]        = useState<string>('');
+  // IDs de notifs en cuenta regresiva para borrado
+  const [deletingIds,   setDeletingIds]   = useState<Set<string>>(new Set());
+  const deleteTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // Modal editar perfil
   const [editModal,     setEditModal]     = useState(false);
@@ -128,6 +134,7 @@ export default function ProfileScreen() {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false }).limit(20);
       setNotifs(notifsData || []);
+      // Marcar todas como leídas al abrir
       if ((notifsData || []).some((n: any) => !n.leida)) {
         await supabase.from('notificaciones').update({ leida: true })
           .eq('user_id', user.id).eq('leida', false);
@@ -146,6 +153,50 @@ export default function ProfileScreen() {
     setRefreshing(true);
     loadUserData();
   }, [loadUserData]);
+
+  // Tap en notificación: si ya está leída, programa su borrado en AUTO_DELETE_MS
+  const handleTapNotif = useCallback((n: any) => {
+    // Solo borrar si ya está leída (las no leídas se marcan al abrir la sección)
+    if (!n.leida) return;
+    // Evitar doble tap
+    if (deleteTimers.current[n.id]) return;
+
+    setDeletingIds(prev => new Set(prev).add(n.id));
+
+    deleteTimers.current[n.id] = setTimeout(async () => {
+      await supabase.from('notificaciones').delete().eq('id', n.id);
+      setNotifs(prev => prev.filter(x => x.id !== n.id));
+      setDeletingIds(prev => { const s = new Set(prev); s.delete(n.id); return s; });
+      delete deleteTimers.current[n.id];
+    }, AUTO_DELETE_MS);
+  }, []);
+
+  // Cancelar borrado al hacer tap de nuevo
+  const handleCancelDelete = useCallback((id: string) => {
+    if (deleteTimers.current[id]) {
+      clearTimeout(deleteTimers.current[id]);
+      delete deleteTimers.current[id];
+      setDeletingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+    }
+  }, []);
+
+  // Borrar todas las notificaciones leídas
+  const handleBorrarLeidas = useCallback(async () => {
+    const leidas = notifs.filter(n => n.leida);
+    if (leidas.length === 0) return;
+    Alert.alert(
+      'Limpiar notificaciones',
+      `¿Eliminar ${leidas.length} notificación${leidas.length > 1 ? 'es' : ''} leída${leidas.length > 1 ? 's' : ''}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: async () => {
+          const ids = leidas.map(n => n.id);
+          await supabase.from('notificaciones').delete().in('id', ids);
+          setNotifs(prev => prev.filter(n => !n.leida));
+        }},
+      ]
+    );
+  }, [notifs]);
 
   const handleSignOut = async () => {
     Alert.alert('Cerrar Sesión', '¿Estás seguro que quieres salir?', [
@@ -191,27 +242,19 @@ export default function ProfileScreen() {
     setSaving(true);
     try {
       let newAvatarUrl = avatarUrl;
-
-      // Subir imagen si cambió
       if (editAvatar && editAvatar !== avatarUrl) {
         const ext      = editAvatar.split('.').pop()?.toLowerCase() ?? 'jpg';
         const fileName = `${userId}_${Date.now()}.${ext}`;
         const response = await fetch(editAvatar);
         const blob     = await response.blob();
         const arrayBuf = await blob.arrayBuffer();
-
         const { error: upErr } = await supabase.storage
           .from('avatars')
           .upload(fileName, arrayBuf, { contentType: `image/${ext}`, upsert: true });
-
         if (upErr) throw upErr;
-
-        const { data: urlData } = supabase.storage
-          .from('avatars')
-          .getPublicUrl(fileName);
+        const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
         newAvatarUrl = urlData.publicUrl;
       }
-
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -220,9 +263,7 @@ export default function ProfileScreen() {
           avatar_url: newAvatarUrl,
         })
         .eq('id', userId);
-
       if (error) throw error;
-
       setFullName(editFullName.trim());
       setUsername(editUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') || username);
       setAvatarUrl(newAvatarUrl);
@@ -239,8 +280,9 @@ export default function ProfileScreen() {
     ? (displayName || username).substring(0, 2).toUpperCase()
     : '?';
 
-  const roiColor = stats.roi >= 0 ? '#2ECC71' : '#E91E63';
-  const noLeidas = notifs.filter(n => !n.leida).length;
+  const roiColor   = stats.roi >= 0 ? '#2ECC71' : '#E91E63';
+  const noLeidas   = notifs.filter(n => !n.leida).length;
+  const hayLeidas  = notifs.some(n => n.leida);
 
   const nivel  = stats.jugadas >= 20 ? 'Oráculo' : stats.jugadas >= 10 ? 'Estratéga' : stats.jugadas >= 5 ? 'Analista' : 'Novato';
   const niveXP = stats.jugadas * 100;
@@ -298,12 +340,10 @@ export default function ProfileScreen() {
             </View>
           ) : null}
 
-          {/* Botón editar perfil */}
           <TouchableOpacity style={st.editBtn} onPress={abrirEditModal}>
             <Text style={st.editBtnTxt}>✏️ Editar perfil</Text>
           </TouchableOpacity>
 
-          {/* Alerta si no tiene full_name */}
           {!fullName && (
             <TouchableOpacity style={st.alertaRetiro} onPress={abrirEditModal}>
               <Text style={st.alertaRetiroTxt}>⚠️ Agrega tu nombre completo para poder realizar retiros</Text>
@@ -322,7 +362,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Stats grid */}
+        {/* Stats */}
         <View style={st.statsCard}>
           <View style={st.statsNeonLine} />
           <Text style={st.statsTitle}>ESTADÍSTICAS DE TEMPORADA</Text>
@@ -335,9 +375,7 @@ export default function ProfileScreen() {
             ].map((item, i, arr) => (
               <React.Fragment key={i}>
                 <View style={st.statItem}>
-                  <Text style={[st.statVal, { color: item.c, textShadowColor: item.c, textShadowRadius: 8 }]}>
-                    {item.v}
-                  </Text>
+                  <Text style={[st.statVal, { color: item.c, textShadowColor: item.c, textShadowRadius: 8 }]}>{item.v}</Text>
                   <Text style={st.statLbl}>{item.l}</Text>
                 </View>
                 {i < arr.length - 1 && <View style={st.statDiv} />}
@@ -372,10 +410,10 @@ export default function ProfileScreen() {
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
           <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 2 }}>
-            <Badge icon="🎯" title="Pleno Perfecto" isUnlocked={stats.ganadas >= 1}     neonColor="#E91E63" />
-            <Badge icon="🔥" title="Racha x3"       isUnlocked={stats.jugadas >= 3}    neonColor="#F39C12" />
-            <Badge icon="💰" title="Bolsa Mayor"    isUnlocked={stats.ganado >= 1000}  neonColor="#FFD700" />
-            <Badge icon="🔮" title="Vidente"        isUnlocked={stats.pctAcierto >= 80} neonColor="#9B59B6" />
+            <Badge icon="🎯" title="Pleno Perfecto" isUnlocked={stats.ganadas >= 1}      neonColor="#E91E63" />
+            <Badge icon="🔥" title="Racha x3"       isUnlocked={stats.jugadas >= 3}     neonColor="#F39C12" />
+            <Badge icon="💰" title="Bolsa Mayor"    isUnlocked={stats.ganado >= 1000}   neonColor="#FFD700" />
+            <Badge icon="🔮" title="Vidente"        isUnlocked={stats.pctAcierto >= 80}  neonColor="#9B59B6" />
           </View>
         </ScrollView>
 
@@ -394,36 +432,77 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Notificaciones */}
-        <TouchableOpacity style={st.notifToggle} onPress={() => setNotifExpanded(v => !v)}>
-          <Text style={st.notifToggleTxt}>🔔 NOTIFICACIONES</Text>
-          {noLeidas > 0 && (
-            <View style={st.notifDot}>
-              <Text style={st.notifDotTxt}>{noLeidas}</Text>
-            </View>
+        {/* ─── Notificaciones ─── */}
+        <View style={st.notifHeader}>
+          <TouchableOpacity
+            style={[st.notifToggle, { flex: 1 }]}
+            onPress={() => setNotifExpanded(v => !v)}
+          >
+            <Text style={st.notifToggleTxt}>🔔 NOTIFICACIONES</Text>
+            {noLeidas > 0 && (
+              <View style={st.notifDot}>
+                <Text style={st.notifDotTxt}>{noLeidas}</Text>
+              </View>
+            )}
+            <Text style={st.notifChevron}>{notifExpanded ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+
+          {/* Botón limpiar leídas */}
+          {hayLeidas && (
+            <TouchableOpacity style={st.clearBtn} onPress={handleBorrarLeidas}>
+              <Text style={st.clearBtnTxt}>🗑️</Text>
+            </TouchableOpacity>
           )}
-          <Text style={st.notifChevron}>{notifExpanded ? '▲' : '▼'}</Text>
-        </TouchableOpacity>
+        </View>
 
         {notifExpanded && (
           <View style={{ gap: 8, marginBottom: 16 }}>
             {notifs.length === 0 ? (
               <Text style={st.emptyTxt}>Sin notificaciones todavía</Text>
             ) : notifs.map(n => {
-              const cfg  = TIPO_CONFIG[n.tipo] ?? TIPO_CONFIG.info;
-              const fecha = new Date(n.created_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
+              const cfg    = TIPO_CONFIG[n.tipo] ?? TIPO_CONFIG.info;
+              const fecha  = new Date(n.created_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
+              const borrandose = deletingIds.has(n.id);
+
               return (
-                <View key={n.id} style={[st.notifCard, !n.leida && { borderColor: cfg.color }]}>
-                  <Text style={{ fontSize: 20 }}>{cfg.icon}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[st.notifTitulo, !n.leida && { color: '#FFF' }]}>{n.titulo}</Text>
-                    <Text style={st.notifMsg}>{n.mensaje}</Text>
-                    <Text style={st.notifFecha}>{fecha}</Text>
+                <TouchableOpacity
+                  key={n.id}
+                  activeOpacity={0.75}
+                  onPress={() => {
+                    if (borrandose) {
+                      // Cancelar borrado si se toca de nuevo
+                      handleCancelDelete(n.id);
+                    } else {
+                      handleTapNotif(n);
+                    }
+                  }}
+                >
+                  <View style={[
+                    st.notifCard,
+                    !n.leida && { borderColor: cfg.color },
+                    borrandose && st.notifCardDeleting,
+                  ]}>
+                    <Text style={{ fontSize: 20 }}>{cfg.icon}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[st.notifTitulo, !n.leida && { color: '#FFF' }]}>{n.titulo}</Text>
+                      <Text style={st.notifMsg}>{n.mensaje}</Text>
+                      <Text style={st.notifFecha}>{fecha}</Text>
+                      {borrandose && (
+                        <Text style={st.notifDeleteHint}>Toca para cancelar · Borrando en 5s…</Text>
+                      )}
+                    </View>
+                    {!n.leida && <View style={[st.dotUnread, { backgroundColor: cfg.color }]} />}
+                    {borrandose && <Text style={st.notifTrash}>🗑️</Text>}
                   </View>
-                  {!n.leida && <View style={[st.dotUnread, { backgroundColor: cfg.color }]} />}
-                </View>
+                </TouchableOpacity>
               );
             })}
+
+            {hayLeidas && (
+              <TouchableOpacity style={st.limpiarAllBtn} onPress={handleBorrarLeidas}>
+                <Text style={st.limpiarAllTxt}>🗑️ Limpiar notificaciones leídas</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -433,7 +512,6 @@ export default function ProfileScreen() {
             ? <ActivityIndicator color="#E74C3C" />
             : <Text style={st.signOutTxt}>🚨 Cerrar Sesión</Text>}
         </TouchableOpacity>
-
       </ScrollView>
 
       {/* ─── Modal Editar Perfil ─── */}
@@ -444,7 +522,6 @@ export default function ProfileScreen() {
               <View style={st.modalCard}>
                 <Text style={st.modalTitle}>✏️ Editar Perfil</Text>
 
-                {/* Foto de perfil */}
                 <View style={st.avatarEditRow}>
                   <TouchableOpacity onPress={pickImage} style={st.avatarEditWrap}>
                     {editAvatar ? (
@@ -464,7 +541,6 @@ export default function ProfileScreen() {
                   </View>
                 </View>
 
-                {/* Nombre completo */}
                 <Text style={st.inputLabel}>NOMBRE COMPLETO <Text style={{ color: '#E74C3C' }}>*</Text></Text>
                 <TextInput
                   style={st.input}
@@ -476,7 +552,6 @@ export default function ProfileScreen() {
                 />
                 <Text style={st.inputHint}>Requerido para procesar retiros 💸</Text>
 
-                {/* Username */}
                 <Text style={[st.inputLabel, { marginTop: 14 }]}>USUARIO</Text>
                 <View style={st.inputUsernameWrap}>
                   <Text style={st.inputPrefix}>@</Text>
@@ -490,23 +565,12 @@ export default function ProfileScreen() {
                   />
                 </View>
 
-                {/* Botones */}
                 <View style={st.modalBtns}>
-                  <TouchableOpacity
-                    style={st.cancelBtn}
-                    onPress={() => setEditModal(false)}
-                    disabled={saving}
-                  >
+                  <TouchableOpacity style={st.cancelBtn} onPress={() => setEditModal(false)} disabled={saving}>
                     <Text style={st.cancelBtnTxt}>Cancelar</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[st.saveBtn, saving && { opacity: 0.6 }]}
-                    onPress={handleGuardarPerfil}
-                    disabled={saving}
-                  >
-                    {saving
-                      ? <ActivityIndicator color="#000" />
-                      : <Text style={st.saveBtnTxt}>Guardar</Text>}
+                  <TouchableOpacity style={[st.saveBtn, saving && { opacity: 0.6 }]} onPress={handleGuardarPerfil} disabled={saving}>
+                    {saving ? <ActivityIndicator color="#000" /> : <Text style={st.saveBtnTxt}>Guardar</Text>}
                   </TouchableOpacity>
                 </View>
               </View>
@@ -519,127 +583,96 @@ export default function ProfileScreen() {
 }
 
 const st = StyleSheet.create({
-  container:           { flex: 1, backgroundColor: '#0A0C10' },
-  scroll:              { padding: 16, paddingBottom: 120 },
-  heroSection:         { alignItems: 'center', marginBottom: 24 },
-  avatarWrap:          { marginBottom: 14, alignItems: 'center' },
-  avatarNeonRing:      { width: 92, height: 92, borderRadius: 46, borderWidth: 2,
-                         borderColor: '#9B59B6', justifyContent: 'center', alignItems: 'center',
-                         shadowColor: '#9B59B6', shadowOpacity: 0.6, shadowRadius: 16, elevation: 8,
-                         overflow: 'hidden' },
-  avatar:              { width: 86, height: 86, borderRadius: 43,
-                         backgroundColor: '#15181F', justifyContent: 'center', alignItems: 'center' },
-  avatarImg:           { width: 86, height: 86, borderRadius: 43 },
-  avatarTxt:           { color: '#FFF', fontSize: 28, fontWeight: 'bold',
-                         textShadowColor: '#9B59B6', textShadowRadius: 10 },
-  adminPill:           { marginTop: 8, backgroundColor: 'rgba(255,215,0,0.1)',
-                         borderRadius: 20, paddingHorizontal: 12, paddingVertical: 3,
-                         borderWidth: 1, borderColor: '#FFD700' },
-  adminPillTxt:        { color: '#FFD700', fontWeight: 'bold', fontSize: 11, letterSpacing: 1 },
-  nombre:              { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 6 },
-  usernamePill:        { backgroundColor: 'rgba(155,89,182,0.12)', borderRadius: 20,
-                         paddingHorizontal: 14, paddingVertical: 4, marginBottom: 10,
-                         borderWidth: 1, borderColor: '#9B59B655' },
-  usernamePillTxt:     { color: '#9B59B6', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
-  editBtn:             { flexDirection: 'row', alignItems: 'center', gap: 6,
-                         backgroundColor: 'rgba(155,89,182,0.1)', borderRadius: 20,
-                         paddingHorizontal: 16, paddingVertical: 7, marginBottom: 12,
-                         borderWidth: 1, borderColor: '#9B59B655' },
-  editBtnTxt:          { color: '#9B59B6', fontSize: 13, fontWeight: '600' },
-  alertaRetiro:        { backgroundColor: 'rgba(243,156,18,0.1)', borderRadius: 12,
-                         borderWidth: 1, borderColor: '#F39C12',
-                         paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14,
-                         width: '100%' },
-  alertaRetiroTxt:     { color: '#F39C12', fontSize: 12, fontWeight: '600', textAlign: 'center' },
-  nivelBox:            { width: '100%', backgroundColor: '#0D1117', borderRadius: 14, padding: 14,
-                         borderWidth: 1, borderColor: '#1E2330' },
-  nivelRow:            { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  nivelLabel:          { color: '#404040', fontSize: 10, letterSpacing: 2 },
-  nivelNombre:         { color: '#9B59B6', fontSize: 15, fontWeight: 'bold' },
-  xpTrack:             { height: 6, backgroundColor: '#1A1D24', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
-  xpFill:              { height: '100%', backgroundColor: '#9B59B6',
-                         shadowColor: '#9B59B6', shadowOpacity: 0.8, shadowRadius: 4 },
-  xpTxt:               { color: '#303030', fontSize: 10, textAlign: 'right', letterSpacing: 1 },
-  statsCard:           { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 20,
-                         borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                         shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 14, elevation: 5 },
-  statsNeonLine:       { height: 2, backgroundColor: '#9B59B6',
-                         shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
-  statsTitle:          { color: '#303030', fontSize: 9, fontWeight: 'bold', letterSpacing: 3,
-                         textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
-  statsGrid:           { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 16, alignItems: 'center' },
-  statItem:            { flex: 1, alignItems: 'center' },
-  statVal:             { fontSize: 22, fontWeight: 'bold' },
-  statLbl:             { color: '#303030', fontSize: 8, letterSpacing: 1.5, marginTop: 3 },
-  statDiv:             { width: 1, height: 32, backgroundColor: '#1E2330' },
-  statsBottomRow:      { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
-  statsFinBox:         { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  statsFinLbl:         { color: '#303030', fontSize: 8, letterSpacing: 2, marginBottom: 4 },
-  statsFinVal:         { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
-  sectionHeader:       { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  sectionLine:         { flex: 1, height: 1, backgroundColor: '#1E2330' },
-  sectionTitle:        { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3 },
-  adminCard:           { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 20,
-                         borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                         shadowColor: '#FFD700', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
-  adminCardNeonLine:   { height: 2, backgroundColor: '#FFD700',
-                         shadowColor: '#FFD700', shadowOpacity: 1, shadowRadius: 8 },
-  adminCardBody:       { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
-  adminCardTitle:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  adminCardSub:        { color: '#404040', fontSize: 12, marginTop: 2 },
-  adminCardArrow:      { color: '#FFD700', fontSize: 24 },
-  notifToggle:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0D1117',
-                         borderRadius: 12, padding: 14, marginBottom: 10,
-                         borderWidth: 1, borderColor: '#1E2330', gap: 8 },
-  notifToggleTxt:      { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, flex: 1 },
-  notifDot:            { backgroundColor: '#E74C3C', borderRadius: 10, minWidth: 20, height: 20,
-                         alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  notifDotTxt:         { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  notifChevron:        { color: '#303030', fontSize: 11 },
-  notifCard:           { flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-                         backgroundColor: '#0D1117', borderRadius: 12, padding: 12,
-                         borderWidth: 1, borderColor: '#1E2330' },
-  notifTitulo:         { color: '#606060', fontWeight: 'bold', fontSize: 13, marginBottom: 2 },
-  notifMsg:            { color: '#404040', fontSize: 12, lineHeight: 17 },
-  notifFecha:          { color: '#303030', fontSize: 10, marginTop: 4 },
-  dotUnread:           { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
-  emptyTxt:            { color: '#404040', textAlign: 'center', padding: 20, letterSpacing: 1 },
-  signOutBtn:          { marginTop: 8, padding: 15, borderRadius: 14,
-                         borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)',
-                         alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)',
-                         shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
-  signOutTxt:          { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
+  container:             { flex: 1, backgroundColor: '#0A0C10' },
+  scroll:                { padding: 16, paddingBottom: 120 },
+  heroSection:           { alignItems: 'center', marginBottom: 24 },
+  avatarWrap:            { marginBottom: 14, alignItems: 'center' },
+  avatarNeonRing:        { width: 92, height: 92, borderRadius: 46, borderWidth: 2,
+                           borderColor: '#9B59B6', justifyContent: 'center', alignItems: 'center',
+                           shadowColor: '#9B59B6', shadowOpacity: 0.6, shadowRadius: 16, elevation: 8, overflow: 'hidden' },
+  avatar:                { width: 86, height: 86, borderRadius: 43, backgroundColor: '#15181F', justifyContent: 'center', alignItems: 'center' },
+  avatarImg:             { width: 86, height: 86, borderRadius: 43 },
+  avatarTxt:             { color: '#FFF', fontSize: 28, fontWeight: 'bold', textShadowColor: '#9B59B6', textShadowRadius: 10 },
+  adminPill:             { marginTop: 8, backgroundColor: 'rgba(255,215,0,0.1)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 3, borderWidth: 1, borderColor: '#FFD700' },
+  adminPillTxt:          { color: '#FFD700', fontWeight: 'bold', fontSize: 11, letterSpacing: 1 },
+  nombre:                { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 6 },
+  usernamePill:          { backgroundColor: 'rgba(155,89,182,0.12)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 4, marginBottom: 10, borderWidth: 1, borderColor: '#9B59B655' },
+  usernamePillTxt:       { color: '#9B59B6', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
+  editBtn:               { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(155,89,182,0.1)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 7, marginBottom: 12, borderWidth: 1, borderColor: '#9B59B655' },
+  editBtnTxt:            { color: '#9B59B6', fontSize: 13, fontWeight: '600' },
+  alertaRetiro:          { backgroundColor: 'rgba(243,156,18,0.1)', borderRadius: 12, borderWidth: 1, borderColor: '#F39C12', paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14, width: '100%' },
+  alertaRetiroTxt:       { color: '#F39C12', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  nivelBox:              { width: '100%', backgroundColor: '#0D1117', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#1E2330' },
+  nivelRow:              { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  nivelLabel:            { color: '#404040', fontSize: 10, letterSpacing: 2 },
+  nivelNombre:           { color: '#9B59B6', fontSize: 15, fontWeight: 'bold' },
+  xpTrack:               { height: 6, backgroundColor: '#1A1D24', borderRadius: 3, overflow: 'hidden', marginBottom: 6 },
+  xpFill:                { height: '100%', backgroundColor: '#9B59B6', shadowColor: '#9B59B6', shadowOpacity: 0.8, shadowRadius: 4 },
+  xpTxt:                 { color: '#303030', fontSize: 10, textAlign: 'right', letterSpacing: 1 },
+  statsCard:             { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 20, borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden', shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 14, elevation: 5 },
+  statsNeonLine:         { height: 2, backgroundColor: '#9B59B6', shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+  statsTitle:            { color: '#303030', fontSize: 9, fontWeight: 'bold', letterSpacing: 3, textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
+  statsGrid:             { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 16, alignItems: 'center' },
+  statItem:              { flex: 1, alignItems: 'center' },
+  statVal:               { fontSize: 22, fontWeight: 'bold' },
+  statLbl:               { color: '#303030', fontSize: 8, letterSpacing: 1.5, marginTop: 3 },
+  statDiv:               { width: 1, height: 32, backgroundColor: '#1E2330' },
+  statsBottomRow:        { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
+  statsFinBox:           { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  statsFinLbl:           { color: '#303030', fontSize: 8, letterSpacing: 2, marginBottom: 4 },
+  statsFinVal:           { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
+  sectionHeader:         { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  sectionLine:           { flex: 1, height: 1, backgroundColor: '#1E2330' },
+  sectionTitle:          { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3 },
+  adminCard:             { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden', shadowColor: '#FFD700', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
+  adminCardNeonLine:     { height: 2, backgroundColor: '#FFD700', shadowColor: '#FFD700', shadowOpacity: 1, shadowRadius: 8 },
+  adminCardBody:         { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
+  adminCardTitle:        { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  adminCardSub:          { color: '#404040', fontSize: 12, marginTop: 2 },
+  adminCardArrow:        { color: '#FFD700', fontSize: 24 },
+  // Notificaciones
+  notifHeader:           { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  notifToggle:           { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0D1117', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#1E2330', gap: 8 },
+  notifToggleTxt:        { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, flex: 1 },
+  notifDot:              { backgroundColor: '#E74C3C', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  notifDotTxt:           { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+  notifChevron:          { color: '#303030', fontSize: 11 },
+  clearBtn:              { backgroundColor: '#0D1117', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#1E2330', alignItems: 'center', justifyContent: 'center' },
+  clearBtnTxt:           { fontSize: 18 },
+  notifCard:             { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#0D1117', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#1E2330' },
+  notifCardDeleting:     { borderColor: '#E74C3C', backgroundColor: 'rgba(231,76,60,0.06)', opacity: 0.75 },
+  notifTitulo:           { color: '#606060', fontWeight: 'bold', fontSize: 13, marginBottom: 2 },
+  notifMsg:              { color: '#404040', fontSize: 12, lineHeight: 17 },
+  notifFecha:            { color: '#303030', fontSize: 10, marginTop: 4 },
+  notifDeleteHint:       { color: '#E74C3C', fontSize: 10, marginTop: 4, fontStyle: 'italic' },
+  notifTrash:            { fontSize: 16, alignSelf: 'center' },
+  dotUnread:             { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
+  limpiarAllBtn:         { alignItems: 'center', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(231,76,60,0.3)', backgroundColor: 'rgba(231,76,60,0.05)' },
+  limpiarAllTxt:         { color: '#E74C3C', fontSize: 12, fontWeight: '600' },
+  emptyTxt:              { color: '#404040', textAlign: 'center', padding: 20, letterSpacing: 1 },
+  signOutBtn:            { marginTop: 8, padding: 15, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)', alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)', shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
+  signOutTxt:            { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
   // Modal
-  modalOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  modalCard:           { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-                         padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 2 },
-  modalTitle:          { color: '#FFF', fontSize: 19, fontWeight: 'bold', marginBottom: 18 },
-  avatarEditRow:       { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
-  avatarEditWrap:      { position: 'relative', width: 72, height: 72, borderRadius: 36,
-                         overflow: 'hidden', borderWidth: 2, borderColor: '#9B59B6' },
-  avatarEditImg:       { width: 72, height: 72 },
-  avatarEditPlaceholder: { width: 72, height: 72, backgroundColor: '#1C1F28',
-                           justifyContent: 'center', alignItems: 'center' },
-  avatarEditInitials:  { color: '#FFF', fontSize: 22, fontWeight: 'bold' },
-  avatarEditOverlay:   { position: 'absolute', bottom: 0, left: 0, right: 0,
-                         backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', paddingVertical: 4 },
-  avatarEditCamara:    { fontSize: 14 },
-  avatarEditHint:      { color: '#FFF', fontSize: 13, fontWeight: '600' },
-  avatarEditSub:       { color: '#606070', fontSize: 11, marginTop: 3 },
-  inputLabel:          { color: '#606070', fontSize: 10, letterSpacing: 1.5, fontWeight: '700', marginBottom: 6 },
-  input:               { backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1,
-                         borderColor: '#2A2D35', color: '#FFF', padding: 12,
-                         fontSize: 15, marginBottom: 4 },
-  inputHint:           { color: '#F39C1288', fontSize: 11, marginBottom: 4 },
-  inputUsernameWrap:   { flexDirection: 'row', alignItems: 'center',
-                         backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1,
-                         borderColor: '#2A2D35', paddingLeft: 12, marginBottom: 4 },
-  inputPrefix:         { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
-  modalBtns:           { flexDirection: 'row', gap: 12, marginTop: 20 },
-  cancelBtn:           { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center',
-                         backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
-  cancelBtnTxt:        { color: '#A0A0A0', fontWeight: 'bold' },
-  saveBtn:             { flex: 1, padding: 14, borderRadius: 12,
-                         alignItems: 'center', backgroundColor: '#9B59B6' },
-  saveBtnTxt:          { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  modalOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
+  modalCard:             { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 2 },
+  modalTitle:            { color: '#FFF', fontSize: 19, fontWeight: 'bold', marginBottom: 18 },
+  avatarEditRow:         { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
+  avatarEditWrap:        { position: 'relative', width: 72, height: 72, borderRadius: 36, overflow: 'hidden', borderWidth: 2, borderColor: '#9B59B6' },
+  avatarEditImg:         { width: 72, height: 72 },
+  avatarEditPlaceholder: { width: 72, height: 72, backgroundColor: '#1C1F28', justifyContent: 'center', alignItems: 'center' },
+  avatarEditInitials:    { color: '#FFF', fontSize: 22, fontWeight: 'bold' },
+  avatarEditOverlay:     { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', paddingVertical: 4 },
+  avatarEditCamara:      { fontSize: 14 },
+  avatarEditHint:        { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  avatarEditSub:         { color: '#606070', fontSize: 11, marginTop: 3 },
+  inputLabel:            { color: '#606070', fontSize: 10, letterSpacing: 1.5, fontWeight: '700', marginBottom: 6 },
+  input:                 { backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1, borderColor: '#2A2D35', color: '#FFF', padding: 12, fontSize: 15, marginBottom: 4 },
+  inputHint:             { color: '#F39C1288', fontSize: 11, marginBottom: 4 },
+  inputUsernameWrap:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1, borderColor: '#2A2D35', paddingLeft: 12, marginBottom: 4 },
+  inputPrefix:           { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
+  modalBtns:             { flexDirection: 'row', gap: 12, marginTop: 20 },
+  cancelBtn:             { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
+  cancelBtnTxt:          { color: '#A0A0A0', fontWeight: 'bold' },
+  saveBtn:               { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#9B59B6' },
+  saveBtnTxt:            { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
 });

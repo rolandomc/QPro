@@ -102,23 +102,55 @@ export class AdminService {
     cierreAutomatico: boolean = true,
     primerPartido: string | null = null,
   ) {
-    const { data: quiniela, error: errQ } = await supabase
+    // Intentamos insertar con las columnas nuevas; si fallan (migración pendiente),
+    // reintentamos sin ellas para no bloquear al admin.
+    const insertPayloadFull = {
+      titulo,
+      descripcion,
+      precio_entrada:     precioEntrada,
+      premio_total:       0,
+      estado:             'abierta',
+      fecha_cierre:       fechaCierre,
+      jugadores_minimos:  jugadoresMinimos,
+      porcentaje_admin:   porcentajeAdmin,
+      cierre_automatico:  cierreAutomatico,
+      primer_partido:     primerPartido,
+    };
+
+    let quiniela: any;
+
+    const { data: dataFull, error: errFull } = await supabase
       .from('quinielas')
-      .insert({
-        titulo,
-        descripcion,
-        precio_entrada:     precioEntrada,
-        premio_total:       0,
-        estado:             'abierta',
-        fecha_cierre:       fechaCierre,
-        jugadores_minimos:  jugadoresMinimos,
-        porcentaje_admin:   porcentajeAdmin,
-        cierre_automatico:  cierreAutomatico,
-        primer_partido:     primerPartido,
-      })
+      .insert(insertPayloadFull)
       .select('id')
       .single();
-    if (errQ) throw errQ;
+
+    if (errFull) {
+      // Si el error es por columna inexistente, reintentamos sin las columnas nuevas
+      const missingCol = errFull.message?.includes('cierre_automatico') ||
+                         errFull.message?.includes('primer_partido') ||
+                         errFull.message?.includes('jugadores_minimos') ||
+                         errFull.message?.includes('porcentaje_admin');
+      if (!missingCol) throw errFull;
+
+      // Fallback: insertar solo con columnas base
+      const { data: dataBasic, error: errBasic } = await supabase
+        .from('quinielas')
+        .insert({
+          titulo,
+          descripcion,
+          precio_entrada: precioEntrada,
+          premio_total:   0,
+          estado:         'abierta',
+          fecha_cierre:   fechaCierre,
+        })
+        .select('id')
+        .single();
+      if (errBasic) throw errBasic;
+      quiniela = dataBasic;
+    } else {
+      quiniela = dataFull;
+    }
 
     const rows = partidos.map((p, i) => ({
       quiniela_id:      quiniela.id,
@@ -132,6 +164,42 @@ export class AdminService {
     const { error: errP } = await supabase.from('partidos').insert(rows);
     if (errP) throw errP;
     return quiniela;
+  }
+
+  // ─── Obtener quinielas — tolerante a columnas faltantes ──────────────────
+  static async getQuinielas() {
+    // Intento 1: select completo con columnas nuevas
+    const { data, error } = await supabase
+      .from('quinielas')
+      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, auto_resultados, jugadores_minimos, porcentaje_admin, cierre_automatico, primer_partido, created_at, partidos(count)')
+      .order('created_at', { ascending: false });
+
+    if (!error) return data;
+
+    // Si el error es por columnas inexistentes (migración pendiente), select reducido
+    const missingCol = error.message?.includes('cierre_automatico') ||
+                       error.message?.includes('primer_partido') ||
+                       error.message?.includes('jugadores_minimos') ||
+                       error.message?.includes('porcentaje_admin');
+
+    if (!missingCol) throw error;
+
+    // Intento 2: columnas base únicamente
+    const { data: dataBasic, error: errBasic } = await supabase
+      .from('quinielas')
+      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, created_at, partidos(count)')
+      .order('created_at', { ascending: false });
+
+    if (errBasic) throw errBasic;
+
+    // Rellenar con defaults para que la UI no explote
+    return (dataBasic ?? []).map((q: any) => ({
+      ...q,
+      jugadores_minimos:  q.jugadores_minimos  ?? 5,
+      porcentaje_admin:   q.porcentaje_admin   ?? 10,
+      cierre_automatico:  q.cierre_automatico  ?? false,
+      primer_partido:     q.primer_partido     ?? null,
+    }));
   }
 
   // ─── Cerrar quiniela (verifica minimo y anula si no cumple) ───────────────
@@ -150,7 +218,7 @@ export class AdminService {
       .in('estado', ['pagado', 'ganador', 'perdedor']);
 
     const jugadoresPagados = count ?? 0;
-    const valida = jugadoresPagados >= q.jugadores_minimos;
+    const valida = jugadoresPagados >= (q.jugadores_minimos ?? 2);
 
     if (valida) {
       const { error } = await supabase
@@ -204,15 +272,6 @@ export class AdminService {
       .update({ estado })
       .eq('id', quinielaId);
     if (error) throw error;
-  }
-
-  static async getQuinielas() {
-    const { data, error } = await supabase
-      .from('quinielas')
-      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, auto_resultados, jugadores_minimos, porcentaje_admin, cierre_automatico, primer_partido, created_at, partidos(count)')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data;
   }
 
   static async getPartidos(quinielaId: string) {

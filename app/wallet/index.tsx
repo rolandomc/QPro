@@ -1,23 +1,109 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import {
+  StyleSheet, Text, View, ScrollView, Pressable,
+  ActivityIndicator, RefreshControl, Alert,
+  Modal, TouchableOpacity, TextInput, TouchableWithoutFeedback,
+  KeyboardAvoidingView, Platform,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import QuickRechargeButton from '../../src/components/QuickRechargeButton';
-import TransactionItem from '../../src/components/TransactionItem';
+import { WalletService } from '../../src/services/wallet.service';
+
+const TIPO_CONFIG: Record<string, { emoji: string; color: string; label: string }> = {
+  premio:        { emoji: '🏆', color: '#2ECC71', label: 'Premio' },
+  participacion: { emoji: '🎮', color: '#E74C3C', label: 'Participación' },
+  retiro:        { emoji: '💸', color: '#F39C12', label: 'Retiro' },
+  ajuste_admin:  { emoji: '⚙️',  color: '#A0A0A0', label: 'Ajuste' },
+};
+
+function formatMonto(monto: number) {
+  const abs = Math.abs(monto).toLocaleString('es-MX', { minimumFractionDigits: 2 });
+  return monto >= 0 ? `+$${abs}` : `-$${abs}`;
+}
+
+function formatFecha(iso: string) {
+  return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+}
 
 export default function WalletScreen() {
   const router = useRouter();
-  const [balance, setBalance] = useState(1250);
 
-  const movimientos = [
-    { id: 1, tipo: 'Depósito', monto: '+ $500.00', fecha: '22 Jun 2026', color: '#2ECC71' },
-    { id: 2, tipo: 'Apuesta: Quiniela Mundial', monto: '- $150.00', fecha: '20 Jun 2026', color: '#E91E63' },
-    { id: 3, tipo: 'Retiro', monto: '- $1,000.00', fecha: '15 Jun 2026', color: '#FFF' },
-  ];
+  const [saldo,        setSaldo]        = useState<number>(0);
+  const [transacciones,setTransacciones]= useState<any[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
 
-  const handleRecharge = (amount: number) => {
-    setBalance(prev => prev + amount);
+  // Modal retiro
+  const [modalRetiro,  setModalRetiro]  = useState(false);
+  const [metodo,       setMetodo]       = useState<'spei' | 'mercadopago'>('spei');
+  const [monto,        setMonto]        = useState('');
+  const [clabe,        setClabe]        = useState('');
+  const [aliasMP,      setAliasMP]      = useState('');
+  const [enviando,     setEnviando]     = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      const [s, tx] = await Promise.all([
+        WalletService.getSaldo(),
+        WalletService.getTransacciones(),
+      ]);
+      setSaldo(s);
+      setTransacciones(tx);
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, []);
+
+  const handleSolicitarRetiro = async () => {
+    const montoNum = parseFloat(monto);
+    if (!monto || isNaN(montoNum) || montoNum <= 0) {
+      Alert.alert('Error', 'Ingresa un monto válido'); return;
+    }
+    if (montoNum > saldo) {
+      Alert.alert('Saldo insuficiente', `Tu saldo disponible es $${saldo.toFixed(2)} MXN`); return;
+    }
+    if (metodo === 'spei' && clabe.length !== 18) {
+      Alert.alert('Error', 'La CLABE debe tener 18 dígitos'); return;
+    }
+    if (metodo === 'mercadopago' && !aliasMP.trim()) {
+      Alert.alert('Error', 'Ingresa tu alias de Mercado Pago'); return;
+    }
+
+    setEnviando(true);
+    try {
+      await WalletService.solicitarRetiro({
+        monto: montoNum,
+        metodo,
+        clabe:    metodo === 'spei'         ? clabe.trim()   : undefined,
+        alias_mp: metodo === 'mercadopago'  ? aliasMP.trim() : undefined,
+      });
+      setModalRetiro(false);
+      setMonto(''); setClabe(''); setAliasMP('');
+      Alert.alert(
+        '✅ Solicitud enviada',
+        'Tu solicitud de retiro fue recibida. La procesaremos en un máximo de 24 horas.',
+      );
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setEnviando(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#2ECC71" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -30,103 +116,196 @@ export default function WalletScreen() {
         <View style={{ width: 60 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData(); }} tintColor="#2ECC71" colors={['#2ECC71']} />
+        }
+      >
         {/* Balance Card */}
-        <View style={[styles.balanceCard, styles.neonCardGreen]}>
+        <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo Disponible</Text>
           <Text style={styles.balanceValue}>
-            ${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })} <Text style={styles.currency}>MXN</Text>
+            ${saldo.toLocaleString('es-MX', { minimumFractionDigits: 2 })}{' '}
+            <Text style={styles.currency}>MXN</Text>
           </Text>
-
           <View style={styles.actionRow}>
-            <Pressable style={styles.depositBtn}>
-              <Text style={styles.depositText}>Ingresar</Text>
+            <Pressable
+              style={styles.withdrawBtn}
+              onPress={() => saldo > 0 ? setModalRetiro(true) : Alert.alert('Sin saldo', 'Aún no tienes saldo para retirar.')}
+            >
+              <Text style={styles.withdrawText}>💸 Solicitar Retiro</Text>
             </Pressable>
-            <Pressable style={styles.withdrawBtn}>
-              <Text style={styles.withdrawText}>Retirar</Text>
-            </Pressable>
           </View>
-        </View>
-
-        {/* Carga Rápida */}
-        <Text style={styles.sectionTitle}>Recarga Rápida</Text>
-        <View style={styles.quickRechargeRow}>
-          <QuickRechargeButton amount={100} onPress={() => handleRecharge(100)} />
-          <QuickRechargeButton amount={200} onPress={() => handleRecharge(200)} />
-          <QuickRechargeButton amount={500} onPress={() => handleRecharge(500)} />
-        </View>
-
-        {/* Gráfico Simulado de Gastos vs Ingresos */}
-        <Text style={styles.sectionTitle}>Resumen del Mes</Text>
-        <View style={styles.chartContainer}>
-          <View style={styles.chartBarContainer}>
-            <View style={[styles.chartBar, styles.incomeBar, { height: '80%' }]} />
-            <Text style={styles.chartLabel}>Ingresos</Text>
-          </View>
-          <View style={styles.chartBarContainer}>
-            <View style={[styles.chartBar, styles.expenseBar, { height: '40%' }]} />
-            <Text style={styles.chartLabel}>Gastos</Text>
-          </View>
+          <Text style={styles.retiroNota}>⏱ Retiros procesados en máx. 24 horas</Text>
         </View>
 
         {/* Movimientos */}
-        <Text style={styles.sectionTitle}>Últimos Movimientos</Text>
+        <Text style={styles.sectionTitle}>Historial de Movimientos</Text>
         <View style={styles.historyContainer}>
-          {movimientos.map((mov) => (
-            <TransactionItem
-              key={mov.id}
-              tipo={mov.tipo}
-              monto={mov.monto}
-              fecha={mov.fecha}
-              color={mov.color}
-            />
-          ))}
+          {transacciones.length === 0 ? (
+            <View style={styles.emptyHistory}>
+              <Text style={styles.emptyEmoji}>📊</Text>
+              <Text style={styles.emptyText}>Aún no hay movimientos</Text>
+              <Text style={styles.emptySubtext}>Tus premios y participaciones aparecerán aquí</Text>
+            </View>
+          ) : (
+            transacciones.map((tx) => {
+              const cfg = TIPO_CONFIG[tx.tipo] ?? { emoji: '💰', color: '#FFF', label: tx.tipo };
+              return (
+                <View key={tx.id} style={styles.txItem}>
+                  <View style={styles.txLeft}>
+                    <Text style={styles.txEmoji}>{cfg.emoji}</Text>
+                    <View>
+                      <Text style={styles.txLabel}>{cfg.label}</Text>
+                      {tx.descripcion ? <Text style={styles.txDesc}>{tx.descripcion}</Text> : null}
+                      <Text style={styles.txFecha}>{formatFecha(tx.created_at)}</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.txMonto, { color: tx.monto >= 0 ? '#2ECC71' : '#E74C3C' }]}>
+                    {formatMonto(tx.monto)}
+                  </Text>
+                </View>
+              );
+            })
+          )}
         </View>
       </ScrollView>
+
+      {/* Modal Retiro */}
+      <Modal visible={modalRetiro} transparent animationType="slide" onRequestClose={() => setModalRetiro(false)}>
+        <TouchableWithoutFeedback onPress={() => setModalRetiro(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                <View style={styles.modalCard}>
+                  <Text style={styles.modalTitle}>💸 Solicitar Retiro</Text>
+                  <Text style={styles.modalSaldo}>Saldo disponible: <Text style={{ color: '#2ECC71' }}>${saldo.toFixed(2)} MXN</Text></Text>
+
+                  {/* Monto */}
+                  <Text style={styles.inputLabel}>Monto a retirar (MXN)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Ej. 500"
+                    placeholderTextColor="#505050"
+                    keyboardType="decimal-pad"
+                    value={monto}
+                    onChangeText={setMonto}
+                  />
+
+                  {/* Método */}
+                  <Text style={styles.inputLabel}>Método de pago</Text>
+                  <View style={styles.metodoRow}>
+                    <TouchableOpacity
+                      style={[styles.metodoPill, metodo === 'spei' && styles.metodoPillActive]}
+                      onPress={() => setMetodo('spei')}
+                    >
+                      <Text style={[styles.metodoPillTxt, metodo === 'spei' && styles.metodoPillTxtActive]}>SPEI</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.metodoPill, metodo === 'mercadopago' && styles.metodoPillActive]}
+                      onPress={() => setMetodo('mercadopago')}
+                    >
+                      <Text style={[styles.metodoPillTxt, metodo === 'mercadopago' && styles.metodoPillTxtActive]}>Mercado Pago</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Datos destino */}
+                  {metodo === 'spei' ? (
+                    <>
+                      <Text style={styles.inputLabel}>CLABE interbancaria (18 dígitos)</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="000000000000000000"
+                        placeholderTextColor="#505050"
+                        keyboardType="numeric"
+                        maxLength={18}
+                        value={clabe}
+                        onChangeText={setClabe}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.inputLabel}>Alias / CVU de Mercado Pago</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="tu.alias"
+                        placeholderTextColor="#505050"
+                        autoCapitalize="none"
+                        value={aliasMP}
+                        onChangeText={setAliasMP}
+                      />
+                    </>
+                  )}
+
+                  <View style={styles.modalBtns}>
+                    <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalRetiro(false)} disabled={enviando}>
+                      <Text style={styles.cancelBtnTxt}>Cancelar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.confirmBtn, enviando && { opacity: 0.6 }]} onPress={handleSolicitarRetiro} disabled={enviando}>
+                      {enviando
+                        ? <ActivityIndicator color="#000" />
+                        : <Text style={styles.confirmBtnTxt}>Confirmar</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A0C10' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
-  backButton: { width: 60 },
-  backText: { color: '#2ECC71', fontSize: 16 },
-  title: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  content: { padding: 15, paddingBottom: 40 },
+  container:         { flex: 1, backgroundColor: '#0A0C10' },
+  centered:          { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
+  backButton:        { width: 60 },
+  backText:          { color: '#2ECC71', fontSize: 16 },
+  title:             { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  content:           { padding: 15, paddingBottom: 50 },
 
-  balanceCard: { backgroundColor: '#15181F', borderRadius: 16, padding: 25, alignItems: 'center', marginBottom: 20 },
-  neonCardGreen: {
-    borderColor: '#2ECC71',
-    borderWidth: 1.5,
-    boxShadow: '0 0 15px 4px rgba(46, 204, 113, 0.6)',
-  },
-  balanceLabel: { color: '#A0A0A0', fontSize: 14, marginBottom: 10 },
-  balanceValue: { color: '#FFF', fontSize: 36, fontWeight: 'bold', marginBottom: 25, textShadowColor: 'rgba(255, 255, 255, 0.3)', textShadowRadius: 10 },
-  currency: { fontSize: 16, color: '#2ECC71' },
+  balanceCard:       { backgroundColor: '#15181F', borderRadius: 20, padding: 25, alignItems: 'center', marginBottom: 25, borderWidth: 1.5, borderColor: '#2ECC71' },
+  balanceLabel:      { color: '#A0A0A0', fontSize: 14, marginBottom: 8 },
+  balanceValue:      { color: '#FFF', fontSize: 40, fontWeight: 'bold', marginBottom: 22 },
+  currency:          { fontSize: 18, color: '#2ECC71' },
+  actionRow:         { width: '100%', marginBottom: 12 },
+  withdrawBtn:       { backgroundColor: '#1C1F26', paddingVertical: 14, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
+  withdrawText:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  retiroNota:        { color: '#505050', fontSize: 11, marginTop: 4 },
 
-  actionRow: { flexDirection: 'row', gap: 15, width: '100%' },
-  depositBtn: { flex: 1, backgroundColor: '#2ECC71', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-  depositText: { color: '#000', fontWeight: 'bold', fontSize: 16 },
-  withdrawBtn: { flex: 1, backgroundColor: '#1C1F26', paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
-  withdrawText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  sectionTitle:      { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
+  historyContainer:  { backgroundColor: '#15181F', borderRadius: 16, borderWidth: 1, borderColor: '#2A2D35', overflow: 'hidden' },
+  emptyHistory:      { padding: 40, alignItems: 'center', gap: 8 },
+  emptyEmoji:        { fontSize: 40 },
+  emptyText:         { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  emptySubtext:      { color: '#505050', fontSize: 13, textAlign: 'center' },
+  txItem:            { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: '#1E2028' },
+  txLeft:            { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  txEmoji:           { fontSize: 24 },
+  txLabel:           { color: '#FFF', fontWeight: '600', fontSize: 14 },
+  txDesc:            { color: '#A0A0A0', fontSize: 12, marginTop: 1 },
+  txFecha:           { color: '#505050', fontSize: 11, marginTop: 2 },
+  txMonto:           { fontWeight: 'bold', fontSize: 15 },
 
-  quickRechargeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25, marginHorizontal: -4 },
-  sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 15, paddingHorizontal: 5 },
-
-  chartContainer: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#15181F', borderRadius: 16, padding: 20, height: 150, marginBottom: 25, borderWidth: 1, borderColor: '#2A2D35' },
-  chartBarContainer: { alignItems: 'center', justifyContent: 'flex-end' },
-  chartBar: { width: 40, borderRadius: 6, marginBottom: 10 },
-  incomeBar: {
-    backgroundColor: '#2ECC71',
-    boxShadow: '0 0 8px 2px rgba(46, 204, 113, 0.6)',
-  },
-  expenseBar: {
-    backgroundColor: '#E91E63',
-    boxShadow: '0 0 8px 2px rgba(233, 30, 99, 0.6)',
-  },
-  chartLabel: { color: '#A0A0A0', fontSize: 12 },
-
-  historyContainer: { backgroundColor: '#15181F', borderRadius: 16, padding: 15, borderWidth: 1, borderColor: '#2A2D35' },
+  // Modal
+  modalOverlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalCard:         { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 4 },
+  modalTitle:        { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
+  modalSaldo:        { color: '#A0A0A0', fontSize: 13, marginBottom: 16 },
+  inputLabel:        { color: '#A0A0A0', fontSize: 12, fontWeight: '600', marginTop: 12, marginBottom: 6 },
+  input:             { backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1, borderColor: '#2A2D35', color: '#FFF', padding: 12, fontSize: 15 },
+  metodoRow:         { flexDirection: 'row', gap: 10, marginBottom: 4 },
+  metodoPill:        { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: '#0A0C10', borderWidth: 1, borderColor: '#2A2D35' },
+  metodoPillActive:  { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: '#2ECC71' },
+  metodoPillTxt:     { color: '#606060', fontWeight: '600' },
+  metodoPillTxtActive:{ color: '#2ECC71', fontWeight: '700' },
+  modalBtns:         { flexDirection: 'row', gap: 12, marginTop: 20 },
+  cancelBtn:         { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
+  cancelBtnTxt:      { color: '#A0A0A0', fontWeight: 'bold' },
+  confirmBtn:        { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#2ECC71' },
+  confirmBtnTxt:     { color: '#000', fontWeight: 'bold', fontSize: 15 },
 });

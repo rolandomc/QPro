@@ -45,7 +45,6 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'Parámetros inválidos' }, 400);
     }
 
-    // Leer solicitud
     const { data: solicitud, error: solError } = await supabase
       .from('retiro_solicitudes')
       .select('*')
@@ -54,60 +53,53 @@ Deno.serve(async (req: Request) => {
 
     if (solError) return json({ error: `Error leyendo solicitud: ${solError.message}` }, 500);
     if (!solicitud) return json({ error: 'Solicitud no encontrada' }, 404);
-    if (solicitud.estado !== 'pendiente') return json({ error: `Ya fue procesada (estado actual: ${solicitud.estado})` }, 400);
+    if (solicitud.estado !== 'pendiente') return json({ error: `Ya procesada (estado: ${solicitud.estado})` }, 400);
 
     if (accion === 'pagar') {
-
-      // 1. Actualizar estado a procesado — verificar error
       const { error: updateError } = await supabase
         .from('retiro_solicitudes')
         .update({
-          estado:     'procesado',
+          estado:     'pagado',
           nota_admin: nota ?? null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', solicitud_id)
-        .eq('estado', 'pendiente'); // doble guard para evitar race condition
+        .eq('estado', 'pendiente');
 
       if (updateError) {
-        console.error('Error actualizando retiro:', updateError);
-        return json({ error: `Error al actualizar retiro: ${updateError.message}` }, 500);
+        console.error('Error update retiro:', updateError);
+        return json({ error: `Error al actualizar: ${updateError.message}` }, 500);
       }
 
-      // 2. Confirmar que realmente se actualizó
-      const { data: check } = await supabase
+      const { data: check, error: checkError } = await supabase
         .from('retiro_solicitudes')
         .select('estado')
         .eq('id', solicitud_id)
         .single();
 
-      if (check?.estado !== 'procesado') {
-        console.error('El estado no cambió a procesado, valor actual:', check?.estado);
-        return json({ error: 'No se pudo actualizar el estado del retiro' }, 500);
+      if (checkError) {
+        console.error('Error verificando estado:', checkError);
+        return json({ error: `Error verificando estado: ${checkError.message}` }, 500);
       }
 
-      // 3. Actualizar descripción de wallet_transaction (no crítico, no falla si hay error)
-      const { error: txError } = await supabase
+      if (check?.estado !== 'pagado') {
+        console.error('Estado no cambió, valor actual:', check?.estado);
+        return json({ error: `El estado no se actualizó (actual: ${check?.estado})` }, 500);
+      }
+
+      await supabase
         .from('wallet_transactions')
         .update({ descripcion: `Retiro ${solicitud.metodo.toUpperCase()} — enviado` })
         .eq('referencia_id', solicitud.id)
         .eq('tipo', 'retiro');
 
-      if (txError) console.error('Error actualizando wallet_transaction (no crítico):', txError);
-
-      // 4. Notificar al usuario
-      const { error: notifError } = await supabase.from('notificaciones').insert({
+      await supabase.from('notificaciones').insert({
         user_id: solicitud.user_id,
         titulo:  '💸 Retiro enviado',
         mensaje: `Tu retiro de $${solicitud.monto} MXN fue procesado. Revisa tu cuenta.`,
       });
 
-      if (notifError) console.error('Error enviando notificación:', notifError);
-
     } else {
-      // RECHAZAR
-
-      // 1. Actualizar estado a rechazado
       const { error: updateError } = await supabase
         .from('retiro_solicitudes')
         .update({
@@ -119,11 +111,10 @@ Deno.serve(async (req: Request) => {
         .eq('estado', 'pendiente');
 
       if (updateError) {
-        console.error('Error actualizando retiro:', updateError);
-        return json({ error: `Error al rechazar retiro: ${updateError.message}` }, 500);
+        console.error('Error rechazando retiro:', updateError);
+        return json({ error: `Error al rechazar: ${updateError.message}` }, 500);
       }
 
-      // 2. Devolver saldo al usuario
       const { error: txError } = await supabase.from('wallet_transactions').insert({
         user_id:       solicitud.user_id,
         tipo:          'ajuste_admin',
@@ -134,25 +125,22 @@ Deno.serve(async (req: Request) => {
 
       if (txError) {
         console.error('Error devolviendo saldo:', txError);
-        return json({ error: `Retiro rechazado pero error devolviendo saldo: ${txError.message}` }, 500);
+        return json({ error: `Rechazado pero error devolviendo saldo: ${txError.message}` }, 500);
       }
 
-      // 3. Notificar al usuario
-      const { error: notifError } = await supabase.from('notificaciones').insert({
+      await supabase.from('notificaciones').insert({
         user_id: solicitud.user_id,
         titulo:  '❌ Retiro rechazado',
         mensaje: nota
           ? `Tu retiro de $${solicitud.monto} MXN fue rechazado. Motivo: ${nota}. El saldo fue devuelto.`
           : `Tu retiro de $${solicitud.monto} MXN fue rechazado. El saldo fue devuelto a tu billetera.`,
       });
-
-      if (notifError) console.error('Error enviando notificación:', notifError);
     }
 
     return json({ success: true });
 
   } catch (err: any) {
-    console.error('procesar-retiro error:', err);
+    console.error('procesar-retiro catch:', err);
     return json({ error: err.message ?? 'Error interno' }, 500);
   }
 });

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, Pressable,
   ActivityIndicator, RefreshControl, Alert,
@@ -6,7 +6,7 @@ import {
   KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { WalletService } from '../../src/services/wallet.service';
 
 const TIPO_CONFIG: Record<string, { emoji: string; color: string; label: string }> = {
@@ -34,12 +34,12 @@ export default function WalletScreen() {
   const [refreshing,   setRefreshing]   = useState(false);
 
   // Modal retiro
-  const [modalRetiro,  setModalRetiro]  = useState(false);
-  const [metodo,       setMetodo]       = useState<'spei' | 'mercadopago'>('spei');
-  const [monto,        setMonto]        = useState('');
-  const [clabe,        setClabe]        = useState('');
-  const [aliasMP,      setAliasMP]      = useState('');
-  const [enviando,     setEnviando]     = useState(false);
+  const [modalRetiro, setModalRetiro] = useState(false);
+  const [metodo,      setMetodo]      = useState<'spei' | 'mercadopago'>('spei');
+  const [monto,       setMonto]       = useState('');
+  const [clabe,       setClabe]       = useState('');
+  const [aliasMP,     setAliasMP]     = useState('');
+  const [enviando,    setEnviando]    = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -57,7 +57,11 @@ export default function WalletScreen() {
     }
   }, []);
 
-  useEffect(() => { loadData(); }, []);
+  // useFocusEffect para recargar cada vez que se navega a la pantalla
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    loadData();
+  }, []));
 
   const handleSolicitarRetiro = async () => {
     const montoNum = parseFloat(monto);
@@ -79,8 +83,8 @@ export default function WalletScreen() {
       await WalletService.solicitarRetiro({
         monto: montoNum,
         metodo,
-        clabe:    metodo === 'spei'         ? clabe.trim()   : undefined,
-        alias_mp: metodo === 'mercadopago'  ? aliasMP.trim() : undefined,
+        clabe:    metodo === 'spei'        ? clabe.trim()   : undefined,
+        alias_mp: metodo === 'mercadopago' ? aliasMP.trim() : undefined,
       });
       setModalRetiro(false);
       setMonto(''); setClabe(''); setAliasMP('');
@@ -107,7 +111,6 @@ export default function WalletScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Volver</Text>
@@ -120,7 +123,12 @@ export default function WalletScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData(); }} tintColor="#2ECC71" colors={['#2ECC71']} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); loadData(); }}
+            tintColor="#2ECC71"
+            colors={['#2ECC71']}
+          />
         }
       >
         {/* Balance Card */}
@@ -183,7 +191,6 @@ export default function WalletScreen() {
                   <Text style={styles.modalTitle}>💸 Solicitar Retiro</Text>
                   <Text style={styles.modalSaldo}>Saldo disponible: <Text style={{ color: '#2ECC71' }}>${saldo.toFixed(2)} MXN</Text></Text>
 
-                  {/* Monto */}
                   <Text style={styles.inputLabel}>Monto a retirar (MXN)</Text>
                   <TextInput
                     style={styles.input}
@@ -194,7 +201,6 @@ export default function WalletScreen() {
                     onChangeText={setMonto}
                   />
 
-                  {/* Método */}
                   <Text style={styles.inputLabel}>Método de pago</Text>
                   <View style={styles.metodoRow}>
                     <TouchableOpacity
@@ -211,7 +217,6 @@ export default function WalletScreen() {
                     </TouchableOpacity>
                   </View>
 
-                  {/* Datos destino */}
                   {metodo === 'spei' ? (
                     <>
                       <Text style={styles.inputLabel}>CLABE interbancaria (18 dígitos)</Text>
@@ -260,52 +265,48 @@ export default function WalletScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:         { flex: 1, backgroundColor: '#0A0C10' },
-  centered:          { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
-  backButton:        { width: 60 },
-  backText:          { color: '#2ECC71', fontSize: 16 },
-  title:             { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  content:           { padding: 15, paddingBottom: 50 },
-
-  balanceCard:       { backgroundColor: '#15181F', borderRadius: 20, padding: 25, alignItems: 'center', marginBottom: 25, borderWidth: 1.5, borderColor: '#2ECC71' },
-  balanceLabel:      { color: '#A0A0A0', fontSize: 14, marginBottom: 8 },
-  balanceValue:      { color: '#FFF', fontSize: 40, fontWeight: 'bold', marginBottom: 22 },
-  currency:          { fontSize: 18, color: '#2ECC71' },
-  actionRow:         { width: '100%', marginBottom: 12 },
-  withdrawBtn:       { backgroundColor: '#1C1F26', paddingVertical: 14, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
-  withdrawText:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  retiroNota:        { color: '#505050', fontSize: 11, marginTop: 4 },
-
-  sectionTitle:      { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
-  historyContainer:  { backgroundColor: '#15181F', borderRadius: 16, borderWidth: 1, borderColor: '#2A2D35', overflow: 'hidden' },
-  emptyHistory:      { padding: 40, alignItems: 'center', gap: 8 },
-  emptyEmoji:        { fontSize: 40 },
-  emptyText:         { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  emptySubtext:      { color: '#505050', fontSize: 13, textAlign: 'center' },
-  txItem:            { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: '#1E2028' },
-  txLeft:            { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  txEmoji:           { fontSize: 24 },
-  txLabel:           { color: '#FFF', fontWeight: '600', fontSize: 14 },
-  txDesc:            { color: '#A0A0A0', fontSize: 12, marginTop: 1 },
-  txFecha:           { color: '#505050', fontSize: 11, marginTop: 2 },
-  txMonto:           { fontWeight: 'bold', fontSize: 15 },
-
-  // Modal
-  modalOverlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalCard:         { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 4 },
-  modalTitle:        { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
-  modalSaldo:        { color: '#A0A0A0', fontSize: 13, marginBottom: 16 },
-  inputLabel:        { color: '#A0A0A0', fontSize: 12, fontWeight: '600', marginTop: 12, marginBottom: 6 },
-  input:             { backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1, borderColor: '#2A2D35', color: '#FFF', padding: 12, fontSize: 15 },
-  metodoRow:         { flexDirection: 'row', gap: 10, marginBottom: 4 },
-  metodoPill:        { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: '#0A0C10', borderWidth: 1, borderColor: '#2A2D35' },
-  metodoPillActive:  { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: '#2ECC71' },
-  metodoPillTxt:     { color: '#606060', fontWeight: '600' },
+  container:          { flex: 1, backgroundColor: '#0A0C10' },
+  centered:           { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
+  backButton:         { width: 60 },
+  backText:           { color: '#2ECC71', fontSize: 16 },
+  title:              { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  content:            { padding: 15, paddingBottom: 50 },
+  balanceCard:        { backgroundColor: '#15181F', borderRadius: 20, padding: 25, alignItems: 'center', marginBottom: 25, borderWidth: 1.5, borderColor: '#2ECC71' },
+  balanceLabel:       { color: '#A0A0A0', fontSize: 14, marginBottom: 8 },
+  balanceValue:       { color: '#FFF', fontSize: 40, fontWeight: 'bold', marginBottom: 22 },
+  currency:           { fontSize: 18, color: '#2ECC71' },
+  actionRow:          { width: '100%', marginBottom: 12 },
+  withdrawBtn:        { backgroundColor: '#1C1F26', paddingVertical: 14, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
+  withdrawText:       { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  retiroNota:         { color: '#505050', fontSize: 11, marginTop: 4 },
+  sectionTitle:       { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
+  historyContainer:   { backgroundColor: '#15181F', borderRadius: 16, borderWidth: 1, borderColor: '#2A2D35', overflow: 'hidden' },
+  emptyHistory:       { padding: 40, alignItems: 'center', gap: 8 },
+  emptyEmoji:         { fontSize: 40 },
+  emptyText:          { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  emptySubtext:       { color: '#505050', fontSize: 13, textAlign: 'center' },
+  txItem:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: '#1E2028' },
+  txLeft:             { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  txEmoji:            { fontSize: 24 },
+  txLabel:            { color: '#FFF', fontWeight: '600', fontSize: 14 },
+  txDesc:             { color: '#A0A0A0', fontSize: 12, marginTop: 1 },
+  txFecha:            { color: '#505050', fontSize: 11, marginTop: 2 },
+  txMonto:            { fontWeight: 'bold', fontSize: 15 },
+  modalOverlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalCard:          { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 4 },
+  modalTitle:         { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
+  modalSaldo:         { color: '#A0A0A0', fontSize: 13, marginBottom: 16 },
+  inputLabel:         { color: '#A0A0A0', fontSize: 12, fontWeight: '600', marginTop: 12, marginBottom: 6 },
+  input:              { backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1, borderColor: '#2A2D35', color: '#FFF', padding: 12, fontSize: 15 },
+  metodoRow:          { flexDirection: 'row', gap: 10, marginBottom: 4 },
+  metodoPill:         { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: '#0A0C10', borderWidth: 1, borderColor: '#2A2D35' },
+  metodoPillActive:   { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: '#2ECC71' },
+  metodoPillTxt:      { color: '#606060', fontWeight: '600' },
   metodoPillTxtActive:{ color: '#2ECC71', fontWeight: '700' },
-  modalBtns:         { flexDirection: 'row', gap: 12, marginTop: 20 },
-  cancelBtn:         { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
-  cancelBtnTxt:      { color: '#A0A0A0', fontWeight: 'bold' },
-  confirmBtn:        { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#2ECC71' },
-  confirmBtnTxt:     { color: '#000', fontWeight: 'bold', fontSize: 15 },
+  modalBtns:          { flexDirection: 'row', gap: 12, marginTop: 20 },
+  cancelBtn:          { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
+  cancelBtnTxt:       { color: '#A0A0A0', fontWeight: 'bold' },
+  confirmBtn:         { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#2ECC71' },
+  confirmBtnTxt:      { color: '#000', fontWeight: 'bold', fontSize: 15 },
 });

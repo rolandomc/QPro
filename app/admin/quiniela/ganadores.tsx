@@ -59,19 +59,13 @@ export default function GanadoresScreen() {
     }
   };
 
-  // Calcula el premio real: usa premio_total de BD si > 0,
-  // si no lo calcula desde participantes pagados x precio_entrada x (1 - admin%)
   const calcularPremioReal = () => {
     if (!quiniela) return 0;
     const premioGuardado = Number(quiniela.premio_total ?? 0);
     if (premioGuardado > 0) return premioGuardado;
-
-    // Contar pagados (o pendientes si no hay sistema de pago aún)
-    const pagados = participantes.filter(
-      (p: any) => p.estado === 'pagado' || p.estado === 'pendiente'
-    ).length;
-    const pozo      = pagados * Number(quiniela.precio_entrada ?? 0);
-    const adminPct  = Number(quiniela.porcentaje_admin ?? 0);
+    const pagados  = participantes.filter((p: any) => p.estado === 'pagado' || p.estado === 'pendiente').length;
+    const pozo     = pagados * Number(quiniela.precio_entrada ?? 0);
+    const adminPct = Number(quiniela.porcentaje_admin ?? 0);
     return Math.round(pozo * (1 - adminPct / 100));
   };
 
@@ -121,25 +115,39 @@ export default function GanadoresScreen() {
           onPress: async () => {
             setDistribuyendo(true);
             try {
-              const notificaciones: any[] = [];
-              const ganadoresIds: string[] = [];
+              const notificaciones: any[]       = [];
+              const walletTransactions: any[]   = [];
+              const ganadoresIds: string[]      = [];
 
+              // --- Ganadores ---
               for (const g of ganadores) {
                 const { error } = await supabase
                   .from('participaciones')
                   .update({ premio_ganado: montoPorGanador, estado: 'ganador' })
                   .eq('id', g.id);
                 if (error) throw error;
+
                 ganadoresIds.push(g.id);
+
+                // ✅ WALLET: acreditar premio al ganador
+                walletTransactions.push({
+                  user_id:      g.user_id,
+                  tipo:         'premio',
+                  monto:        montoPorGanador,
+                  descripcion:  `Premio quiniela: ${quiniela.titulo}`,
+                  referencia_id: g.id,
+                });
+
                 notificaciones.push({
                   user_id: g.user_id,
                   tipo:    'ganador',
                   titulo:  `🏆 ¡Ganaste en ${quiniela.titulo}!`,
-                  mensaje: `Tuviste ${maxAciertos} aciertos y ganaste $${montoPorGanador.toLocaleString()}.`,
+                  mensaje: `Tuviste ${maxAciertos} aciertos y ganaste $${montoPorGanador.toLocaleString()}. Ya está en tu billetera.`,
                   leida:   false,
                 });
               }
 
+              // --- Perdedores ---
               const perdedores = participantes.filter((p: any) => !ganadoresIds.includes(p.id));
               for (const p of perdedores) {
                 const { error } = await supabase
@@ -147,6 +155,7 @@ export default function GanadoresScreen() {
                   .update({ estado: 'perdedor' })
                   .eq('id', p.id);
                 if (error) throw error;
+
                 notificaciones.push({
                   user_id: p.user_id,
                   tipo:    'perdedor',
@@ -156,13 +165,22 @@ export default function GanadoresScreen() {
                 });
               }
 
-              // Actualizar premio_total en la quiniela con el valor real calculado
+              // --- Insertar transacciones de wallet en lote ---
+              if (walletTransactions.length > 0) {
+                const { error: errWallet } = await supabase
+                  .from('wallet_transactions')
+                  .insert(walletTransactions);
+                if (errWallet) throw errWallet;
+              }
+
+              // --- Finalizar quiniela ---
               const { error: errFin } = await supabase
                 .from('quinielas')
                 .update({ estado: 'finalizada', premio_total: premioReal })
                 .eq('id', id);
               if (errFin) throw errFin;
 
+              // --- Notificaciones ---
               if (notificaciones.length > 0) {
                 await supabase.from('notificaciones').insert(notificaciones);
               }
@@ -171,8 +189,8 @@ export default function GanadoresScreen() {
               Alert.alert(
                 '🎉 ¡Premio distribuido!',
                 ganadores.length === 1
-                  ? `@${ganadores[0].username} recibe $${montoPorGanador.toLocaleString()}.`
-                  : `${ganadores.length} ganadores reciben $${montoPorGanador.toLocaleString()} c/u.`,
+                  ? `@${ganadores[0].username} recibe $${montoPorGanador.toLocaleString()} en su billetera.`
+                  : `${ganadores.length} ganadores reciben $${montoPorGanador.toLocaleString()} c/u en su billetera.`,
               );
             } catch (e: any) {
               Alert.alert('Error', e.message);
@@ -181,6 +199,56 @@ export default function GanadoresScreen() {
             }
           },
         },
+      ]
+    );
+  };
+
+  // ---- Retrocompatibilidad: repartir premios de quinielas YA finalizadas sin wallet ----
+  const handleReparar = async () => {
+    Alert.alert(
+      '🔧 Reparar Wallet',
+      'Esto acreditará los premios de esta quiniela a los ganadores que aún no los tienen en su wallet.\n¿Continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Reparar', onPress: async () => {
+          setDistribuyendo(true);
+          try {
+            const ganadores = participantes.filter((p: any) => p.estado === 'ganador' && (p.premio_ganado ?? 0) > 0);
+            if (ganadores.length === 0) { Alert.alert('Sin ganadores marcados'); return; }
+
+            // Verificar cuáles ya tienen transacción para no duplicar
+            const { data: existing } = await supabase
+              .from('wallet_transactions')
+              .select('referencia_id')
+              .in('referencia_id', ganadores.map((g: any) => g.id))
+              .eq('tipo', 'premio');
+
+            const yaAcreditados = new Set((existing || []).map((e: any) => e.referencia_id));
+            const pendientes = ganadores.filter((g: any) => !yaAcreditados.has(g.id));
+
+            if (pendientes.length === 0) {
+              Alert.alert('✅ Ya estaban acreditados', 'Todos los ganadores ya tienen su premio en wallet.');
+              return;
+            }
+
+            const inserts = pendientes.map((g: any) => ({
+              user_id:      g.user_id,
+              tipo:         'premio',
+              monto:        g.premio_ganado,
+              descripcion:  `Premio quiniela: ${quiniela.titulo}`,
+              referencia_id: g.id,
+            }));
+
+            const { error } = await supabase.from('wallet_transactions').insert(inserts);
+            if (error) throw error;
+
+            Alert.alert('✅ Reparado', `Se acreditaron $${inserts.reduce((s: number, i: any) => s + i.monto, 0).toLocaleString()} a ${inserts.length} ganador(es).`);
+          } catch (e: any) {
+            Alert.alert('Error', e.message);
+          } finally {
+            setDistribuyendo(false);
+          }
+        }},
       ]
     );
   };
@@ -247,8 +315,18 @@ export default function GanadoresScreen() {
               : <Text style={styles.distribuirBtnText}>💰 Distribuir Premio Ahora</Text>}
           </TouchableOpacity>
         ) : (
-          <View style={styles.yaDistribuidoBadge}>
-            <Text style={styles.yaDistribuidoText}>✅ Premio ya distribuido</Text>
+          <View style={styles.yaDistribuidoContainer}>
+            <View style={styles.yaDistribuidoBadge}>
+              <Text style={styles.yaDistribuidoText}>✅ Premio ya distribuido</Text>
+            </View>
+            {/* Botón reparación para quinielas antiguas sin wallet */}
+            <TouchableOpacity
+              style={[styles.repararBtn, distribuyendo && { opacity: 0.6 }]}
+              onPress={handleReparar}
+              disabled={distribuyendo}
+            >
+              <Text style={styles.repararBtnText}>🔧 Reparar Wallet</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -268,9 +346,9 @@ export default function GanadoresScreen() {
           return (
             <View key={part.id} style={[
               styles.rankCard,
-              index === 0    && styles.rankCardPrimero,
-              esGanador      && styles.rankCardGanador,
-              esPerdedor     && styles.rankCardPerdedor,
+              index === 0 && styles.rankCardPrimero,
+              esGanador   && styles.rankCardGanador,
+              esPerdedor  && styles.rankCardPerdedor,
             ]}>
               <View style={styles.rankLeft}>
                 <Text style={styles.rankPos}>{MEDALS[index] ?? `#${index + 1}`}</Text>
@@ -302,64 +380,48 @@ export default function GanadoresScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:          { flex: 1, backgroundColor: '#0A0C10' },
-  centered:           { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header:             { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 15,
-                        borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
-  backBtn:            { width: 60 },
-  backText:           { color: '#9B59B6', fontSize: 15 },
-  headerTitle:        { flex: 1, color: '#FFF', fontSize: 15, fontWeight: 'bold' },
-  content:            { padding: 15, paddingBottom: 50 },
-  resumenRow:         { flexDirection: 'row', backgroundColor: '#15181F', borderRadius: 12,
-                        marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
-  resumenBox:         { flex: 1, alignItems: 'center', paddingVertical: 16 },
-  resumenBorder:      { borderLeftWidth: 1, borderLeftColor: '#2A2D35' },
-  resumenVal:         { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
-  resumenLabel:       { color: '#A0A0A0', fontSize: 11, marginTop: 3 },
-  finalizadaBadge:    { backgroundColor: 'rgba(46,204,113,0.08)', borderWidth: 1,
-                        borderColor: '#2ECC71', borderRadius: 10, padding: 10,
-                        alignItems: 'center', marginBottom: 12 },
-  finalizadaText:     { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
-  recalcularBtn:      { backgroundColor: '#1C1F26', borderWidth: 1.5, borderColor: '#3498DB',
-                        borderRadius: 12, padding: 13, alignItems: 'center', marginBottom: 10 },
-  recalcularBtnText:  { color: '#3498DB', fontWeight: 'bold', fontSize: 14 },
-  distribuirBtn:      { backgroundColor: '#F39C12', borderRadius: 14, padding: 16,
-                        alignItems: 'center', marginBottom: 14,
-                        shadowColor: '#F39C12', shadowOpacity: 0.6, shadowRadius: 10, elevation: 8 },
-  distribuirBtnText:  { color: '#000', fontWeight: 'bold', fontSize: 16 },
-  yaDistribuidoBadge: { backgroundColor: 'rgba(46,204,113,0.1)', borderWidth: 1,
-                        borderColor: '#2ECC71', borderRadius: 12, padding: 14,
-                        alignItems: 'center', marginBottom: 14 },
-  yaDistribuidoText:  { color: '#2ECC71', fontWeight: 'bold', fontSize: 14 },
-  reglaBox:           { backgroundColor: '#15181F', borderRadius: 12, padding: 14,
-                        marginBottom: 20, borderWidth: 1, borderColor: '#2A2D35' },
-  reglaTitle:         { color: '#A0A0A0', fontSize: 12, fontWeight: 'bold', marginBottom: 8,
-                        textTransform: 'uppercase', letterSpacing: 0.5 },
-  reglaItem:          { color: '#FFF', fontSize: 13, marginBottom: 4 },
-  reglaNote:          { color: '#505050', fontSize: 11, marginTop: 6, fontStyle: 'italic' },
-  sectionTitle:       { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
-  rankCard:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                        backgroundColor: '#15181F', borderRadius: 12, padding: 14,
-                        marginBottom: 10, borderWidth: 1, borderColor: '#2A2D35' },
-  rankCardPrimero:    { borderColor: '#F39C12', backgroundColor: 'rgba(243,156,18,0.06)' },
-  rankCardGanador:    { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.04)' },
-  rankCardPerdedor:   { opacity: 0.5 },
-  rankLeft:           { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  rankPos:            { fontSize: 22, width: 32, textAlign: 'center' },
-  rankUsername:       { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  rankSub:            { color: '#707070', fontSize: 12, marginTop: 2 },
-  rankRight:          { alignItems: 'flex-end', gap: 4 },
-  rankPremio:         { color: '#F39C12', fontWeight: 'bold', fontSize: 16 },
-  rankBadgeGanador:   { color: '#2ECC71', fontSize: 11, fontWeight: 'bold' },
-  rankBadgePerdedor:  { color: '#505050', fontSize: 10, fontWeight: 'bold',
-                        borderWidth: 1, borderColor: '#505050', borderRadius: 4,
-                        paddingHorizontal: 6, paddingVertical: 2 },
-  rankBadgePagado:    { color: '#3498DB', fontSize: 10, fontWeight: 'bold',
-                        borderWidth: 1, borderColor: '#3498DB', borderRadius: 4,
-                        paddingHorizontal: 6, paddingVertical: 2 },
-  rankBadgePendiente: { color: '#F39C12', fontSize: 10, fontWeight: 'bold',
-                        borderWidth: 1, borderColor: '#F39C12', borderRadius: 4,
-                        paddingHorizontal: 6, paddingVertical: 2 },
-  emptyBox:           { alignItems: 'center', paddingVertical: 40 },
-  emptyText:          { color: '#505050', fontSize: 16 },
+  container:            { flex: 1, backgroundColor: '#0A0C10' },
+  centered:             { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header:               { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 15, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
+  backBtn:              { width: 60 },
+  backText:             { color: '#9B59B6', fontSize: 15 },
+  headerTitle:          { flex: 1, color: '#FFF', fontSize: 15, fontWeight: 'bold' },
+  content:              { padding: 15, paddingBottom: 50 },
+  resumenRow:           { flexDirection: 'row', backgroundColor: '#15181F', borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
+  resumenBox:           { flex: 1, alignItems: 'center', paddingVertical: 16 },
+  resumenBorder:        { borderLeftWidth: 1, borderLeftColor: '#2A2D35' },
+  resumenVal:           { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
+  resumenLabel:         { color: '#A0A0A0', fontSize: 11, marginTop: 3 },
+  finalizadaBadge:      { backgroundColor: 'rgba(46,204,113,0.08)', borderWidth: 1, borderColor: '#2ECC71', borderRadius: 10, padding: 10, alignItems: 'center', marginBottom: 12 },
+  finalizadaText:       { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
+  recalcularBtn:        { backgroundColor: '#1C1F26', borderWidth: 1.5, borderColor: '#3498DB', borderRadius: 12, padding: 13, alignItems: 'center', marginBottom: 10 },
+  recalcularBtnText:    { color: '#3498DB', fontWeight: 'bold', fontSize: 14 },
+  distribuirBtn:        { backgroundColor: '#F39C12', borderRadius: 14, padding: 16, alignItems: 'center', marginBottom: 14, shadowColor: '#F39C12', shadowOpacity: 0.6, shadowRadius: 10, elevation: 8 },
+  distribuirBtnText:    { color: '#000', fontWeight: 'bold', fontSize: 16 },
+  yaDistribuidoContainer:{ marginBottom: 14, gap: 8 },
+  yaDistribuidoBadge:   { backgroundColor: 'rgba(46,204,113,0.1)', borderWidth: 1, borderColor: '#2ECC71', borderRadius: 12, padding: 14, alignItems: 'center' },
+  yaDistribuidoText:    { color: '#2ECC71', fontWeight: 'bold', fontSize: 14 },
+  repararBtn:           { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#F39C12', borderRadius: 12, padding: 12, alignItems: 'center' },
+  repararBtnText:       { color: '#F39C12', fontWeight: '600', fontSize: 13 },
+  reglaBox:             { backgroundColor: '#15181F', borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#2A2D35' },
+  reglaTitle:           { color: '#A0A0A0', fontSize: 12, fontWeight: 'bold', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  reglaItem:            { color: '#FFF', fontSize: 13, marginBottom: 4 },
+  reglaNote:            { color: '#505050', fontSize: 11, marginTop: 6, fontStyle: 'italic' },
+  sectionTitle:         { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
+  rankCard:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#15181F', borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#2A2D35' },
+  rankCardPrimero:      { borderColor: '#F39C12', backgroundColor: 'rgba(243,156,18,0.06)' },
+  rankCardGanador:      { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.04)' },
+  rankCardPerdedor:     { opacity: 0.5 },
+  rankLeft:             { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  rankPos:              { fontSize: 22, width: 32, textAlign: 'center' },
+  rankUsername:         { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  rankSub:              { color: '#707070', fontSize: 12, marginTop: 2 },
+  rankRight:            { alignItems: 'flex-end', gap: 4 },
+  rankPremio:           { color: '#F39C12', fontWeight: 'bold', fontSize: 16 },
+  rankBadgeGanador:     { color: '#2ECC71', fontSize: 11, fontWeight: 'bold' },
+  rankBadgePerdedor:    { color: '#505050', fontSize: 10, fontWeight: 'bold', borderWidth: 1, borderColor: '#505050', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  rankBadgePagado:      { color: '#3498DB', fontSize: 10, fontWeight: 'bold', borderWidth: 1, borderColor: '#3498DB', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  rankBadgePendiente:   { color: '#F39C12', fontSize: 10, fontWeight: 'bold', borderWidth: 1, borderColor: '#F39C12', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  emptyBox:             { alignItems: 'center', paddingVertical: 40 },
+  emptyText:            { color: '#505050', fontSize: 16 },
 });

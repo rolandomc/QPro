@@ -7,7 +7,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { AuthService } from '../../src/services/auth.service';
 
-// ─── Utilidades ───
 function slugify(str: string) {
   return str
     .toLowerCase()
@@ -37,12 +36,10 @@ function getPasswordStrength(pw: string): { score: number; label: string; color:
   return { score, label: 'Segura', color: '#2ECC71' };
 }
 
-// Elimina el outline azul en web
 const noOutline = Platform.OS === 'web'
   ? { outlineWidth: 0, outlineStyle: 'none' } as any
   : {};
 
-// ─── Campo reutilizable ───
 function Field({ label, placeholder, value, onChangeText, keyboardType, autoCapitalize, secureTextEntry, prefix }: any) {
   return (
     <View style={s.inputContainer}>
@@ -64,23 +61,86 @@ function Field({ label, placeholder, value, onChangeText, keyboardType, autoCapi
   );
 }
 
-// ─── Pantalla ───
+// ─── Pantalla de confirmación pendiente ───
+function ConfirmacionPendiente({ email, onResend, onGoLogin }: {
+  email: string;
+  onResend: () => void;
+  onGoLogin: () => void;
+}) {
+  const [resending, setResending] = useState(false);
+  const [cooldown, setCooldown]   = useState(0);
+
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      await onResend();
+      setCooldown(60);
+      const t = setInterval(() => {
+        setCooldown(prev => {
+          if (prev <= 1) { clearInterval(t); return 0; }
+          return prev - 1;
+        });
+      }, 1000);
+      Alert.alert('Correo enviado', 'Revisa tu bandeja de entrada (y spam).');
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setResending(false);
+    }
+  };
+
+  return (
+    <View style={s.confirmBox}>
+      <Text style={s.confirmIcon}>📧</Text>
+      <Text style={s.confirmTitle}>¡Revisa tu correo!</Text>
+      <Text style={s.confirmDesc}>
+        Te enviamos un enlace de confirmación a:{`\n`}
+        <Text style={s.confirmEmail}>{email}</Text>
+      </Text>
+      <Text style={s.confirmSteps}>
+        1. Abre el correo de QPro{`\n`}
+        2. Toca el enlace de confirmación{`\n`}
+        3. Regresa e inicia sesión
+      </Text>
+
+      <TouchableOpacity
+        style={[s.resendBtn, (cooldown > 0 || resending) && { opacity: 0.5 }]}
+        onPress={handleResend}
+        disabled={cooldown > 0 || resending}
+      >
+        {resending
+          ? <ActivityIndicator color="#9B59B6" size="small" />
+          : <Text style={s.resendTxt}>
+              {cooldown > 0 ? `Reenviar en ${cooldown}s` : '🔄 Reenviar correo'}
+            </Text>
+        }
+      </TouchableOpacity>
+
+      <TouchableOpacity style={s.linkBtn} onPress={onGoLogin}>
+        <Text style={s.linkTxt}>Ya confirmé → <Text style={s.linkAccent}>Iniciar sesión</Text></Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── Pantalla principal ───
 export default function RegisterScreen() {
   const router = useRouter();
-  const [nombre, setNombre] = useState('');
-  const [apellido, setApellido] = useState('');
-  const [username, setUsername] = useState('');
-  const [usernameTouched, setUsernameTouched] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [nombre,           setNombre]           = useState('');
+  const [apellido,         setApellido]         = useState('');
+  const [username,         setUsername]         = useState('');
+  const [usernameTouched,  setUsernameTouched]  = useState(false);
+  const [email,            setEmail]            = useState('');
+  const [password,         setPassword]         = useState('');
+  const [showPass,         setShowPass]         = useState(false);
+  const [loading,          setLoading]          = useState(false);
+  const [confirmPendiente, setConfirmPendiente] = useState(false);
 
   useEffect(() => {
     if (!usernameTouched) setUsername(buildUsername(nombre, apellido));
   }, [nombre, apellido, usernameTouched]);
 
-  const strength = getPasswordStrength(password);
+  const strength    = getPasswordStrength(password);
   const strengthPct = Math.min((strength.score / 5) * 100, 100);
 
   const handleRegister = async () => {
@@ -102,21 +162,44 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      await AuthService.signUp(email, password, {
-        nombre: nombre.trim(),
-        apellido: apellido.trim(),
-        username: username.trim(),
+      const result = await AuthService.signUp(email.trim(), password, {
+        nombre:       nombre.trim(),
+        apellido:     apellido.trim(),
+        username:     username.trim(),
         display_name: `${nombre.trim()} ${apellido.trim()}`,
       });
-      Alert.alert('¡Éxito!', 'Tu cuenta ha sido creada. Revisa tu correo o inicia sesión.', [
-        { text: 'OK', onPress: () => router.replace('/auth/login') },
-      ]);
+
+      if (result.requiresEmailConfirmation) {
+        // Mostrar pantalla de confirmación pendiente
+        setConfirmPendiente(true);
+      } else {
+        // Email confirm desactivado → cuenta creada directo
+        Alert.alert('¡Éxito!', 'Tu cuenta ha sido creada.', [
+          { text: 'OK', onPress: () => router.replace('/auth/login') },
+        ]);
+      }
     } catch (error: any) {
       Alert.alert('Error al registrar', error.message || 'No se pudo crear la cuenta.');
     } finally {
       setLoading(false);
     }
   };
+
+  if (confirmPendiente) {
+    return (
+      <SafeAreaView style={s.container}>
+        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+          <View style={{ flex: 1 }} />
+          <ConfirmacionPendiente
+            email={email}
+            onResend={() => AuthService.resendConfirmation(email.trim())}
+            onGoLogin={() => router.replace('/auth/login')}
+          />
+          <View style={{ flex: 1 }} />
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={s.container}>
@@ -125,7 +208,6 @@ export default function RegisterScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Espacio flexible arriba para centrar */}
         <View style={{ flex: 1 }} />
 
         <View style={s.header}>
@@ -134,8 +216,6 @@ export default function RegisterScreen() {
         </View>
 
         <View style={s.form}>
-
-          {/* Nombre + Apellido */}
           <View style={s.row}>
             <View style={{ flex: 1 }}>
               <Field label="Nombre" placeholder="Juan" value={nombre} onChangeText={setNombre} />
@@ -146,7 +226,6 @@ export default function RegisterScreen() {
             </View>
           </View>
 
-          {/* Username */}
           <View style={s.inputContainer}>
             <Text style={s.label}>Usuario</Text>
             <View style={s.inputWrap}>
@@ -166,7 +245,6 @@ export default function RegisterScreen() {
             <Text style={s.hint}>Se genera automáticamente · puedes cambiarlo</Text>
           </View>
 
-          {/* Email */}
           <Field
             label="Correo Electrónico"
             placeholder="tu@correo.com"
@@ -176,7 +254,6 @@ export default function RegisterScreen() {
             autoCapitalize="none"
           />
 
-          {/* Contraseña + barra de seguridad */}
           <View style={s.inputContainer}>
             <Text style={s.label}>Contraseña</Text>
             <View style={s.inputWrap}>
@@ -193,8 +270,6 @@ export default function RegisterScreen() {
                 <Text style={s.eyeTxt}>{showPass ? '🙈' : '👁️'}</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Barra */}
             <View style={s.strengthWrap}>
               <View style={s.strengthTrack}>
                 <View style={[
@@ -206,8 +281,6 @@ export default function RegisterScreen() {
                 <Text style={[s.strengthLabel, { color: strength.color }]}>{strength.label}</Text>
               ) : null}
             </View>
-
-            {/* Reglas */}
             {password.length > 0 && (
               <View style={s.rules}>
                 <Rule ok={password.length >= 8} text="Mínimo 8 caracteres" />
@@ -234,7 +307,6 @@ export default function RegisterScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Espacio flexible abajo para centrar */}
         <View style={{ flex: 1 }} />
       </ScrollView>
     </SafeAreaView>
@@ -314,4 +386,38 @@ const s = StyleSheet.create({
   linkBtn: { marginTop: 18, alignItems: 'center' },
   linkTxt: { color: '#606070', fontSize: 13 },
   linkAccent: { color: '#9B59B6', fontWeight: 'bold' },
+
+  // ─── Confirmación pendiente ───
+  confirmBox: {
+    backgroundColor: '#0D1117',
+    borderRadius: 18,
+    padding: 28,
+    borderWidth: 1,
+    borderColor: '#1E2330',
+    alignItems: 'center',
+    gap: 12,
+  },
+  confirmIcon:  { fontSize: 52, marginBottom: 4 },
+  confirmTitle: { color: '#FFF', fontSize: 22, fontWeight: 'bold', textAlign: 'center' },
+  confirmDesc:  { color: '#808090', fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  confirmEmail: { color: '#9B59B6', fontWeight: 'bold' },
+  confirmSteps: {
+    color: '#606070',
+    fontSize: 13,
+    textAlign: 'left',
+    lineHeight: 22,
+    backgroundColor: '#131620',
+    borderRadius: 10,
+    padding: 14,
+    width: '100%',
+  },
+  resendBtn: {
+    borderWidth: 1,
+    borderColor: '#9B59B6',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginTop: 4,
+  },
+  resendTxt: { color: '#9B59B6', fontWeight: 'bold', fontSize: 14 },
 });

@@ -8,20 +8,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../src/config/supabase';
 
-type Filtro = 'pendiente' | 'procesado' | 'rechazado' | 'todos';
+type Filtro = 'pendiente' | 'pagado' | 'rechazado' | 'todos';
 
 const FILTROS: { key: Filtro; label: string; emoji: string; color: string }[] = [
-  { key: 'pendiente',  label: 'Pendientes', emoji: '⏳', color: '#F39C12' },
-  { key: 'procesado',  label: 'Procesados', emoji: '✅', color: '#2ECC71' },
-  { key: 'rechazado',  label: 'Rechazados', emoji: '❌', color: '#E74C3C' },
-  { key: 'todos',      label: 'Todos',      emoji: '📋', color: '#9B59B6' },
+  { key: 'pendiente', label: 'Pendientes', emoji: '⏳', color: '#F39C12' },
+  { key: 'pagado',    label: 'Pagados',    emoji: '✅', color: '#2ECC71' },
+  { key: 'rechazado', label: 'Rechazados', emoji: '❌', color: '#E74C3C' },
+  { key: 'todos',     label: 'Todos',      emoji: '📋', color: '#9B59B6' },
 ];
 
 const ESTADO_CFG: Record<string, { color: string; bg: string; emoji: string }> = {
-  pendiente:  { color: '#F39C12', bg: 'rgba(243,156,18,0.12)', emoji: '⏳' },
-  procesado:  { color: '#2ECC71', bg: 'rgba(46,204,113,0.12)', emoji: '✅' },
-  rechazado:  { color: '#E74C3C', bg: 'rgba(231,76,60,0.12)',  emoji: '❌' },
-  pagado:     { color: '#2ECC71', bg: 'rgba(46,204,113,0.12)', emoji: '✅' },
+  pendiente: { color: '#F39C12', bg: 'rgba(243,156,18,0.12)', emoji: '⏳' },
+  pagado:    { color: '#2ECC71', bg: 'rgba(46,204,113,0.12)', emoji: '✅' },
+  rechazado: { color: '#E74C3C', bg: 'rgba(231,76,60,0.12)',  emoji: '❌' },
 };
 
 function formatFecha(iso: string) {
@@ -95,7 +94,7 @@ export default function AdminRetirosScreen() {
 
     Alert.alert(
       '💸 Confirmar pago',
-      `¿Marcar como procesado el retiro de\n\n@${retiro.profiles?.username}\n$${retiro.monto} MXN\n${destino}?\n\n⚠️ Solo confirma si ya hiciste la transferencia.`,
+      `¿Marcar como pagado el retiro de\n\n@${retiro.profiles?.username}\n$${retiro.monto} MXN\n${destino}?\n\n⚠️ Solo confirma si ya hiciste la transferencia.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -106,7 +105,7 @@ export default function AdminRetirosScreen() {
             try {
               await llamarEdgeFunction(retiro.id, 'pagar');
               await refrescarDespuesAccion();
-              Alert.alert('✅ Listo', 'Retiro marcado como procesado.');
+              Alert.alert('✅ Listo', 'Retiro marcado como pagado.');
             } catch (e: any) {
               Alert.alert('Error', e.message);
             } finally {

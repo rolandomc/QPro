@@ -1,13 +1,12 @@
 import { supabase } from '../config/supabase';
 
-export type CompetitionCode = 'PD' | 'PL' | 'MX1' | 'CL' | 'WC' | 'BL1' | 'SA' | 'FL1';
+export type CompetitionCode = 'PD' | 'PL' | 'MX1' | 'CL' | 'WC' | 'BL1' | 'SA' | 'FL1' | 'BSA' | 'MLS';
 export type MatchStatus = 'SCHEDULED' | 'FINISHED' | 'LIVE' | 'ALL';
 
 const FOOTBALL_API_BASE = 'https://api.football-data.org/v4';
 
 function getMatchesUrl(competition: string, params: URLSearchParams): string {
   const query = params.toString();
-  // En web/produccion usamos el proxy para evitar CORS
   if (typeof window !== 'undefined' && !__DEV__) {
     return `/api/matches?competition=${competition}${query ? '&' + query : ''}`;
   }
@@ -61,7 +60,6 @@ export class AdminService {
     const url = getMatchesUrl(competition, params);
 
     const headers: Record<string, string> = {};
-    // Solo mandamos el API key directo si NO vamos por el proxy
     if (typeof window === 'undefined' || __DEV__) {
       const apiKey = process.env.EXPO_PUBLIC_FOOTBALL_API_KEY;
       if (!apiKey) throw new Error('EXPO_PUBLIC_FOOTBALL_API_KEY no configurada en .env');
@@ -87,6 +85,7 @@ export class AdminService {
     return { matches };
   }
 
+  // ─── Crear quiniela con partidos ──────────────────────────────────────────
   static async createQuinielaConPartidos(
     titulo: string,
     descripcion: string,
@@ -100,18 +99,22 @@ export class AdminService {
     }>,
     jugadoresMinimos: number = 5,
     porcentajeAdmin: number = 10,
+    cierreAutomatico: boolean = true,
+    primerPartido: string | null = null,
   ) {
     const { data: quiniela, error: errQ } = await supabase
       .from('quinielas')
       .insert({
         titulo,
         descripcion,
-        precio_entrada:    precioEntrada,
-        premio_total:      0,
-        estado:            'abierta',
-        fecha_cierre:      fechaCierre,
-        jugadores_minimos: jugadoresMinimos,
-        porcentaje_admin:  porcentajeAdmin,
+        precio_entrada:     precioEntrada,
+        premio_total:       0,
+        estado:             'abierta',
+        fecha_cierre:       fechaCierre,
+        jugadores_minimos:  jugadoresMinimos,
+        porcentaje_admin:   porcentajeAdmin,
+        cierre_automatico:  cierreAutomatico,
+        primer_partido:     primerPartido,
       })
       .select('id')
       .single();
@@ -131,10 +134,82 @@ export class AdminService {
     return quiniela;
   }
 
+  // ─── Cerrar quiniela (verifica minimo y anula si no cumple) ───────────────
+  static async cerrarQuiniela(quinielaId: string): Promise<{ valida: boolean; jugadoresPagados: number }> {
+    const { data: q, error: errQ } = await supabase
+      .from('quinielas')
+      .select('id, jugadores_minimos, precio_entrada, titulo')
+      .eq('id', quinielaId)
+      .single();
+    if (errQ || !q) throw errQ ?? new Error('Quiniela no encontrada');
+
+    const { count } = await supabase
+      .from('participaciones')
+      .select('*', { count: 'exact', head: true })
+      .eq('quiniela_id', quinielaId)
+      .in('estado', ['pagado', 'ganador', 'perdedor']);
+
+    const jugadoresPagados = count ?? 0;
+    const valida = jugadoresPagados >= q.jugadores_minimos;
+
+    if (valida) {
+      const { error } = await supabase
+        .from('quinielas')
+        .update({ estado: 'cerrada' })
+        .eq('id', quinielaId);
+      if (error) throw error;
+    } else {
+      const { error: errAnul } = await supabase
+        .from('quinielas')
+        .update({ estado: 'anulada' })
+        .eq('id', quinielaId);
+      if (errAnul) throw errAnul;
+
+      const { data: participantes, error: errP } = await supabase
+        .from('participaciones')
+        .select('id, user_id, monto_pagado')
+        .eq('quiniela_id', quinielaId)
+        .in('estado', ['pagado']);
+      if (errP) throw errP;
+
+      for (const p of (participantes ?? [])) {
+        const monto = p.monto_pagado ?? q.precio_entrada;
+
+        await supabase.rpc('incrementar_wallet', {
+          p_user_id: p.user_id,
+          p_monto:   monto,
+        });
+
+        await supabase.from('wallet_movimientos').insert({
+          user_id:     p.user_id,
+          tipo:        'reembolso',
+          monto:       monto,
+          descripcion: `Reembolso: quiniela "${q.titulo}" anulada por no alcanzar el mínimo de jugadores`,
+          quiniela_id: quinielaId,
+        });
+
+        await supabase
+          .from('participaciones')
+          .update({ estado: 'reembolsado' })
+          .eq('id', p.id);
+      }
+    }
+
+    return { valida, jugadoresPagados };
+  }
+
+  static async updateEstado(quinielaId: string, estado: string) {
+    const { error } = await supabase
+      .from('quinielas')
+      .update({ estado })
+      .eq('id', quinielaId);
+    if (error) throw error;
+  }
+
   static async getQuinielas() {
     const { data, error } = await supabase
       .from('quinielas')
-      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, auto_resultados, jugadores_minimos, porcentaje_admin, created_at, partidos(count)')
+      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, auto_resultados, jugadores_minimos, porcentaje_admin, cierre_automatico, primer_partido, created_at, partidos(count)')
       .order('created_at', { ascending: false });
     if (error) throw error;
     return data;
@@ -148,14 +223,6 @@ export class AdminService {
       .order('orden', { ascending: true });
     if (error) throw error;
     return data;
-  }
-
-  static async updateEstado(quinielaId: string, estado: string) {
-    const { error } = await supabase
-      .from('quinielas')
-      .update({ estado })
-      .eq('id', quinielaId);
-    if (error) throw error;
   }
 
   static async setResultadoPartido(partidoId: string, resultado: 'local' | 'empate' | 'visitante') {

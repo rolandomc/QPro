@@ -51,7 +51,8 @@ export default function RootLayout() {
   useEffect(() => {
     if (!isInitialized) return;
     const inAuthGroup = segments[0] === 'auth';
-    if (!session && !inAuthGroup) router.replace('/auth/login');
+    const inPagoGroup = segments[0] === 'pago';
+    if (!session && !inAuthGroup && !inPagoGroup) router.replace('/auth/login');
     else if (session && inAuthGroup) router.replace('/(tabs)');
   }, [session, isInitialized, segments]);
 
@@ -74,6 +75,9 @@ export default function RootLayout() {
         <Stack.Screen name="admin/index" />
         <Stack.Screen name="admin/create" />
         <Stack.Screen name="wallet/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="pago/exito" />
+        <Stack.Screen name="pago/fallo" />
+        <Stack.Screen name="pago/pendiente" />
       </Stack>
     </>
   );

@@ -10,10 +10,10 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { WalletService } from '../../src/services/wallet.service';
 
 const TIPO_CONFIG: Record<string, { emoji: string; color: string; label: string }> = {
-  premio:        { emoji: '🏆', color: '#2ECC71', label: 'Premio' },
-  participacion: { emoji: '🎮', color: '#E74C3C', label: 'Participación' },
-  retiro:        { emoji: '💸', color: '#F39C12', label: 'Retiro' },
-  ajuste_admin:  { emoji: '⚙️',  color: '#A0A0A0', label: 'Ajuste' },
+  premio:        { emoji: '\ud83c\udfc6', color: '#2ECC71', label: 'Premio' },
+  participacion: { emoji: '\ud83c\udfae', color: '#E74C3C', label: 'Participaci\u00f3n' },
+  retiro:        { emoji: '\ud83d\udcb8', color: '#F39C12', label: 'Retiro' },
+  ajuste_admin:  { emoji: '\u2699\ufe0f',  color: '#A0A0A0', label: 'Ajuste' },
 };
 
 function formatMonto(monto: number) {
@@ -28,10 +28,10 @@ function formatFecha(iso: string) {
 export default function WalletScreen() {
   const router = useRouter();
 
-  const [saldo,        setSaldo]        = useState<number>(0);
-  const [transacciones,setTransacciones]= useState<any[]>([]);
-  const [loading,      setLoading]      = useState(true);
-  const [refreshing,   setRefreshing]   = useState(false);
+  const [saldo,         setSaldo]         = useState<number>(0);
+  const [transacciones, setTransacciones] = useState<any[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [refreshing,    setRefreshing]    = useState(false);
 
   // Modal retiro
   const [modalRetiro, setModalRetiro] = useState(false);
@@ -57,22 +57,34 @@ export default function WalletScreen() {
     }
   }, []);
 
-  // useFocusEffect para recargar cada vez que se navega a la pantalla
   useFocusEffect(useCallback(() => {
     setLoading(true);
     loadData();
   }, []));
 
+  const abrirModalRetiro = () => {
+    if (saldo <= 0) {
+      Alert.alert('Sin saldo', 'A\u00fan no tienes saldo para retirar.');
+      return;
+    }
+    setModalRetiro(true);
+  };
+
+  // Rellena el campo monto con el saldo total disponible
+  const handleRetirarTodo = () => {
+    setMonto(saldo.toFixed(2));
+  };
+
   const handleSolicitarRetiro = async () => {
     const montoNum = parseFloat(monto);
     if (!monto || isNaN(montoNum) || montoNum <= 0) {
-      Alert.alert('Error', 'Ingresa un monto válido'); return;
+      Alert.alert('Error', 'Ingresa un monto v\u00e1lido'); return;
     }
     if (montoNum > saldo) {
       Alert.alert('Saldo insuficiente', `Tu saldo disponible es $${saldo.toFixed(2)} MXN`); return;
     }
     if (metodo === 'spei' && clabe.length !== 18) {
-      Alert.alert('Error', 'La CLABE debe tener 18 dígitos'); return;
+      Alert.alert('Error', 'La CLABE debe tener 18 d\u00edgitos'); return;
     }
     if (metodo === 'mercadopago' && !aliasMP.trim()) {
       Alert.alert('Error', 'Ingresa tu alias de Mercado Pago'); return;
@@ -88,9 +100,10 @@ export default function WalletScreen() {
       });
       setModalRetiro(false);
       setMonto(''); setClabe(''); setAliasMP('');
+      await loadData(); // refrescar saldo tras solicitar
       Alert.alert(
-        '✅ Solicitud enviada',
-        'Tu solicitud de retiro fue recibida. La procesaremos en un máximo de 24 horas.',
+        '\u2705 Solicitud enviada',
+        'Tu solicitud de retiro fue recibida. La procesaremos en un m\u00e1ximo de 24 horas.',
       );
     } catch (e: any) {
       Alert.alert('Error', e.message);
@@ -113,7 +126,7 @@ export default function WalletScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backText}>← Volver</Text>
+          <Text style={styles.backText}>\u2190 Volver</Text>
         </Pressable>
         <Text style={styles.title}>Mi Billetera</Text>
         <View style={{ width: 60 }} />
@@ -139,14 +152,11 @@ export default function WalletScreen() {
             <Text style={styles.currency}>MXN</Text>
           </Text>
           <View style={styles.actionRow}>
-            <Pressable
-              style={styles.withdrawBtn}
-              onPress={() => saldo > 0 ? setModalRetiro(true) : Alert.alert('Sin saldo', 'Aún no tienes saldo para retirar.')}
-            >
-              <Text style={styles.withdrawText}>💸 Solicitar Retiro</Text>
+            <Pressable style={styles.withdrawBtn} onPress={abrirModalRetiro}>
+              <Text style={styles.withdrawText}>\ud83d\udcb8 Solicitar Retiro</Text>
             </Pressable>
           </View>
-          <Text style={styles.retiroNota}>⏱ Retiros procesados en máx. 24 horas</Text>
+          <Text style={styles.retiroNota}>\u23f1 Retiros procesados en m\u00e1x. 24 horas</Text>
         </View>
 
         {/* Movimientos */}
@@ -154,13 +164,13 @@ export default function WalletScreen() {
         <View style={styles.historyContainer}>
           {transacciones.length === 0 ? (
             <View style={styles.emptyHistory}>
-              <Text style={styles.emptyEmoji}>📊</Text>
-              <Text style={styles.emptyText}>Aún no hay movimientos</Text>
-              <Text style={styles.emptySubtext}>Tus premios y participaciones aparecerán aquí</Text>
+              <Text style={styles.emptyEmoji}>\ud83d\udcca</Text>
+              <Text style={styles.emptyText}>A\u00fan no hay movimientos</Text>
+              <Text style={styles.emptySubtext}>Tus premios y participaciones aparecer\u00e1n aqu\u00ed</Text>
             </View>
           ) : (
             transacciones.map((tx) => {
-              const cfg = TIPO_CONFIG[tx.tipo] ?? { emoji: '💰', color: '#FFF', label: tx.tipo };
+              const cfg = TIPO_CONFIG[tx.tipo] ?? { emoji: '\ud83d\udcb0', color: '#FFF', label: tx.tipo };
               return (
                 <View key={tx.id} style={styles.txItem}>
                   <View style={styles.txLeft}>
@@ -188,20 +198,30 @@ export default function WalletScreen() {
             <TouchableWithoutFeedback>
               <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                 <View style={styles.modalCard}>
-                  <Text style={styles.modalTitle}>💸 Solicitar Retiro</Text>
-                  <Text style={styles.modalSaldo}>Saldo disponible: <Text style={{ color: '#2ECC71' }}>${saldo.toFixed(2)} MXN</Text></Text>
+                  <Text style={styles.modalTitle}>\ud83d\udcb8 Solicitar Retiro</Text>
+                  <Text style={styles.modalSaldo}>
+                    Saldo disponible:{' '}
+                    <Text style={{ color: '#2ECC71' }}>${saldo.toFixed(2)} MXN</Text>
+                  </Text>
 
+                  {/* Monto + botón retirar todo */}
                   <Text style={styles.inputLabel}>Monto a retirar (MXN)</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Ej. 500"
-                    placeholderTextColor="#505050"
-                    keyboardType="decimal-pad"
-                    value={monto}
-                    onChangeText={setMonto}
-                  />
+                  <View style={styles.montoRow}>
+                    <TextInput
+                      style={[styles.input, { flex: 1 }]}
+                      placeholder="Ej. 500"
+                      placeholderTextColor="#505050"
+                      keyboardType="decimal-pad"
+                      value={monto}
+                      onChangeText={setMonto}
+                    />
+                    <TouchableOpacity style={styles.todoBtn} onPress={handleRetirarTodo}>
+                      <Text style={styles.todoBtnTxt}>Todo</Text>
+                    </TouchableOpacity>
+                  </View>
 
-                  <Text style={styles.inputLabel}>Método de pago</Text>
+                  {/* M\u00e9todo */}
+                  <Text style={styles.inputLabel}>M\u00e9todo de pago</Text>
                   <View style={styles.metodoRow}>
                     <TouchableOpacity
                       style={[styles.metodoPill, metodo === 'spei' && styles.metodoPillActive]}
@@ -219,7 +239,7 @@ export default function WalletScreen() {
 
                   {metodo === 'spei' ? (
                     <>
-                      <Text style={styles.inputLabel}>CLABE interbancaria (18 dígitos)</Text>
+                      <Text style={styles.inputLabel}>CLABE interbancaria (18 d\u00edgitos)</Text>
                       <TextInput
                         style={styles.input}
                         placeholder="000000000000000000"
@@ -293,12 +313,16 @@ const styles = StyleSheet.create({
   txDesc:             { color: '#A0A0A0', fontSize: 12, marginTop: 1 },
   txFecha:            { color: '#505050', fontSize: 11, marginTop: 2 },
   txMonto:            { fontWeight: 'bold', fontSize: 15 },
+  // Modal
   modalOverlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalCard:          { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 4 },
   modalTitle:         { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
   modalSaldo:         { color: '#A0A0A0', fontSize: 13, marginBottom: 16 },
   inputLabel:         { color: '#A0A0A0', fontSize: 12, fontWeight: '600', marginTop: 12, marginBottom: 6 },
+  montoRow:           { flexDirection: 'row', gap: 8, alignItems: 'center' },
   input:              { backgroundColor: '#0A0C10', borderRadius: 12, borderWidth: 1, borderColor: '#2A2D35', color: '#FFF', padding: 12, fontSize: 15 },
+  todoBtn:            { backgroundColor: 'rgba(46,204,113,0.12)', borderRadius: 12, borderWidth: 1, borderColor: '#2ECC71', paddingHorizontal: 14, paddingVertical: 13 },
+  todoBtnTxt:         { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
   metodoRow:          { flexDirection: 'row', gap: 10, marginBottom: 4 },
   metodoPill:         { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: '#0A0C10', borderWidth: 1, borderColor: '#2A2D35' },
   metodoPillActive:   { backgroundColor: 'rgba(46,204,113,0.1)', borderColor: '#2ECC71' },

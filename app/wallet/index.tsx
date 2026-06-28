@@ -16,10 +16,11 @@ const TIPO_CONFIG: Record<string, { emoji: string; color: string; label: string 
   ajuste_admin:  { emoji: '⚙️',  color: '#A0A0A0', label: 'Ajuste' },
 };
 
+// Estados válidos de la BD: pendiente, pagado, rechazado
 const ESTADO_COLOR: Record<string, string> = {
-  pendiente:  '#F39C12',
-  procesado:  '#2ECC71',
-  rechazado:  '#E74C3C',
+  pendiente: '#F39C12',
+  pagado:    '#2ECC71',
+  rechazado: '#E74C3C',
 };
 
 function formatMonto(monto: number) {
@@ -40,7 +41,6 @@ export default function WalletScreen() {
   const [refreshing,    setRefreshing]    = useState(false);
   const [hayPendiente,  setHayPendiente]  = useState(false);
 
-  // Modal retiro
   const [modalRetiro, setModalRetiro] = useState(false);
   const [metodo,      setMetodo]      = useState<'spei' | 'mercadopago'>('spei');
   const [monto,       setMonto]       = useState('');
@@ -157,7 +157,6 @@ export default function WalletScreen() {
           />
         }
       >
-        {/* Balance Card */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo Disponible</Text>
           <Text style={styles.balanceValue}>
@@ -182,7 +181,6 @@ export default function WalletScreen() {
           <Text style={styles.retiroNota}>⏱ Retiros procesados en máx. 24 horas</Text>
         </View>
 
-        {/* Movimientos */}
         <Text style={styles.sectionTitle}>Historial de Movimientos</Text>
         <View style={styles.historyContainer}>
           {transacciones.length === 0 ? (
@@ -195,6 +193,10 @@ export default function WalletScreen() {
             transacciones.map((tx) => {
               const cfg = TIPO_CONFIG[tx.tipo] ?? { emoji: '💰', color: '#FFF', label: tx.tipo };
               const estadoColor = tx.estado ? (ESTADO_COLOR[tx.estado] ?? '#A0A0A0') : undefined;
+              // Para retiros pagados: mostrar monto en verde porque ya se confirmó el envío
+              const montoColor = tx.tipo === 'retiro' && tx.estado === 'pagado'
+                ? '#2ECC71'
+                : tx.monto >= 0 ? '#2ECC71' : '#E74C3C';
               return (
                 <View key={tx.id} style={styles.txItem}>
                   <View style={styles.txLeft}>
@@ -212,7 +214,7 @@ export default function WalletScreen() {
                       <Text style={styles.txFecha}>{formatFecha(tx.created_at)}</Text>
                     </View>
                   </View>
-                  <Text style={[styles.txMonto, { color: tx.monto >= 0 ? '#2ECC71' : '#E74C3C' }]}>
+                  <Text style={[styles.txMonto, { color: montoColor }]}>
                     {formatMonto(tx.monto)}
                   </Text>
                 </View>
@@ -222,7 +224,6 @@ export default function WalletScreen() {
         </View>
       </ScrollView>
 
-      {/* Modal Retiro */}
       <Modal visible={modalRetiro} transparent animationType="slide" onRequestClose={() => setModalRetiro(false)}>
         <TouchableWithoutFeedback onPress={() => setModalRetiro(false)}>
           <View style={styles.modalOverlay}>
@@ -235,7 +236,6 @@ export default function WalletScreen() {
                     <Text style={{ color: '#2ECC71' }}>${saldo.toFixed(2)} MXN</Text>
                   </Text>
 
-                  {/* Monto + botón retirar todo */}
                   <Text style={styles.inputLabel}>Monto a retirar (MXN)</Text>
                   <View style={styles.montoRow}>
                     <TextInput
@@ -251,7 +251,6 @@ export default function WalletScreen() {
                     </TouchableOpacity>
                   </View>
 
-                  {/* Método */}
                   <Text style={styles.inputLabel}>Método de pago</Text>
                   <View style={styles.metodoRow}>
                     <TouchableOpacity
@@ -353,7 +352,6 @@ const styles = StyleSheet.create({
   txMonto:             { fontWeight: 'bold', fontSize: 15 },
   estadoPill:          { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2, borderWidth: 1 },
   estadoPillTxt:       { fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
-  // Modal
   modalOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalCard:           { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 4 },
   modalTitle:          { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 4 },

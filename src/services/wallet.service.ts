@@ -1,7 +1,6 @@
 import { supabase } from '../config/supabase';
 
 export const WalletService = {
-  /** Saldo actual del usuario autenticado */
   async getSaldo(): Promise<number> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return 0;
@@ -11,12 +10,11 @@ export const WalletService = {
     return Number(data ?? 0);
   },
 
-  /** Últimas N transacciones del usuario incluyendo retiros pendientes */
   async getTransacciones(limit = 30) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
 
-    // Transacciones normales de wallet
+    // Transacciones reales de wallet (incluye el retiro con monto negativo)
     const { data: txs, error } = await supabase
       .from('wallet_transactions')
       .select('*')
@@ -25,7 +23,14 @@ export const WalletService = {
       .limit(limit);
     if (error) throw error;
 
-    // Retiros solicitados (pendientes/procesados/rechazados)
+    // IDs de retiros que ya tienen wallet_transaction (referencia_id apunta al retiro)
+    const retiroIdsEnTx = new Set(
+      (txs ?? [])
+        .filter((t: any) => t.tipo === 'retiro' && t.referencia_id)
+        .map((t: any) => t.referencia_id)
+    );
+
+    // Retiros cuyo estado queremos mostrar encima si NO tienen tx todavía (solo pendientes sin tx)
     const { data: retiros } = await supabase
       .from('retiro_solicitudes')
       .select('*')
@@ -33,8 +38,12 @@ export const WalletService = {
       .order('created_at', { ascending: false })
       .limit(10);
 
-    // Mapear retiros como movimientos para mostrar en historial
-    const retirosComoTx = (retiros ?? []).map((r: any) => ({
+    // Solo incluir retiros que NO están ya en wallet_transactions
+    const retirosHuerfanos = (retiros ?? []).filter(
+      (r: any) => !retiroIdsEnTx.has(r.id)
+    );
+
+    const retirosComoTx = retirosHuerfanos.map((r: any) => ({
       id: `retiro-${r.id}`,
       user_id: r.user_id,
       tipo: 'retiro',
@@ -45,15 +54,27 @@ export const WalletService = {
       estado: r.estado,
     }));
 
-    // Combinar y ordenar por fecha
-    const todos = [...(txs ?? []), ...retirosComoTx]
+    // Para las tx de retiro ya existentes, enriquecer con el estado actual del retiro
+    const retiroMap = new Map((retiros ?? []).map((r: any) => [r.id, r]));
+    const txsEnriquecidas = (txs ?? []).map((t: any) => {
+      if (t.tipo === 'retiro' && t.referencia_id && retiroMap.has(t.referencia_id)) {
+        const retiro = retiroMap.get(t.referencia_id);
+        return {
+          ...t,
+          estado: retiro.estado,
+          descripcion: `Retiro ${retiro.metodo.toUpperCase()} · ${retiro.estado}`,
+        };
+      }
+      return t;
+    });
+
+    const todos = [...txsEnriquecidas, ...retirosComoTx]
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, limit);
 
     return todos;
   },
 
-  /** Verificar si hay retiro pendiente */
   async tienePendiente(): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
@@ -66,7 +87,6 @@ export const WalletService = {
     return (data ?? []).length > 0;
   },
 
-  /** Enviar solicitud de retiro via Edge Function */
   async solicitarRetiro(params: {
     monto: number;
     metodo: 'spei' | 'mercadopago';

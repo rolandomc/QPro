@@ -1,29 +1,34 @@
 /**
  * apiCEP Service
  * Valida un comprobante SPEI usando OCR + Banxico vía apiCEP.
- * Docs: https://www.apicep.cloud
+ * Docs: https://www.apicep.cloud/documentacion
  *
- * El flujo correcto:
- *  1. El usuario sube la imagen del comprobante a Supabase Storage
- *  2. Se envía la URL de la imagen a POST /validate-transfer
- *  3. apiCEP hace OCR, extrae clave de rastreo, monto, fecha y valida contra Banxico
- *  4. Si válido y beneficiario coincide → pago confirmado
+ * Flujo:
+ *  POST /validate-transfer con imageUrl + beneficiary (clabe, bank, name)
+ *  apiCEP descarga la imagen, hace OCR, extrae clave de rastreo y valida contra Banxico.
  *
- * Variables de entorno necesarias en .env:
- *   EXPO_PUBLIC_APICEP_API_KEY   = apicep_665deccc1cb8f1a87b05e7f58850c31150cd4ce778a04a7f08af2bae8e9799f3
- *   EXPO_PUBLIC_CLABE_DESTINO    = tu CLABE de 18 dígitos
+ * Variables de entorno requeridas:
+ *   EXPO_PUBLIC_APICEP_API_KEY   = apicep_665deccc...
+ *   EXPO_PUBLIC_CLABE_DESTINO    = CLABE de 18 dígitos
+ *   EXPO_PUBLIC_BANCO_DESTINO    = Nombre exacto del banco (ej. "BBVA MEXICO")
+ *   EXPO_PUBLIC_TITULAR_DESTINO  = Nombre del titular (ej. "Rolando Martinez")
  */
 
 const APICEP_BASE = 'https://api.apicep.cloud';
 
-export interface CepExtracted {
-  senderBank?:    string;
-  receiverBank?:  string;
-  trackingKey:    string;   // clave de rastreo extraída por OCR
-  referenceNumber?: string;
-  amount:         number;   // en pesos
-  date:           string;   // ISO date
-  paymentConcept?: string;
+export interface CepDetails {
+  operationDate?:         string;
+  processingDate?:        string;
+  processingTime?:        string;
+  trackingKey?:           string;
+  senderBank?:            string;
+  senderName?:            string;
+  receiverBank?:          string;
+  beneficiaryName?:       string;
+  beneficiaryAccount?:    string;
+  amount?:                number;
+  paymentConcept?:        string;
+  digitalSignature?:      string;
 }
 
 export interface CepResult {
@@ -34,98 +39,115 @@ export interface CepResult {
   fechaOperacion:     string;
   estado:             'LIQUIDADA' | 'DEVUELTA' | string;
   cuentaBeneficiario: string;
+  cepDetails?:        CepDetails;
+  cepXml?:            string;
+  cepPdf?:            string;
 }
 
 export interface ValidarResult {
-  valid:       boolean;
-  cep?:        CepResult;
-  extracted?:  CepExtracted;
-  confidence?: number;
-  errorMsg?:   string;
+  valid:          boolean;
+  cep?:           CepResult;
+  confidence?:    number;
+  missingFields?: string[];
+  errorMsg?:      string;
 }
 
 export const ApiCepService = {
   /**
-   * Valida un comprobante SPEI enviando la imagen (URL pública) a apiCEP.
-   * apiCEP hace OCR sobre la imagen, extrae los datos y valida contra Banxico.
+   * Valida un comprobante SPEI enviando su URL a apiCEP.
+   * apiCEP descarga la imagen, hace OCR, extrae los datos y valida contra Banxico.
    *
-   * @param imageUrl      URL pública de la imagen del comprobante (Supabase Storage)
-   * @param montoEsperado Monto que debe haberse pagado (en pesos MXN)
+   * @param imageUrl      URL pública (o pre-firmada vigente) del PNG/JPG del comprobante
+   * @param montoEsperado Monto que debe haberse pagado (MXN)
    */
   async validarComprobante(imageUrl: string, montoEsperado: number): Promise<ValidarResult> {
-    const apiKey      = process.env.EXPO_PUBLIC_APICEP_API_KEY;
-    const clabe       = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? '';
+    const apiKey  = process.env.EXPO_PUBLIC_APICEP_API_KEY;
+    const clabe   = process.env.EXPO_PUBLIC_CLABE_DESTINO   ?? '';
+    const banco   = process.env.EXPO_PUBLIC_BANCO_DESTINO   ?? 'BBVA MEXICO';
+    const titular = process.env.EXPO_PUBLIC_TITULAR_DESTINO ?? 'Rolando Martinez';
 
     if (!apiKey) return { valid: false, errorMsg: 'EXPO_PUBLIC_APICEP_API_KEY no configurada' };
     if (!clabe)  return { valid: false, errorMsg: 'EXPO_PUBLIC_CLABE_DESTINO no configurada' };
 
     try {
       const res = await fetch(`${APICEP_BASE}/validate-transfer`, {
-        method:  'POST',
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type':  'application/json',
         },
         body: JSON.stringify({
           imageUrl,
-          beneficiary: { clabe },
+          beneficiary: {
+            clabe,
+            bank: banco,      // ⚠️ REQUERIDO según docs de apiCEP
+            name: titular,    // recomendado para mayor precisión
+          },
         }),
       });
 
       const json = await res.json();
 
+      // Error HTTP (400, 401, 429, 500…)
       if (!res.ok) {
-        return { valid: false, errorMsg: json.message ?? `apiCEP error ${res.status}` };
+        const msg = json.message ?? json.error ?? `apiCEP HTTP ${res.status}`;
+        return { valid: false, errorMsg: msg };
       }
 
-      // Respuesta exitosa de apiCEP
-      const extracted: CepExtracted = json.extracted;
-      const status: string          = json.status;      // 'valid' | 'invalid' | ...
-      const confidence: number      = json.confidence ?? 1;
+      const status:     string = json.status;     // 'valid' | 'invalid' | 'error' | 'pending'
+      const confidence: number = json.confidence ?? 0;
+      const extracted          = json.extracted  ?? {};
+      const validation         = json.validation ?? {};
+      const downloads          = json.downloads  ?? {};
 
-      if (status !== 'valid') {
+      // OCR no pudo leer campos obligatorios
+      if (status === 'error') {
         return {
-          valid:      false,
-          extracted,
+          valid:         false,
           confidence,
-          errorMsg:   json.message ?? 'Comprobante no válido según apiCEP',
+          missingFields: json.missingFields ?? [],
+          errorMsg:      json.error ?? 'El OCR no pudo leer el comprobante. Intenta con una imagen más clara.',
         };
       }
 
-      if (extracted.amount < montoEsperado) {
+      // Transferencia no encontrada en Banxico
+      if (status !== 'valid' || !validation.banxicoConfirmed) {
         return {
-          valid:      false,
-          extracted,
+          valid:     false,
           confidence,
-          errorMsg:   `Monto insuficiente. Esperado: $${montoEsperado} MXN, recibido: $${extracted.amount} MXN`,
+          errorMsg:  `Transferencia no confirmada por Banxico (status: ${status})`,
         };
       }
 
-      // Construimos CepResult compatible con el resto del código
+      // Verificar monto
+      const montoRecibido: number = extracted.amount ?? validation.cepDetails?.amount ?? 0;
+      if (montoRecibido < montoEsperado) {
+        return {
+          valid:     false,
+          confidence,
+          errorMsg:  `Monto insuficiente. Esperado: $${montoEsperado} MXN, recibido: $${montoRecibido} MXN`,
+        };
+      }
+
+      // ✅ Válido — construir CepResult
+      const cepD = validation.cepDetails ?? {};
       const cep: CepResult = {
-        claveRastreo:       extracted.trackingKey,
-        monto:              extracted.amount,
-        emisor:             extracted.senderBank   ?? '',
-        receptor:           extracted.receiverBank ?? '',
-        fechaOperacion:     extracted.date,
-        estado:             'LIQUIDADA',
+        claveRastreo:       extracted.trackingKey   ?? cepD.trackingKey   ?? '',
+        monto:              montoRecibido,
+        emisor:             extracted.senderBank    ?? cepD.senderBank    ?? '',
+        receptor:           extracted.receiverBank  ?? cepD.receiverBank  ?? '',
+        fechaOperacion:     extracted.date          ?? cepD.operationDate ?? '',
+        estado:             validation.cepStatus    ?? 'LIQUIDADA',
         cuentaBeneficiario: clabe,
+        cepDetails:         cepD,
+        cepXml:             downloads.cepXml,
+        cepPdf:             downloads.cepPdf,
       };
 
-      return { valid: true, cep, extracted, confidence };
+      return { valid: true, cep, confidence };
 
     } catch (e: any) {
-      return { valid: false, errorMsg: e.message ?? 'Error al consultar apiCEP' };
+      return { valid: false, errorMsg: e.message ?? 'Error al conectar con apiCEP' };
     }
-  },
-
-  /** @deprecated Usar validarComprobante(imageUrl, monto) en su lugar */
-  async validarCEP(claveRastreo: string, montoEsperado: number): Promise<ValidarResult> {
-    return { valid: false, errorMsg: 'Método obsoleto. Usa validarComprobante() con la URL del comprobante.' };
-  },
-
-  /** @deprecated Alias obsoleto */
-  async validarPago(claveRastreo: string, montoEsperado: number): Promise<ValidarResult> {
-    return ApiCepService.validarCEP(claveRastreo, montoEsperado);
   },
 };

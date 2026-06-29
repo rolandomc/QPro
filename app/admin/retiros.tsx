@@ -40,6 +40,15 @@ export default function AdminRetirosScreen() {
   const [notaRechazo, setNotaRechazo] = useState('');
   const [retiroActivo, setRetiroActivo] = useState<any | null>(null);
 
+  // Navegación segura: evita que router.back() falle si no hay historial
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/admin');
+    }
+  };
+
   const loadRetiros = useCallback(async () => {
     try {
       let query = supabase
@@ -155,7 +164,7 @@ export default function AdminRetirosScreen() {
   return (
     <SafeAreaView style={s.container}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+        <TouchableOpacity onPress={handleBack} style={s.backBtn}>
           <Text style={s.backTxt}>← Volver</Text>
         </TouchableOpacity>
         <View style={s.headerCenter}>

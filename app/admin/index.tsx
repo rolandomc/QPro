@@ -49,6 +49,15 @@ export default function AdminDashboardScreen() {
   const [loadingRetiros,       setLoadingRetiros]       = useState(false);
   const [accionandoRetiro,     setAccionandoRetiro]     = useState<string | null>(null);
 
+  // Navegación segura: evita que router.back() falle si no hay historial
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
+  };
+
   const loadQuinielas = useCallback(async () => {
     try {
       const [data, fecha, { count }, { data: speiData }] = await Promise.all([
@@ -320,7 +329,7 @@ export default function AdminDashboardScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <Text style={styles.backText}>← Volver</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Panel Admin</Text>
@@ -728,43 +737,4 @@ const styles = StyleSheet.create({
   configBtn:            { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   configBtnSave:        { backgroundColor: '#F39C12' },
   configBtnSaveText:    { color: '#000', fontWeight: 'bold', fontSize: 14 },
-  configBtnClear:       { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
-  configBtnClearText:   { color: '#A0A0A0', fontSize: 14 },
-
-  createBtn:            { backgroundColor: '#1C1F26', padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 12, marginBottom: 24, borderWidth: 1.5 },
-  neonBorderPurple:     { borderColor: '#9B59B6' },
-  createBtnText:        { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
-  sectionTitle:         { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 15 },
-  emptyBox:             { alignItems: 'center', padding: 30 },
-  emptyText:            { color: '#A0A0A0', fontSize: 14, textAlign: 'center' },
-
-  card:                 { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: '#2A2D35' },
-  cardHeader:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  cardTitle:            { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1, marginRight: 8 },
-  cardArrow:            { color: '#9B59B6', fontSize: 22, marginLeft: 4 },
-  estadoBadge:          { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  estadoBadgeText:      { fontSize: 10, fontWeight: 'bold' },
-  cardInfo:             { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#1C1F26', padding: 10, borderRadius: 8, marginBottom: 8 },
-  infoText:             { color: '#A0A0A0', fontSize: 12 },
-  cardActions:          { flexDirection: 'row', gap: 8, marginTop: 4 },
-  actionBtn:            { flex: 1, backgroundColor: '#1C1F26', paddingVertical: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
-  actionText:           { color: '#FFF', fontSize: 12, fontWeight: '600' },
-  dangerBtn:            { borderColor: '#E91E63', backgroundColor: 'rgba(233,30,99,0.1)' },
-  dangerText:           { color: '#E91E63', fontSize: 12, fontWeight: 'bold' },
-  disabledBtn:          { opacity: 0.35 },
-
-  modalOverlay:         { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalBox:             { backgroundColor: '#15181F', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '75%' },
-  modalHeader:          { marginBottom: 15 },
-  modalTitle:           { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  modalSubtitle:        { color: '#A0A0A0', fontSize: 13, marginTop: 2 },
-  modalClose:           { position: 'absolute', right: 0, top: 0, padding: 5 },
-  modalCloseText:       { color: '#FFF', fontSize: 20 },
-  userRow:              { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35', gap: 8 },
-  userRank:             { color: '#F39C12', fontWeight: 'bold', width: 28, fontSize: 14 },
-  userEmail:            { color: '#FFF', fontSize: 14, fontWeight: '600' },
-  userMeta:             { color: '#A0A0A0', fontSize: 12, marginTop: 2 },
-  partEstadoBadge:      { borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  partEstadoBadgeText:  { fontSize: 9, fontWeight: 'bold' },
-  userMonto:            { color: '#2ECC71', fontWeight: 'bold', fontSize: 13, minWidth: 40, textAlign: 'right' },
-});
+  configBtnClear:       { backgroundColor: '#1C1F26', borderWidth: 1, borde

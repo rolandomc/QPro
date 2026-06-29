@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ActivityIndicator,
   TouchableOpacity, FlatList, Alert, Linking, Platform,
@@ -45,14 +45,13 @@ export default function QuinielaDetailsScreen() {
   const [confirmState,    setConfirmState]    = useState<ConfirmState>(
     isPendingPago.current ? 'success' : 'idle'
   );
-  const [errorMsg,      setErrorMsg]      = useState('');
-  const [faltanMsg,     setFaltanMsg]     = useState('');
-  const [retryingPago,  setRetryingPago]  = useState(false);
+  const [errorMsg,     setErrorMsg]     = useState('');
+  const [faltanMsg,    setFaltanMsg]    = useState('');
+  const [retryingPago, setRetryingPago] = useState(false);
 
   const openingRef = useRef(false);
   const picksOriginalesRef = useRef<Record<string, SeleccionConGoles>>({});
 
-  /** Carga picks guardados y los transforma a SeleccionConGoles */
   const cargarPicksActuales = useCallback(async (partId: string) => {
     const { data: sels } = await supabase
       .from('selecciones')
@@ -62,9 +61,9 @@ export default function QuinielaDetailsScreen() {
     const map: Record<string, SeleccionConGoles> = {};
     (sels || []).forEach((s: any) => {
       map[s.partido_id] = {
-        prediccion:    s.prediccion,
-        golesLocal:    s.goles_local_predichos    ?? 0,
-        golesVisitante: s.goles_visitante_predichos ?? 1,
+        prediccion:     s.prediccion,
+        golesLocal:     s.goles_local_predichos    ?? 0,
+        golesVisitante: s.goles_visitante_predichos ?? 0,
       };
     });
     picksOriginalesRef.current = map;
@@ -125,7 +124,7 @@ export default function QuinielaDetailsScreen() {
     setSelecciones(prev => ({ ...prev, [partidoId]: seleccion }));
   };
 
-  const handleCancelarEdicion = useCallback(async () => {
+  const handleCancelarEdicion = useCallback(() => {
     setModoEdicion(false);
     setFaltanMsg('');
     if (participacionId) setSelecciones({ ...picksOriginalesRef.current });
@@ -135,10 +134,8 @@ export default function QuinielaDetailsScreen() {
     if (!participacionId) return;
     setSaving(true);
     try {
-      // Recalcular total goles al editar
       const totalGolesPredichos = Object.values(selecciones).reduce(
-        (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0),
-        0
+        (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0), 0
       );
 
       const rows = Object.entries(selecciones).map(([partido_id, sel]) => ({
@@ -190,13 +187,10 @@ export default function QuinielaDetailsScreen() {
     if (openingRef.current) return;
     openingRef.current = true;
     setSaving(true);
-
     try {
       const participacion = await QuinielasService.guardarSelecciones(id, selecciones);
       const partId = participacion.id ?? participacionId;
-
       const { init_point } = await MercadoPagoService.crearPreferencia(partId!, id as string);
-
       if (Platform.OS === 'web') {
         try { localStorage.setItem(PENDING_KEY, id as string); } catch (_) {}
         window.location.href = init_point;
@@ -217,13 +211,8 @@ export default function QuinielaDetailsScreen() {
     if (!participacionId || openingRef.current) return;
     openingRef.current = true;
     setRetryingPago(true);
-
     try {
-      const { init_point } = await MercadoPagoService.crearPreferencia(
-        participacionId,
-        id as string
-      );
-
+      const { init_point } = await MercadoPagoService.crearPreferencia(participacionId, id as string);
       if (Platform.OS === 'web') {
         try { localStorage.setItem(PENDING_KEY, id as string); } catch (_) {}
         window.location.href = init_point;
@@ -242,15 +231,16 @@ export default function QuinielaDetailsScreen() {
 
   const totalSeleccionados = Object.keys(selecciones).length;
   const isComplete = totalSeleccionados === partidos.length && partidos.length > 0;
-  const puedeEditar = yaParticipo && quiniela?.estado === 'abierta' && !pagoPendiente;
 
-  // Suma total de goles predichos para mostrar en el resumen
+  // ✅ El botón editar se muestra siempre que el usuario ya participó
+  // y la quiniela sigue abierta, sin importar el estado del pago
+  const puedeEditar = yaParticipo && quiniela?.estado === 'abierta';
+
   const golesPredichosTotales = Object.values(selecciones).reduce(
-    (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0),
-    0
+    (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0), 0
   );
 
-  // --- Pantallas de estado ---
+  // ─── Pantallas de estado ───────────────────────────────────────────
 
   if (loading) {
     return (
@@ -325,7 +315,6 @@ export default function QuinielaDetailsScreen() {
               : 'Se procesará tu pago y quedarás inscrito.'}
           </Text>
 
-          {/* Resumen de goles para desempate */}
           <View style={styles.desempateSummary}>
             <Text style={styles.desempateLabel}>🎯 Tus goles totales predichos</Text>
             <Text style={styles.desempateValue}>{golesPredichosTotales}</Text>
@@ -355,8 +344,10 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
+  // ─── Pantalla principal ────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -370,7 +361,14 @@ export default function QuinielaDetailsScreen() {
             {quiniela?.estado === 'abierta' ? '🟢 Abierta' : '🔴 Cerrada'}
           </Text>
         </View>
-        <View style={{ width: 36 }} />
+        {/* Botón editar en el header cuando ya participó */}
+        {puedeEditar && !modoEdicion ? (
+          <TouchableOpacity style={styles.editHeaderBtn} onPress={() => setModoEdicion(true)}>
+            <Text style={styles.editHeaderBtnTxt}>✏️ Editar</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 64 }} />
+        )}
       </View>
 
       {/* Barra de progreso */}
@@ -379,10 +377,15 @@ export default function QuinielaDetailsScreen() {
           <ProgressBar current={totalSeleccionados} total={partidos.length} />
           <Text style={styles.progressText}>
             {totalSeleccionados}/{partidos.length} picks
-            {isComplete && !modoEdicion ? '  —  ' : ''}
-            {isComplete && !modoEdicion
-              ? <Text style={styles.golesHint}>🎯 {golesPredichosTotales} goles predichos</Text>
-              : null}
+          </Text>
+        </View>
+      )}
+
+      {/* Banner: ya participó (no en modo edición) */}
+      {yaParticipo && !modoEdicion && (
+        <View style={styles.participandoBanner}>
+          <Text style={styles.participandoText}>
+            ✅ Ya tienes picks guardados  •  🎯 {golesPredichosTotales} goles predichos
           </Text>
         </View>
       )}
@@ -405,11 +408,11 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Hint de desempate (banner info) */}
+      {/* Hint de desempate */}
       {(!yaParticipo || modoEdicion) && (
         <View style={styles.desempateInfoBanner}>
           <Text style={styles.desempateInfoText}>
-            ⚔️ <Text style={{ fontWeight: '600' }}>Desempate por goles:</Text> ingresa el marcador exacto que predices para cada partido. En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
+            ⚔️ <Text style={{ fontWeight: '600' }}>Desempate por goles:</Text> ingresa el marcador exacto que predices. En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
           </Text>
         </View>
       )}
@@ -432,7 +435,7 @@ export default function QuinielaDetailsScreen() {
           <View style={styles.footer}>
             {faltanMsg ? <Text style={styles.faltanMsg}>{faltanMsg}</Text> : null}
 
-            {/* Boton principal: participar / editar / pago pendiente */}
+            {/* Primera vez: confirmar y pagar */}
             {!yaParticipo && (
               <TouchableOpacity
                 style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
@@ -443,28 +446,32 @@ export default function QuinielaDetailsScreen() {
               </TouchableOpacity>
             )}
 
-            {yaParticipo && !pagoPendiente && !modoEdicion && puedeEditar && (
+            {/* Modo edición: guardar / cancelar */}
+            {modoEdicion && (
+              <View style={styles.editActions}>
+                <TouchableOpacity
+                  style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
+                  onPress={handleConfirmarEdicionClick}
+                  disabled={!isComplete || saving}
+                >
+                  {saving
+                    ? <ActivityIndicator color="#000" />
+                    : <Text style={styles.confirmBtnTxt}>Guardar cambios</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelBtn} onPress={handleCancelarEdicion} disabled={saving}>
+                  <Text style={styles.cancelBtnTxt}>Cancelar edición</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Ya participó, no editando: botón editar también en el footer */}
+            {yaParticipo && !modoEdicion && puedeEditar && (
               <TouchableOpacity
                 style={styles.editBtn}
                 onPress={() => setModoEdicion(true)}
               >
                 <Text style={styles.editBtnTxt}>✏️ Editar mis picks</Text>
               </TouchableOpacity>
-            )}
-
-            {modoEdicion && (
-              <View style={styles.editActions}>
-                <TouchableOpacity
-                  style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
-                  onPress={handleConfirmarEdicionClick}
-                  disabled={!isComplete}
-                >
-                  <Text style={styles.confirmBtnTxt}>Guardar cambios</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.cancelBtn} onPress={handleCancelarEdicion}>
-                  <Text style={styles.cancelBtnTxt}>Cancelar</Text>
-                </TouchableOpacity>
-              </View>
             )}
           </View>
         }
@@ -474,9 +481,9 @@ export default function QuinielaDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:  { flex: 1, backgroundColor: '#0A0C12' },
-  centered:   { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  loadingText:{ color: '#A0A0A0', marginTop: 12 },
+  container:   { flex: 1, backgroundColor: '#0A0C12' },
+  centered:    { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  loadingText: { color: '#A0A0A0', marginTop: 12 },
 
   // Header
   header: {
@@ -484,30 +491,41 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: '#1E2128',
   },
-  backBtn:      { width: 36, height: 36, justifyContent: 'center' },
-  backIcon:     { color: '#2ECC71', fontSize: 28, lineHeight: 30 },
-  headerCenter: { flex: 1, alignItems: 'center' },
-  headerTitle:  { color: '#E0E0E0', fontSize: 16, fontWeight: 'bold' },
-  headerSub:    { color: '#606060', fontSize: 11, marginTop: 2 },
+  backBtn:        { width: 36, height: 36, justifyContent: 'center' },
+  backIcon:       { color: '#2ECC71', fontSize: 28, lineHeight: 30 },
+  headerCenter:   { flex: 1, alignItems: 'center' },
+  headerTitle:    { color: '#E0E0E0', fontSize: 16, fontWeight: 'bold' },
+  headerSub:      { color: '#606060', fontSize: 11, marginTop: 2 },
+  editHeaderBtn: {
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderWidth: 1, borderColor: '#2ECC71',
+    borderRadius: 8,
+  },
+  editHeaderBtnTxt: { color: '#2ECC71', fontSize: 12, fontWeight: '600' },
 
   // Progress
-  progressWrap:  { paddingHorizontal: 16, paddingTop: 12 },
-  progressText:  { color: '#606060', fontSize: 12, marginTop: 6, marginBottom: 4 },
-  golesHint:     { color: '#2ECC71', fontWeight: '600' },
+  progressWrap: { paddingHorizontal: 16, paddingTop: 12 },
+  progressText: { color: '#606060', fontSize: 12, marginTop: 6, marginBottom: 4 },
 
-  // Pending banner
+  // Banners
+  participandoBanner: {
+    marginHorizontal: 16, marginTop: 10,
+    backgroundColor: 'rgba(46,204,113,0.08)',
+    borderWidth: 1, borderColor: 'rgba(46,204,113,0.25)',
+    borderRadius: 10, padding: 10, alignItems: 'center',
+  },
+  participandoText: { color: '#2ECC71', fontSize: 12, fontWeight: '500' },
+
   pendingBanner: {
     margin: 16, marginBottom: 0,
     backgroundColor: 'rgba(243,156,18,0.1)',
     borderWidth: 1, borderColor: '#F39C12',
-    borderRadius: 12, padding: 14,
-    gap: 10,
+    borderRadius: 12, padding: 14, gap: 10,
   },
   pendingBannerText:   { color: '#F39C12', fontSize: 13 },
   pendingBannerBtn:    { backgroundColor: '#F39C12', borderRadius: 8, padding: 10, alignItems: 'center' },
   pendingBannerBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 13 },
 
-  // Desempate info banner
   desempateInfoBanner: {
     marginHorizontal: 16, marginTop: 12, marginBottom: 4,
     backgroundColor: 'rgba(46,204,113,0.06)',
@@ -516,7 +534,7 @@ const styles = StyleSheet.create({
   },
   desempateInfoText: { color: '#6ABD8A', fontSize: 12, lineHeight: 17 },
 
-  // Desempate summary (en confirmación)
+  // Desempate summary
   desempateSummary: {
     width: '100%', backgroundColor: '#15181F',
     borderRadius: 14, padding: 18, marginVertical: 20, alignItems: 'center',
@@ -530,8 +548,8 @@ const styles = StyleSheet.create({
   list: { padding: 16, paddingBottom: 24 },
 
   // Footer
-  footer:   { marginTop: 8, gap: 10 },
-  faltanMsg:{ color: '#F39C12', textAlign: 'center', fontSize: 13, marginBottom: 4 },
+  footer:    { marginTop: 8, gap: 10 },
+  faltanMsg: { color: '#F39C12', textAlign: 'center', fontSize: 13, marginBottom: 4 },
 
   confirmBtn: {
     backgroundColor: '#2ECC71', borderRadius: 14,
@@ -541,17 +559,17 @@ const styles = StyleSheet.create({
   btnDisabled:   { opacity: 0.35 },
 
   editBtn: {
-    borderWidth: 1, borderColor: '#2ECC71', borderRadius: 14,
+    borderWidth: 1.5, borderColor: '#2ECC71', borderRadius: 14,
     paddingVertical: 14, alignItems: 'center',
+    backgroundColor: 'rgba(46,204,113,0.06)',
   },
-  editBtnTxt: { color: '#2ECC71', fontWeight: '600', fontSize: 14 },
+  editBtnTxt: { color: '#2ECC71', fontWeight: '700', fontSize: 15 },
 
   editActions: { gap: 10 },
 
   cancelBtn:    { paddingVertical: 14, alignItems: 'center' },
   cancelBtnTxt: { color: '#606060', fontSize: 14 },
 
-  // Success
   successTitle:  { color: '#E0E0E0', fontSize: 22, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
   successSub:    { color: '#808080', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
   successBtn:    { backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 40, marginBottom: 12 },

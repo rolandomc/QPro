@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -13,16 +13,17 @@ export default function ResetPasswordScreen() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
-  const [sessionReady, setSessionReady] = useState(false);
+
+  // Ref para saber si completó el flujo antes de desmontarse
+  const completedRef = useRef(false);
 
   useEffect(() => {
-    // Supabase maneja la sesión automáticamente al llegar desde el link del correo
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setSessionReady(true);
+    return () => {
+      // Si sale sin completar el cambio de contraseña, cerrar la sesión de recovery
+      if (!completedRef.current) {
+        supabase.auth.signOut();
       }
-    });
-    return () => subscription.unsubscribe();
+    };
   }, []);
 
   const handleReset = async () => {
@@ -42,6 +43,7 @@ export default function ResetPasswordScreen() {
     try {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
+      completedRef.current = true; // Marcar como completado ANTES de setDone
       setDone(true);
     } catch (error: any) {
       Alert.alert('Error', error.message || 'No se pudo actualizar la contraseña.');

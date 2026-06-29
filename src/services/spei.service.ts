@@ -1,14 +1,16 @@
 /**
- * SPEI Service — flujo con comprobante
+ * SPEI Service — flujo con comprobante + OCR automático
  *
  * Flujo completo:
  *  1. registrarIntencionSPEI  — guarda picks y marca participación 'spei_pendiente'
  *  2. subirComprobante        — abre picker → sube a Supabase Storage → guarda URL
- *  3. validarYConfirmar       — llama apiCEP con clave de rastreo; si válido → 'pagado'
+ *  3. validarYConfirmar       — envía URL a apiCEP; el OCR extrae la clave de rastreo
+ *                               y valida contra Banxico automáticamente
  *  4. notificarAdmin          — inserta notificación para revisión manual si apiCEP falla
  *
- * ⚠️  Variable de entorno requerida:
- *      EXPO_PUBLIC_APICEP_API_KEY=apicep_665deccc1cb8f1a87b05e7f58850c31150cd4ce778a04a7f08af2bae8e9799f3
+ * ⚠️  Variables de entorno requeridas:
+ *      EXPO_PUBLIC_APICEP_API_KEY  = apicep_665deccc1cb8f1a87b05e7f58850c31150cd4ce778a04a7f08af2bae8e9799f3
+ *      EXPO_PUBLIC_CLABE_DESTINO   = tu CLABE de 18 dígitos
  */
 import * as ImagePicker from 'expo-image-picker';
 import { Platform } from 'react-native';
@@ -16,29 +18,12 @@ import { decode } from 'base64-arraybuffer';
 import { supabase } from '../config/supabase';
 import { ApiCepService } from './apicep.service';
 
-/**
- * Prefijos de claves de rastreo que NO pertenecen al sistema CEP de Banxico.
- * Estas claves son generadas por wallets/fintechs y no pueden consultarse en apiCEP.
- * El pago debe revisarse manualmente.
- */
-const PREFIJOS_NO_CEP = ['REVO', 'CLBE', 'SPIN', 'PREX', 'NVIO', 'MPIN', 'CUEN'];
-
-/**
- * Devuelve true si la clave de rastreo pertenece al sistema CEP de Banxico
- * y puede consultarse con apiCEP.
- */
-function esClaveCEPConsultable(clave: string): boolean {
-  if (!clave || clave.trim().length === 0) return false;
-  const upper = clave.trim().toUpperCase();
-  return !PREFIJOS_NO_CEP.some((prefix) => upper.startsWith(prefix));
-}
-
 /** Abre un <input type="file"> nativo en web y devuelve el archivo seleccionado */
 function pickFileWeb(): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*,application/xml,text/xml';
+    input.accept = 'image/*,application/pdf';
     input.onchange = () => resolve(input.files?.[0] ?? null);
     input.oncancel = () => resolve(null);
     input.click();
@@ -58,7 +43,7 @@ export const SpeiService = {
   /**
    * Abre el picker de imágenes/documentos, sube a Supabase Storage
    * y guarda la URL en la participación.
-   * Devuelve la URL firmada o null si el usuario canceló.
+   * Devuelve la URL pública firmada o null si el usuario canceló.
    */
   async subirComprobante(participacionId: string): Promise<string | null> {
     let path: string;
@@ -70,7 +55,7 @@ export const SpeiService = {
       if (!file) return null;
 
       const ext  = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
-      mime       = file.type || (ext === 'xml' ? 'application/xml' : 'image/jpeg');
+      mime       = file.type || (ext === 'pdf' ? 'application/pdf' : 'image/jpeg');
       path       = `spei/${participacionId}_${Date.now()}.${ext}`;
       fileData   = await file.arrayBuffer();
     } else {
@@ -81,7 +66,7 @@ export const SpeiService = {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality:    0.85,
+        quality:    0.9,
         base64:     true,
         allowsEditing: false,
       });
@@ -101,6 +86,7 @@ export const SpeiService = {
 
     if (uploadError) throw new Error(`Error al subir comprobante: ${uploadError.message}`);
 
+    // URL firmada con 7 días de vigencia — suficiente para que apiCEP la descargue
     const { data: signedData } = await supabase.storage
       .from('comprobantes')
       .createSignedUrl(path, 60 * 60 * 24 * 7);
@@ -119,38 +105,18 @@ export const SpeiService = {
   },
 
   /**
-   * Valida el pago con apiCEP.
-   * - Si la clave NO es consultable en CEP (ej. Revolut REVO...) → revisión manual
-   * - Si válido   → estado = 'pagado'  + graba datos CEP
-   * - Si inválido → estado sigue 'spei_pendiente', guarda último error e inserta notif admin
+   * Valida el comprobante enviando su URL a apiCEP.
+   * apiCEP hace OCR sobre la imagen, extrae la clave de rastreo y valida contra Banxico.
+   *
+   * - Si válido   → estado = 'pagado' + graba clave de rastreo y datos CEP
+   * - Si inválido → estado sigue 'spei_pendiente', guarda último error + notifica admin
    */
   async validarYConfirmar(
     participacionId: string,
-    claveRastreo:    string,
+    comprobanteUrl:  string,   // URL de la imagen en Storage
     monto:           number,
   ) {
-    // ── Detección de clave no-CEP (Revolut, otros fintechs) ──────────────────
-    if (!esClaveCEPConsultable(claveRastreo)) {
-      const prefijo = claveRastreo.trim().substring(0, 4).toUpperCase();
-      const msg = `Clave de rastreo con prefijo '${prefijo}' no consultable en CEP/Banxico. Revisión manual requerida.`;
-
-      await supabase
-        .from('participaciones')
-        .update({
-          estado:               'spei_pendiente',
-          clave_rastreo:        claveRastreo,
-          comprobante_validado: false,
-          ultimo_error_spei:    msg,
-        })
-        .eq('id', participacionId);
-
-      await SpeiService.notificarAdmin(participacionId, msg);
-
-      return { valid: false, errorMsg: msg, requiereRevisionManual: true };
-    }
-
-    // ── Validación normal con apiCEP ──────────────────────────────────────────
-    const result = await ApiCepService.validarCEP(claveRastreo, monto);
+    const result = await ApiCepService.validarComprobante(comprobanteUrl, monto);
 
     if (result.valid && result.cep) {
       const { error } = await supabase
@@ -158,7 +124,7 @@ export const SpeiService = {
         .update({
           estado:               'pagado',
           metodo_pago:          'spei',
-          clave_rastreo:        claveRastreo,
+          clave_rastreo:        result.cep.claveRastreo,
           monto_pagado:         result.cep.monto,
           fecha_pago:           result.cep.fechaOperacion,
           comprobante_validado: true,
@@ -170,30 +136,35 @@ export const SpeiService = {
       await supabase
         .from('participaciones')
         .update({
-          ultimo_error_spei:    result.errorMsg,
+          ultimo_error_spei:    result.errorMsg ?? 'Validación fallida',
           comprobante_validado: false,
         })
         .eq('id', participacionId);
 
-      await SpeiService.notificarAdmin(participacionId, result.errorMsg ?? 'Validación fallida');
+      await SpeiService.notificarAdmin(
+        participacionId,
+        result.errorMsg ?? 'Validación fallida',
+      );
     }
 
     return result;
   },
 
   /**
-   * Cuando el usuario sube comprobante sin clave de rastreo,
+   * Cuando el OCR de apiCEP no puede procesar el comprobante,
    * deja la participación en 'spei_pendiente' para revisión manual del admin.
    */
-  async marcarPendienteRevision(participacionId: string): Promise<void> {
+  async marcarPendienteRevision(participacionId: string, motivo?: string): Promise<void> {
+    const msg = motivo ?? 'Comprobante no procesable por OCR — revisión manual requerida';
     await supabase
       .from('participaciones')
-      .update({ estado: 'spei_pendiente', comprobante_validado: false })
+      .update({
+        estado:               'spei_pendiente',
+        comprobante_validado: false,
+        ultimo_error_spei:    msg,
+      })
       .eq('id', participacionId);
-    await SpeiService.notificarAdmin(
-      participacionId,
-      'Comprobante subido sin clave de rastreo — revisión manual requerida',
-    );
+    await SpeiService.notificarAdmin(participacionId, msg);
   },
 
   /** Inserta una notificación en la tabla admin_notificaciones */
@@ -205,6 +176,5 @@ export const SpeiService = {
       leida:            false,
       created_at:       new Date().toISOString(),
     });
-    // Silencioso — no lanzamos error si la tabla no existe aún
   },
 };

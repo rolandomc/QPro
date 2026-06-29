@@ -16,6 +16,23 @@ import { decode } from 'base64-arraybuffer';
 import { supabase } from '../config/supabase';
 import { ApiCepService } from './apicep.service';
 
+/**
+ * Prefijos de claves de rastreo que NO pertenecen al sistema CEP de Banxico.
+ * Estas claves son generadas por wallets/fintechs y no pueden consultarse en apiCEP.
+ * El pago debe revisarse manualmente.
+ */
+const PREFIJOS_NO_CEP = ['REVO', 'CLBE', 'SPIN', 'PREX', 'NVIO', 'MPIN', 'CUEN'];
+
+/**
+ * Devuelve true si la clave de rastreo pertenece al sistema CEP de Banxico
+ * y puede consultarse con apiCEP.
+ */
+function esClaveCEPConsultable(clave: string): boolean {
+  if (!clave || clave.trim().length === 0) return false;
+  const upper = clave.trim().toUpperCase();
+  return !PREFIJOS_NO_CEP.some((prefix) => upper.startsWith(prefix));
+}
+
 /** Abre un <input type="file"> nativo en web y devuelve el archivo seleccionado */
 function pickFileWeb(): Promise<File | null> {
   return new Promise((resolve) => {
@@ -103,6 +120,7 @@ export const SpeiService = {
 
   /**
    * Valida el pago con apiCEP.
+   * - Si la clave NO es consultable en CEP (ej. Revolut REVO...) → revisión manual
    * - Si válido   → estado = 'pagado'  + graba datos CEP
    * - Si inválido → estado sigue 'spei_pendiente', guarda último error e inserta notif admin
    */
@@ -111,6 +129,27 @@ export const SpeiService = {
     claveRastreo:    string,
     monto:           number,
   ) {
+    // ── Detección de clave no-CEP (Revolut, otros fintechs) ──────────────────
+    if (!esClaveCEPConsultable(claveRastreo)) {
+      const prefijo = claveRastreo.trim().substring(0, 4).toUpperCase();
+      const msg = `Clave de rastreo con prefijo '${prefijo}' no consultable en CEP/Banxico. Revisión manual requerida.`;
+
+      await supabase
+        .from('participaciones')
+        .update({
+          estado:               'spei_pendiente',
+          clave_rastreo:        claveRastreo,
+          comprobante_validado: false,
+          ultimo_error_spei:    msg,
+        })
+        .eq('id', participacionId);
+
+      await SpeiService.notificarAdmin(participacionId, msg);
+
+      return { valid: false, errorMsg: msg, requiereRevisionManual: true };
+    }
+
+    // ── Validación normal con apiCEP ──────────────────────────────────────────
     const result = await ApiCepService.validarCEP(claveRastreo, monto);
 
     if (result.valid && result.cep) {

@@ -22,6 +22,16 @@ function formatFecha(iso: string) {
   });
 }
 
+type FiltroEstado = 'todas' | 'abierta' | 'cerrada' | 'finalizada' | 'nula';
+
+const FILTROS: { key: FiltroEstado; label: string; color: string }[] = [
+  { key: 'todas',     label: 'Todas',     color: '#9B59B6' },
+  { key: 'abierta',  label: 'Abiertas',  color: '#2ECC71' },
+  { key: 'cerrada',  label: 'Cerradas',  color: '#3498DB' },
+  { key: 'finalizada', label: 'Canceladas', color: '#E74C3C' },
+  { key: 'nula',     label: 'Nulas',     color: '#A0A0A0' },
+];
+
 export default function AdminDashboardScreen() {
   const router = useRouter();
   const [quinielas,            setQuinielas]            = useState<any[]>([]);
@@ -37,6 +47,9 @@ export default function AdminDashboardScreen() {
   const [configExpanded,       setConfigExpanded]       = useState(false);
   const [pickerVisible,        setPickerVisible]        = useState(false);
   const [retirosPendientes,    setRetirosPendientes]    = useState(0);
+
+  // ── Filtro de quinielas ───────────────────────────────────────────
+  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('todas');
 
   // ── Comprobantes SPEI pendientes ──────────────────────────────────
   const [speiPendientes,       setSpeiPendientes]       = useState<any[]>([]);
@@ -103,6 +116,13 @@ export default function AdminDashboardScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
+
+  // ── Quinielas filtradas ───────────────────────────────────────────
+  const quinielasFiltradas = filtroEstado === 'todas'
+    ? quinielas
+    : filtroEstado === 'nula'
+      ? quinielas.filter(q => !q.estado || q.estado === 'nula')
+      : quinielas.filter(q => q.estado === filtroEstado);
 
   // ── Cargar retiros al expandir ────────────────────────────────────
   const handleToggleRetiros = async () => {
@@ -549,19 +569,64 @@ export default function AdminDashboardScreen() {
           <Text style={styles.createBtnText}>+ Diseñar Nueva Quiniela</Text>
         </TouchableOpacity>
 
-        <Text style={styles.sectionTitle}>Quinielas</Text>
-        {quinielas.length === 0 && (
+        {/* ── Sección Quinielas con filtros ── */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Quinielas</Text>
+          <Text style={styles.sectionCount}>
+            {quinielasFiltradas.length}{filtroEstado !== 'todas' ? ` / ${quinielas.length}` : ''}
+          </Text>
+        </View>
+
+        {/* Filtros */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filtrosContainer}
+        >
+          {FILTROS.map(f => {
+            const activo = filtroEstado === f.key;
+            const count = f.key === 'todas'
+              ? quinielas.length
+              : f.key === 'nula'
+                ? quinielas.filter(q => !q.estado || q.estado === 'nula').length
+                : quinielas.filter(q => q.estado === f.key).length;
+            return (
+              <TouchableOpacity
+                key={f.key}
+                style={[
+                  styles.filtroPill,
+                  activo && { backgroundColor: f.color, borderColor: f.color },
+                  !activo && { borderColor: f.color },
+                ]}
+                onPress={() => setFiltroEstado(f.key)}
+              >
+                <Text style={[styles.filtroPillText, { color: activo ? '#000' : f.color }]}>
+                  {f.label}
+                </Text>
+                <View style={[styles.filtroCount, activo ? { backgroundColor: 'rgba(0,0,0,0.2)' } : { backgroundColor: `${f.color}22` }]}>
+                  <Text style={[styles.filtroCountText, { color: activo ? '#000' : f.color }]}>{count}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {quinielasFiltradas.length === 0 && (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>No hay quinielas creadas aún.</Text>
+            <Text style={styles.emptyText}>
+              {quinielas.length === 0
+                ? 'No hay quinielas creadas aún.'
+                : `No hay quinielas con estado "${filtroEstado}".`}
+            </Text>
           </View>
         )}
 
-        {quinielas.map((q) => (
+        {quinielasFiltradas.map((q) => (
           <TouchableOpacity key={q.id} style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
               <View style={[styles.estadoBadge, { borderColor: getEstadoColor(q.estado) }]}>
-                <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado.toUpperCase()}</Text>
+                <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado?.toUpperCase() ?? 'NULA'}</Text>
               </View>
               <Text style={styles.cardArrow}>›</Text>
             </View>
@@ -744,7 +809,17 @@ const styles = StyleSheet.create({
   neonBorderPurple:     { borderColor: '#9B59B6', backgroundColor: 'rgba(155,89,182,0.1)' },
   createBtnText:        { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
 
-  sectionTitle:         { color: '#A0A0A0', fontSize: 13, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
+  // ── Sección quinielas header + filtros ──
+  sectionHeaderRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  sectionTitle:         { color: '#A0A0A0', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+  sectionCount:         { color: '#505050', fontSize: 12 },
+
+  filtrosContainer:     { paddingBottom: 12, gap: 8 },
+  filtroPill:           { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1.5, backgroundColor: 'transparent' },
+  filtroPillText:       { fontSize: 12, fontWeight: '700' },
+  filtroCount:          { borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5 },
+  filtroCountText:      { fontSize: 11, fontWeight: 'bold' },
+
   emptyBox:             { padding: 30, alignItems: 'center' },
   emptyText:            { color: '#505050', fontSize: 14 },
 

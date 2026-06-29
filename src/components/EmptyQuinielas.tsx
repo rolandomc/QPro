@@ -102,11 +102,11 @@ function QuinielaCard({ q }: { q: any }) {
                 <Text style={[card.aciLbl, { color: NEON[i], opacity: 0.6 }]}>aciertos</Text>
               </View>
 
-              {/* Premio ganador */}
+              {/* ✅ Premio ganador: ahora usa premio_ganado real de la BD */}
               {j.estado === 'ganador' && (
                 <View style={card.premioNeon}>
                   <Text style={card.premioNeonVal}>
-                    ${Number(j.monto_pagado > 0 ? j.monto_pagado : bolsa).toLocaleString()}
+                    ${Number(j.premio_ganado > 0 ? j.premio_ganado : bolsa).toLocaleString()}
                   </Text>
                   <Text style={card.premioNeonLbl}>💰 COBRADO</Text>
                 </View>

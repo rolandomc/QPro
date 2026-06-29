@@ -64,7 +64,8 @@ export const QuinielasService = {
     const resultado = await Promise.all((data || []).map(async (q: any) => {
       const { data: tops } = await supabase
         .from('participaciones')
-        .select('user_id, aciertos, estado, monto_pagado')
+        // ✅ Ahora también traemos premio_ganado
+        .select('user_id, aciertos, estado, monto_pagado, premio_ganado')
         .eq('quiniela_id', q.id)
         .order('aciertos', { ascending: false })
         .limit(3);
@@ -76,10 +77,12 @@ export const QuinielasService = {
           .eq('id', p.user_id)
           .single();
         return {
-          username: perfil?.username ?? 'Usuario',
-          aciertos: p.aciertos ?? 0,
-          estado: p.estado,
-          monto_pagado: p.monto_pagado ?? 0,
+          username:      perfil?.username ?? 'Usuario',
+          aciertos:      p.aciertos ?? 0,
+          estado:        p.estado,
+          monto_pagado:  p.monto_pagado ?? 0,
+          // ✅ Pasamos premio_ganado al componente
+          premio_ganado: p.premio_ganado ?? 0,
         };
       }));
 

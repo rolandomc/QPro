@@ -4,27 +4,25 @@
  * Flujo:
  *  1. Muestra los datos bancarios (CLABE, banco, titular)
  *  2. Usuario sube el comprobante (imagen)
- *  3. Ingresa opcionalmente la clave de rastreo
- *  4. Si tiene clave → valida con apiCEP automáticamente
- *     Si no tiene clave → queda en revisión manual (admin lo aprueba)
+ *  3. apiCEP hace OCR automático → extrae clave de rastreo → valida contra Banxico
+ *     Si OCR falla → queda en revisión manual (admin lo aprueba)
  */
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  TextInput, Alert, ActivityIndicator, Image, Clipboard, Platform,
+  Alert, ActivityIndicator, Image, Clipboard, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SpeiService } from '../../src/services/spei.service';
 
-// ─── Tipo de estado de la pantalla ──────────────────────────────────────────
 type PantallaEstado =
-  | 'instrucciones'   // paso 1: muestra datos bancarios
-  | 'comprobante'     // paso 2: sube imagen + clave rastreo
-  | 'validando'       // cargando: consultando apiCEP
-  | 'exito'           // pago validado automáticamente
-  | 'pendiente'       // sin clave rastreo, queda para revisión manual
-  | 'error';          // clave rastreo inválida
+  | 'instrucciones'
+  | 'comprobante'
+  | 'validando'
+  | 'exito'
+  | 'pendiente'
+  | 'error';
 
 export default function PagoSPEI() {
   const router    = useRouter();
@@ -34,15 +32,14 @@ export default function PagoSPEI() {
     quiniela_id: string;
   }>();
 
-  const [estado, setEstado]             = useState<PantallaEstado>('instrucciones');
+  const [estado, setEstado]                 = useState<PantallaEstado>('instrucciones');
   const [comprobanteUrl, setComprobanteUrl] = useState<string | null>(null);
-  const [claveRastreo, setClaveRastreo] = useState('');
-  const [errorMsg, setErrorMsg]         = useState('');
-  const [subiendoImg, setSubiendoImg]   = useState(false);
+  const [errorMsg, setErrorMsg]             = useState('');
+  const [subiendoImg, setSubiendoImg]       = useState(false);
 
   const montoNum = parseFloat(monto ?? '0');
 
-  // ─── Paso 1 → 2: Registrar intención y avanzar ──────────────────────────
+  // ─── Paso 1 → 2 ─────────────────────────────────────────────────────────
   const irASubirComprobante = useCallback(async () => {
     try {
       await SpeiService.registrarIntencionSPEI(participacion_id);
@@ -52,7 +49,7 @@ export default function PagoSPEI() {
     }
   }, [participacion_id]);
 
-  // ─── Subir imagen desde galería ─────────────────────────────────────────
+  // ─── Subir imagen ────────────────────────────────────────────────────────
   const seleccionarImagen = useCallback(async () => {
     try {
       setSubiendoImg(true);
@@ -65,41 +62,28 @@ export default function PagoSPEI() {
     }
   }, [participacion_id]);
 
-  // ─── Paso 2 → validar / pendiente ────────────────────────────────────────
+  // ─── Paso 2 → validar con OCR ────────────────────────────────────────────
   const enviarComprobante = useCallback(async () => {
     if (!comprobanteUrl) {
       Alert.alert('Falta el comprobante', 'Por favor sube la imagen de tu transferencia.');
       return;
     }
 
-    const clave = claveRastreo.trim();
-
-    if (!clave) {
-      // Sin clave → revisión manual
-      try {
-        await SpeiService.marcarPendienteRevision(participacion_id);
-        setEstado('pendiente');
-      } catch (e: any) {
-        Alert.alert('Error', e.message);
-      }
-      return;
-    }
-
-    // Con clave → validar con apiCEP
     setEstado('validando');
     try {
-      const result = await SpeiService.validarYConfirmar(participacion_id, clave, montoNum);
+      // Se pasa la URL del comprobante — apiCEP hace OCR y extrae la clave automáticamente
+      const result = await SpeiService.validarYConfirmar(participacion_id, comprobanteUrl, montoNum);
       if (result.valid) {
         setEstado('exito');
       } else {
-        setErrorMsg(result.errorMsg ?? 'Comprobante inválido');
+        setErrorMsg(result.errorMsg ?? 'No se pudo validar el comprobante');
         setEstado('error');
       }
     } catch (e: any) {
       setErrorMsg(e.message);
       setEstado('error');
     }
-  }, [comprobanteUrl, claveRastreo, participacion_id, montoNum]);
+  }, [comprobanteUrl, participacion_id, montoNum]);
 
   const copiarCLABE = useCallback(() => {
     const clabe = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? '';
@@ -112,7 +96,7 @@ export default function PagoSPEI() {
   }, []);
 
   // ────────────────────────────────────────────────────────────────────────
-  //  RENDER ESTADOS FINALES
+  //  ESTADOS FINALES
   // ────────────────────────────────────────────────────────────────────────
 
   if (estado === 'validando') {
@@ -121,7 +105,7 @@ export default function PagoSPEI() {
         <View style={s.centrado}>
           <ActivityIndicator size="large" color="#00E5FF" />
           <Text style={s.validandoTxt}>Validando tu pago…</Text>
-          <Text style={s.validandoSub}>Consultando Banxico vía apiCEP</Text>
+          <Text style={s.validandoSub}>Leyendo comprobante y consultando Banxico</Text>
         </View>
       </SafeAreaView>
     );
@@ -133,8 +117,13 @@ export default function PagoSPEI() {
         <View style={s.centrado}>
           <Text style={s.resultIcon}>✅</Text>
           <Text style={[s.resultTitulo, { color: '#2ECC71' }]}>¡Pago confirmado!</Text>
-          <Text style={s.resultSub}>Tu transferencia fue validada correctamente.{`\n`}Ya puedes participar en la quiniela.</Text>
-          <TouchableOpacity style={[s.btnPrimario, { backgroundColor: '#2ECC71' }]} onPress={() => router.replace('/(tabs)')}>
+          <Text style={s.resultSub}>
+            Tu transferencia fue validada correctamente.{`\n`}Ya puedes participar en la quiniela.
+          </Text>
+          <TouchableOpacity
+            style={[s.btnPrimario, { backgroundColor: '#2ECC71' }]}
+            onPress={() => router.replace('/(tabs)')}
+          >
             <Text style={s.btnPrimarioTxt}>Ir al inicio</Text>
           </TouchableOpacity>
         </View>
@@ -151,7 +140,10 @@ export default function PagoSPEI() {
           <Text style={s.resultSub}>
             Tu comprobante está siendo revisado.{`\n`}Te notificaremos cuando se confirme tu participación.
           </Text>
-          <TouchableOpacity style={[s.btnPrimario, { backgroundColor: '#F59E0B' }]} onPress={() => router.replace('/(tabs)')}>
+          <TouchableOpacity
+            style={[s.btnPrimario, { backgroundColor: '#F59E0B' }]}
+            onPress={() => router.replace('/(tabs)')}
+          >
             <Text style={[s.btnPrimarioTxt, { color: '#0A0C10' }]}>Ir al inicio</Text>
           </TouchableOpacity>
         </View>
@@ -168,9 +160,9 @@ export default function PagoSPEI() {
           <Text style={s.resultSub}>{errorMsg}</Text>
           <TouchableOpacity
             style={[s.btnPrimario, { backgroundColor: '#E91E63', marginBottom: 12 }]}
-            onPress={() => { setEstado('comprobante'); setClaveRastreo(''); }}
+            onPress={() => setEstado('comprobante')}
           >
-            <Text style={s.btnPrimarioTxt}>Intentar sin clave de rastreo</Text>
+            <Text style={s.btnPrimarioTxt}>Subir otro comprobante</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.btnSecundario} onPress={() => router.replace('/(tabs)')}>
             <Text style={s.btnSecundarioTxt}>Ir al inicio</Text>
@@ -181,7 +173,7 @@ export default function PagoSPEI() {
   }
 
   // ────────────────────────────────────────────────────────────────────────
-  //  PASO 1: INSTRUCCIONES / DATOS BANCARIOS
+  //  PASO 1: INSTRUCCIONES
   // ────────────────────────────────────────────────────────────────────────
   if (estado === 'instrucciones') {
     return (
@@ -193,16 +185,13 @@ export default function PagoSPEI() {
           <Text style={s.headerTit}>Pago por SPEI</Text>
         </View>
         <ScrollView contentContainerStyle={s.scroll}>
-          {/* Monto */}
           <View style={s.montoCard}>
             <Text style={s.montoLbl}>MONTO A TRANSFERIR</Text>
             <Text style={s.montoVal}>${montoNum.toFixed(2)} MXN</Text>
           </View>
 
-          {/* Datos bancarios */}
           <View style={s.card}>
             <Text style={s.cardTit}>📋 Datos de transferencia</Text>
-
             <DatoRow label="Banco" value="BBVA" />
             <DatoRow label="Titular" value="Rolando Martinez" />
             <DatoRow
@@ -214,21 +203,28 @@ export default function PagoSPEI() {
             <DatoRow label="Concepto" value={`QPro - ${quiniela_id ?? ''}`} />
           </View>
 
-          {/* Pasos */}
           <View style={s.card}>
             <Text style={s.cardTit}>📲 ¿Cómo pagar?</Text>
             {[
               'Abre tu app bancaria.',
               'Realiza una transferencia SPEI con los datos de arriba.',
               `Transfiere exactamente $${montoNum.toFixed(2)} MXN.`,
-              'Guarda el comprobante (screenshot o PDF).',
-              'Regresa aquí y sube el comprobante.',
+              'Guarda el comprobante (screenshot o PDF) donde se vea la clave de rastreo.',
+              'Regresa aquí y sube el comprobante — lo validamos automáticamente.',
             ].map((paso, i) => (
               <View key={i} style={s.pasoRow}>
                 <View style={s.pasoDot}><Text style={s.pasoDotTxt}>{i + 1}</Text></View>
                 <Text style={s.pasoTxt}>{paso}</Text>
               </View>
             ))}
+          </View>
+
+          {/* Aviso OCR */}
+          <View style={s.ocrBadge}>
+            <Text style={s.ocrIcon}>🔍</Text>
+            <Text style={s.ocrTxt}>
+              Leemos tu comprobante automáticamente con OCR y lo validamos contra Banxico al instante.
+            </Text>
           </View>
 
           <TouchableOpacity style={s.btnPrimario} onPress={irASubirComprobante}>
@@ -251,7 +247,8 @@ export default function PagoSPEI() {
         <Text style={s.headerTit}>Subir comprobante</Text>
       </View>
       <ScrollView contentContainerStyle={s.scroll}>
-        {/* Subir imagen */}
+
+        {/* Zona de subida */}
         <TouchableOpacity
           style={[s.uploadBox, comprobanteUrl && s.uploadBoxDone]}
           onPress={seleccionarImagen}
@@ -266,7 +263,7 @@ export default function PagoSPEI() {
             <>
               <Text style={s.uploadIcon}>📁</Text>
               <Text style={s.uploadTxt}>Toca para seleccionar{`\n`}tu comprobante</Text>
-              <Text style={s.uploadSub}>JPG, PNG o WEBP</Text>
+              <Text style={s.uploadSub}>JPG, PNG o WEBP • asegúrate que se vea la clave de rastreo</Text>
             </>
           )}
         </TouchableOpacity>
@@ -277,21 +274,12 @@ export default function PagoSPEI() {
           </TouchableOpacity>
         )}
 
-        {/* Clave de rastreo */}
-        <View style={s.card}>
-          <Text style={s.cardTit}>🔑 Clave de rastreo (opcional)</Text>
-          <Text style={s.claveDesc}>
-            Si tu app bancaria muestra una clave de rastreo (o SPEI key), ingrésala para validación instantánea.{`\n`}Si no la tienes, déjala vacía — revisaremos tu comprobante manualmente.
+        {/* Info OCR */}
+        <View style={s.ocrBadge}>
+          <Text style={s.ocrIcon}>🤖</Text>
+          <Text style={s.ocrTxt}>
+            Nuestro sistema leerá automáticamente la clave de rastreo de tu comprobante y la validará contra Banxico.
           </Text>
-          <TextInput
-            style={s.claveInput}
-            placeholder="Ej: 2024010112345678"
-            placeholderTextColor="#404060"
-            value={claveRastreo}
-            onChangeText={setClaveRastreo}
-            keyboardType="number-pad"
-            maxLength={30}
-          />
         </View>
 
         <TouchableOpacity
@@ -299,15 +287,11 @@ export default function PagoSPEI() {
           onPress={enviarComprobante}
           disabled={!comprobanteUrl}
         >
-          <Text style={s.btnPrimarioTxt}>
-            {claveRastreo.trim() ? 'Validar pago automáticamente' : 'Enviar para revisión manual'}
-          </Text>
+          <Text style={s.btnPrimarioTxt}>Validar pago automáticamente ⚡</Text>
         </TouchableOpacity>
 
         <Text style={s.aviso}>
-          {claveRastreo.trim()
-            ? '⚡ La validación con Banxico tarda unos segundos.'
-            : '⏱ La revisión manual puede tardar hasta 24 h.'}
+          ⚡ La validación con Banxico tarda unos segundos.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -343,49 +327,49 @@ const d = StyleSheet.create({
 
 // ─── Estilos principales ─────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  container:     { flex: 1, backgroundColor: '#0A0C10' },
-  centrado:      { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32, gap: 16 },
-  scroll:        { padding: 16, paddingBottom: 48, gap: 16 },
-  header:        { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1E2330', gap: 12 },
-  backBtn:       { width: 36, height: 36, justifyContent: 'center', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 10, borderWidth: 1, borderColor: '#2A2D35' },
-  backTxt:       { color: '#00E5FF', fontSize: 18, fontWeight: 'bold' },
-  headerTit:     { color: '#FFF', fontSize: 17, fontWeight: 'bold', flex: 1 },
+  container:      { flex: 1, backgroundColor: '#0A0C10' },
+  centrado:       { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32, gap: 16 },
+  scroll:         { padding: 16, paddingBottom: 48, gap: 16 },
+  header:         { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1E2330', gap: 12 },
+  backBtn:        { width: 36, height: 36, justifyContent: 'center', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 10, borderWidth: 1, borderColor: '#2A2D35' },
+  backTxt:        { color: '#00E5FF', fontSize: 18, fontWeight: 'bold' },
+  headerTit:      { color: '#FFF', fontSize: 17, fontWeight: 'bold', flex: 1 },
 
-  montoCard:     { backgroundColor: '#0D1117', borderRadius: 16, padding: 20, alignItems: 'center', borderWidth: 1, borderColor: '#00E5FF33' },
-  montoLbl:      { color: '#00E5FF', fontSize: 10, letterSpacing: 2, marginBottom: 6 },
-  montoVal:      { color: '#FFF', fontSize: 32, fontWeight: 'bold', textShadowColor: '#00E5FF', textShadowRadius: 10 },
+  montoCard:      { backgroundColor: '#0D1117', borderRadius: 16, padding: 20, alignItems: 'center', borderWidth: 1, borderColor: '#00E5FF33' },
+  montoLbl:       { color: '#00E5FF', fontSize: 10, letterSpacing: 2, marginBottom: 6 },
+  montoVal:       { color: '#FFF', fontSize: 32, fontWeight: 'bold', textShadowColor: '#00E5FF', textShadowRadius: 10 },
 
-  card:          { backgroundColor: '#0D1117', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#1E2330' },
-  cardTit:       { color: '#9B9BFF', fontSize: 13, fontWeight: 'bold', letterSpacing: 0.5, marginBottom: 12 },
+  card:           { backgroundColor: '#0D1117', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#1E2330' },
+  cardTit:        { color: '#9B9BFF', fontSize: 13, fontWeight: 'bold', letterSpacing: 0.5, marginBottom: 12 },
 
-  pasoRow:       { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 10 },
-  pasoDot:       { width: 22, height: 22, borderRadius: 11, backgroundColor: '#00E5FF22', borderWidth: 1, borderColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
-  pasoDotTxt:    { color: '#00E5FF', fontSize: 11, fontWeight: 'bold' },
-  pasoTxt:       { color: '#C0C0D0', fontSize: 13, flex: 1, lineHeight: 20 },
+  pasoRow:        { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 10 },
+  pasoDot:        { width: 22, height: 22, borderRadius: 11, backgroundColor: '#00E5FF22', borderWidth: 1, borderColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
+  pasoDotTxt:     { color: '#00E5FF', fontSize: 11, fontWeight: 'bold' },
+  pasoTxt:        { color: '#C0C0D0', fontSize: 13, flex: 1, lineHeight: 20 },
 
-  uploadBox:     { backgroundColor: '#0D1117', borderRadius: 16, borderWidth: 2, borderColor: '#1E2330', borderStyle: 'dashed', minHeight: 160, alignItems: 'center', justifyContent: 'center', gap: 8, overflow: 'hidden' },
-  uploadBoxDone: { borderColor: '#2ECC71', borderStyle: 'solid' },
-  uploadIcon:    { fontSize: 36 },
-  uploadTxt:     { color: '#9CA3AF', fontSize: 15, textAlign: 'center', fontWeight: '600' },
-  uploadSub:     { color: '#404060', fontSize: 12 },
-  previewImg:    { width: '100%', height: 200 },
+  ocrBadge:       { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#00E5FF11', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#00E5FF33' },
+  ocrIcon:        { fontSize: 20 },
+  ocrTxt:         { color: '#A0C4D0', fontSize: 12, lineHeight: 18, flex: 1 },
 
-  cambiarImgBtn: { alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#1A1D26', borderRadius: 8, borderWidth: 1, borderColor: '#2A2D35' },
-  cambiarImgTxt: { color: '#9CA3AF', fontSize: 12 },
+  uploadBox:      { backgroundColor: '#0D1117', borderRadius: 16, borderWidth: 2, borderColor: '#1E2330', borderStyle: 'dashed', minHeight: 160, alignItems: 'center', justifyContent: 'center', gap: 8, overflow: 'hidden' },
+  uploadBoxDone:  { borderColor: '#2ECC71', borderStyle: 'solid' },
+  uploadIcon:     { fontSize: 36 },
+  uploadTxt:      { color: '#9CA3AF', fontSize: 15, textAlign: 'center', fontWeight: '600' },
+  uploadSub:      { color: '#404060', fontSize: 12, textAlign: 'center', paddingHorizontal: 16 },
+  previewImg:     { width: '100%', height: 200 },
 
-  claveDesc:     { color: '#606080', fontSize: 12, lineHeight: 18, marginBottom: 12 },
-  claveInput:    { backgroundColor: '#15181F', borderRadius: 10, borderWidth: 1, borderColor: '#2A2D35', color: '#E0E0F0', fontSize: 16, padding: 14, letterSpacing: 1 },
+  cambiarImgBtn:  { alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#1A1D26', borderRadius: 8, borderWidth: 1, borderColor: '#2A2D35' },
+  cambiarImgTxt:  { color: '#9CA3AF', fontSize: 12 },
 
-  btnPrimario:   { backgroundColor: '#00E5FF', borderRadius: 14, paddingVertical: 16, alignItems: 'center', shadowColor: '#00E5FF', shadowOpacity: 0.25, shadowRadius: 10, elevation: 4 },
-  btnPrimarioTxt:{ color: '#0A0C10', fontSize: 15, fontWeight: 'bold', letterSpacing: 0.5 },
-  btnSecundario: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
+  btnPrimario:    { backgroundColor: '#00E5FF', borderRadius: 14, paddingVertical: 16, alignItems: 'center', shadowColor: '#00E5FF', shadowOpacity: 0.25, shadowRadius: 10, elevation: 4 },
+  btnPrimarioTxt: { color: '#0A0C10', fontSize: 15, fontWeight: 'bold', letterSpacing: 0.5 },
+  btnSecundario:  { borderRadius: 14, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
   btnSecundarioTxt: { color: '#9CA3AF', fontSize: 15, fontWeight: '600' },
 
-  aviso:         { color: '#404060', fontSize: 12, textAlign: 'center', lineHeight: 18 },
-
-  validandoTxt:  { color: '#00E5FF', fontSize: 18, fontWeight: 'bold', marginTop: 20 },
-  validandoSub:  { color: '#606080', fontSize: 13, textAlign: 'center' },
-  resultIcon:    { fontSize: 64 },
-  resultTitulo:  { fontSize: 26, fontWeight: 'bold', textAlign: 'center' },
-  resultSub:     { color: '#9CA3AF', fontSize: 15, textAlign: 'center', lineHeight: 22 },
+  aviso:          { color: '#404060', fontSize: 12, textAlign: 'center', lineHeight: 18 },
+  validandoTxt:   { color: '#00E5FF', fontSize: 18, fontWeight: 'bold', marginTop: 20 },
+  validandoSub:   { color: '#606080', fontSize: 13, textAlign: 'center' },
+  resultIcon:     { fontSize: 64 },
+  resultTitulo:   { fontSize: 26, fontWeight: 'bold', textAlign: 'center' },
+  resultSub:      { color: '#9CA3AF', fontSize: 15, textAlign: 'center', lineHeight: 22 },
 });

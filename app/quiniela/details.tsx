@@ -137,7 +137,6 @@ export default function QuinielaDetailsScreen() {
       const totalGolesPredichos = Object.values(selecciones).reduce(
         (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0), 0
       );
-
       const rows = Object.entries(selecciones).map(([partido_id, sel]) => ({
         participacion_id:           participacionId,
         partido_id,
@@ -145,7 +144,6 @@ export default function QuinielaDetailsScreen() {
         goles_local_predichos:      sel.golesLocal,
         goles_visitante_predichos:  sel.golesVisitante,
       }));
-
       const [{ error: selErr }] = await Promise.all([
         supabase
           .from('selecciones')
@@ -156,7 +154,6 @@ export default function QuinielaDetailsScreen() {
           .eq('id', participacionId),
       ]);
       if (selErr) throw selErr;
-
       picksOriginalesRef.current = { ...selecciones };
       setModoEdicion(false);
       setConfirmState('successEdit');
@@ -231,16 +228,13 @@ export default function QuinielaDetailsScreen() {
 
   const totalSeleccionados = Object.keys(selecciones).length;
   const isComplete = totalSeleccionados === partidos.length && partidos.length > 0;
-
-  // ✅ El botón editar se muestra siempre que el usuario ya participó
-  // y la quiniela sigue abierta, sin importar el estado del pago
   const puedeEditar = yaParticipo && quiniela?.estado === 'abierta';
 
   const golesPredichosTotales = Object.values(selecciones).reduce(
     (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0), 0
   );
 
-  // ─── Pantallas de estado ───────────────────────────────────────────
+  // ─── Pantallas de estado ───────────────────────────────────
 
   if (loading) {
     return (
@@ -314,7 +308,6 @@ export default function QuinielaDetailsScreen() {
               ? 'Se guardarán tus picks actualizados.'
               : 'Se procesará tu pago y quedarás inscrito.'}
           </Text>
-
           <View style={styles.desempateSummary}>
             <Text style={styles.desempateLabel}>🎯 Tus goles totales predichos</Text>
             <Text style={styles.desempateValue}>{golesPredichosTotales}</Text>
@@ -323,7 +316,6 @@ export default function QuinielaDetailsScreen() {
               totales sea la más cercana a los goles reales ganará.
             </Text>
           </View>
-
           <TouchableOpacity
             style={[styles.successBtn, saving && styles.btnDisabled]}
             onPress={isEdit ? handleGuardarEdicion : handleConfirmarFinal}
@@ -335,7 +327,6 @@ export default function QuinielaDetailsScreen() {
                   {isEdit ? 'Guardar cambios' : 'Pagar y participar'}
                 </Text>}
           </TouchableOpacity>
-
           <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
             <Text style={styles.cancelBtnTxt}>Cancelar</Text>
           </TouchableOpacity>
@@ -344,7 +335,7 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Pantalla principal ────────────────────────────────────────────
+  // ─── Pantalla principal ─────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
 
@@ -361,14 +352,7 @@ export default function QuinielaDetailsScreen() {
             {quiniela?.estado === 'abierta' ? '🟢 Abierta' : '🔴 Cerrada'}
           </Text>
         </View>
-        {/* Botón editar en el header cuando ya participó */}
-        {puedeEditar && !modoEdicion ? (
-          <TouchableOpacity style={styles.editHeaderBtn} onPress={() => setModoEdicion(true)}>
-            <Text style={styles.editHeaderBtnTxt}>✏️ Editar</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={{ width: 64 }} />
-        )}
+        <View style={{ width: 36 }} />
       </View>
 
       {/* Barra de progreso */}
@@ -381,7 +365,7 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Banner: ya participó (no en modo edición) */}
+      {/* Banner: ya participó */}
       {yaParticipo && !modoEdicion && (
         <View style={styles.participandoBanner}>
           <Text style={styles.participandoText}>
@@ -408,7 +392,7 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Hint de desempate */}
+      {/* Hint desempate */}
       {(!yaParticipo || modoEdicion) && (
         <View style={styles.desempateInfoBanner}>
           <Text style={styles.desempateInfoText}>
@@ -435,7 +419,7 @@ export default function QuinielaDetailsScreen() {
           <View style={styles.footer}>
             {faltanMsg ? <Text style={styles.faltanMsg}>{faltanMsg}</Text> : null}
 
-            {/* Primera vez: confirmar y pagar */}
+            {/* Primera vez */}
             {!yaParticipo && (
               <TouchableOpacity
                 style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
@@ -443,6 +427,16 @@ export default function QuinielaDetailsScreen() {
                 disabled={!isComplete}
               >
                 <Text style={styles.confirmBtnTxt}>Confirmar picks y pagar</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Botón editar — solo en el footer */}
+            {yaParticipo && !modoEdicion && puedeEditar && (
+              <TouchableOpacity
+                style={styles.editBtn}
+                onPress={() => setModoEdicion(true)}
+              >
+                <Text style={styles.editBtnTxt}>✏️ Editar mis picks</Text>
               </TouchableOpacity>
             )}
 
@@ -463,16 +457,6 @@ export default function QuinielaDetailsScreen() {
                 </TouchableOpacity>
               </View>
             )}
-
-            {/* Ya participó, no editando: botón editar también en el footer */}
-            {yaParticipo && !modoEdicion && puedeEditar && (
-              <TouchableOpacity
-                style={styles.editBtn}
-                onPress={() => setModoEdicion(true)}
-              >
-                <Text style={styles.editBtnTxt}>✏️ Editar mis picks</Text>
-              </TouchableOpacity>
-            )}
           </View>
         }
       />
@@ -485,29 +469,20 @@ const styles = StyleSheet.create({
   centered:    { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   loadingText: { color: '#A0A0A0', marginTop: 12 },
 
-  // Header
   header: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: '#1E2128',
   },
-  backBtn:        { width: 36, height: 36, justifyContent: 'center' },
-  backIcon:       { color: '#2ECC71', fontSize: 28, lineHeight: 30 },
-  headerCenter:   { flex: 1, alignItems: 'center' },
-  headerTitle:    { color: '#E0E0E0', fontSize: 16, fontWeight: 'bold' },
-  headerSub:      { color: '#606060', fontSize: 11, marginTop: 2 },
-  editHeaderBtn: {
-    paddingHorizontal: 10, paddingVertical: 6,
-    borderWidth: 1, borderColor: '#2ECC71',
-    borderRadius: 8,
-  },
-  editHeaderBtnTxt: { color: '#2ECC71', fontSize: 12, fontWeight: '600' },
+  backBtn:      { width: 36, height: 36, justifyContent: 'center' },
+  backIcon:     { color: '#2ECC71', fontSize: 28, lineHeight: 30 },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerTitle:  { color: '#E0E0E0', fontSize: 16, fontWeight: 'bold' },
+  headerSub:    { color: '#606060', fontSize: 11, marginTop: 2 },
 
-  // Progress
   progressWrap: { paddingHorizontal: 16, paddingTop: 12 },
   progressText: { color: '#606060', fontSize: 12, marginTop: 6, marginBottom: 4 },
 
-  // Banners
   participandoBanner: {
     marginHorizontal: 16, marginTop: 10,
     backgroundColor: 'rgba(46,204,113,0.08)',
@@ -534,7 +509,6 @@ const styles = StyleSheet.create({
   },
   desempateInfoText: { color: '#6ABD8A', fontSize: 12, lineHeight: 17 },
 
-  // Desempate summary
   desempateSummary: {
     width: '100%', backgroundColor: '#15181F',
     borderRadius: 14, padding: 18, marginVertical: 20, alignItems: 'center',
@@ -544,17 +518,11 @@ const styles = StyleSheet.create({
   desempateValue: { color: '#2ECC71', fontSize: 42, fontWeight: 'bold', marginBottom: 8 },
   desempateHint:  { color: '#505050', fontSize: 11, textAlign: 'center', lineHeight: 16 },
 
-  // List
-  list: { padding: 16, paddingBottom: 24 },
-
-  // Footer
+  list:      { padding: 16, paddingBottom: 24 },
   footer:    { marginTop: 8, gap: 10 },
   faltanMsg: { color: '#F39C12', textAlign: 'center', fontSize: 13, marginBottom: 4 },
 
-  confirmBtn: {
-    backgroundColor: '#2ECC71', borderRadius: 14,
-    paddingVertical: 16, alignItems: 'center',
-  },
+  confirmBtn:    { backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   confirmBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 15 },
   btnDisabled:   { opacity: 0.35 },
 
@@ -565,8 +533,7 @@ const styles = StyleSheet.create({
   },
   editBtnTxt: { color: '#2ECC71', fontWeight: '700', fontSize: 15 },
 
-  editActions: { gap: 10 },
-
+  editActions:  { gap: 10 },
   cancelBtn:    { paddingVertical: 14, alignItems: 'center' },
   cancelBtnTxt: { color: '#606060', fontSize: 14 },
 

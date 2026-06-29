@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Animated, Share } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Animated, Share, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../config/supabase';
 import { colors } from '../theme/colors';
@@ -20,7 +20,7 @@ interface Props {
   yaParticipo?: boolean;
 }
 
-// ─── Skeleton ───────────────────────────────────────────────────────────────
+// ─── Skeleton ────────────────────────────────────────────────
 function SkeletonBlock({ width, height = 18, style }: { width: number | string; height?: number; style?: any }) {
   const anim = useRef(new Animated.Value(0.3)).current;
   useEffect(() => {
@@ -34,7 +34,7 @@ function SkeletonBlock({ width, height = 18, style }: { width: number | string; 
   return <Animated.View style={[{ width, height, borderRadius: 6, backgroundColor: '#2A2D35', opacity: anim }, style]} />;
 }
 
-// ─── Countdown hook ──────────────────────────────────────────────────────────
+// ─── Countdown hook ────────────────────────────────────────────
 function useCountdown(fechaPrimerPartido?: string, estado?: string) {
   const [label, setLabel] = useState<string | null>(null);
 
@@ -44,7 +44,6 @@ function useCountdown(fechaPrimerPartido?: string, estado?: string) {
     const calc = () => {
       const diff = new Date(fechaPrimerPartido).getTime() - Date.now();
 
-      // Ya pasó la hora del primer partido → no mostrar countdown
       if (diff <= 0) { setLabel(null); return; }
 
       const totalSecs = Math.floor(diff / 1000);
@@ -70,7 +69,7 @@ function useCountdown(fechaPrimerPartido?: string, estado?: string) {
   return label;
 }
 
-// ─── Componente principal ────────────────────────────────────────────────────
+// ─── Componente principal ────────────────────────────────────────────
 export function QuinielaCard({
   id,
   titulo,
@@ -95,6 +94,8 @@ export function QuinielaCard({
   const [yaParticipo, setYaParticipo] = useState<boolean | null>(
     yaParticipoInit !== undefined ? yaParticipoInit : null
   );
+  // Nuevo: detectar si el usuario tiene una participación con pago pendiente
+  const [pagoPendiente, setPagoPendiente] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -102,6 +103,21 @@ export function QuinielaCard({
     const needsParticipo = yaParticipoInit === undefined;
 
     if (!needsCount && !needsParticipo) {
+      // Aunque no necesitemos recargar conteo, sí necesitamos saber si el pago está pendiente
+      const fetchPendingStatus = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: part } = await supabase
+            .from('participaciones')
+            .select('id, estado')
+            .eq('quiniela_id', id)
+            .eq('user_id', user.id)
+            .maybeSingle();
+          setPagoPendiente(part?.estado === 'pendiente');
+        }
+      };
+      fetchPendingStatus();
+
       const channel = supabase
         .channel(`pozo-${id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` },
@@ -131,13 +147,15 @@ export function QuinielaCard({
       if (user) {
         const { data: part } = await supabase
           .from('participaciones')
-          .select('id')
+          .select('id, estado')
           .eq('quiniela_id', id)
           .eq('user_id', user.id)
           .maybeSingle();
         setYaParticipo(!!part);
+        setPagoPendiente(part?.estado === 'pendiente');
       } else {
         setYaParticipo(false);
+        setPagoPendiente(false);
       }
     };
 
@@ -173,6 +191,11 @@ export function QuinielaCard({
       return;
     }
     router.push(`/quiniela/${id}`);
+  };
+
+  const handleReintentarPago = () => {
+    // Navegar a details — esa pantalla detecta pagoPendiente y muestra el banner con "Pagar ahora"
+    router.push(`/quiniela/details?id=${id}`);
   };
 
   const handleShare = async () => {
@@ -298,6 +321,17 @@ export function QuinielaCard({
         </Text>
       </TouchableOpacity>
 
+      {/* Botón de reintentar pago — solo se muestra si el usuario tiene pago pendiente */}
+      {pagoPendiente && estado === 'abierta' && (
+        <TouchableOpacity
+          style={styles.reintentarBtn}
+          onPress={handleReintentarPago}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.reintentarBtnText}>💳 Reintentar pago</Text>
+        </TouchableOpacity>
+      )}
+
     </TouchableOpacity>
   );
 }
@@ -332,4 +366,7 @@ const styles = StyleSheet.create({
   button:            { backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
   buttonDisabled:    { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
   buttonText:        { color: '#000', fontWeight: 'bold', fontSize: 16 },
+  // Botón reintentar pago
+  reintentarBtn:     { backgroundColor: '#EF4444', paddingVertical: 11, borderRadius: 12, alignItems: 'center', marginTop: 8 },
+  reintentarBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
 });

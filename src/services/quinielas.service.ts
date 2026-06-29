@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase';
+import type { SeleccionConGoles } from '../components/MatchSelectionCard';
 
 export const QuinielasService = {
 
@@ -14,7 +15,6 @@ export const QuinielasService = {
 
     if (!data) return data;
 
-    // Obtener el primer partido (orden asc) de cada quiniela para el countdown
     const ids = data.map((q: any) => q.id);
 
     const [misParticipacionesRes, primerPartidoRes] = await Promise.all([
@@ -32,7 +32,6 @@ export const QuinielasService = {
         .order('orden', { ascending: true }),
     ]);
 
-    // Quedarnos solo con el primer partido por quiniela
     const primerPartidoMap: Record<string, string> = {};
     for (const p of (primerPartidoRes.data || [])) {
       if (!primerPartidoMap[p.quiniela_id] && p.fecha_partido) {
@@ -46,8 +45,8 @@ export const QuinielasService = {
 
     return data.map((q: any) => ({
       ...q,
-      jugadores_count:    q.participaciones?.[0]?.count ?? 0,
-      ya_participo:       yaParticipo.has(q.id),
+      jugadores_count:      q.participaciones?.[0]?.count ?? 0,
+      ya_participo:         yaParticipo.has(q.id),
       fecha_primer_partido: primerPartidoMap[q.id] ?? q.fecha_cierre ?? null,
     }));
   },
@@ -64,7 +63,7 @@ export const QuinielasService = {
     const resultado = await Promise.all((data || []).map(async (q: any) => {
       const { data: tops } = await supabase
         .from('participaciones')
-        .select('user_id, aciertos, estado, monto_pagado')
+        .select('user_id, aciertos, estado, monto_pagado, premio_ganado')
         .eq('quiniela_id', q.id)
         .order('aciertos', { ascending: false })
         .limit(3);
@@ -76,15 +75,15 @@ export const QuinielasService = {
           .eq('id', p.user_id)
           .single();
         return {
-          username: perfil?.username ?? 'Usuario',
-          aciertos: p.aciertos ?? 0,
-          estado: p.estado,
-          monto_pagado: p.monto_pagado ?? 0,
+          username:      perfil?.username ?? 'Usuario',
+          aciertos:      p.aciertos ?? 0,
+          estado:        p.estado,
+          monto_pagado:  p.monto_pagado ?? 0,
+          premio_ganado: p.premio_ganado ?? 0,
         };
       }));
 
       const totalJugadores = q.participaciones?.[0]?.count ?? 0;
-      // Si premio_total es igual o menor al precio de entrada, recalcular
       const premioReal = q.premio_total > q.precio_entrada
         ? q.premio_total
         : totalJugadores * q.precio_entrada;
@@ -135,31 +134,83 @@ export const QuinielasService = {
     return data;
   },
 
+  /**
+   * Crea o reutiliza la participación pendiente del usuario para esta quiniela.
+   *
+   * AHORA incluye goles predichos por partido + suma total para desempate.
+   *
+   * LÓGICA ANTI-DUPLICADOS:
+   * - Si ya existe una participación con estado 'pendiente' → la reutiliza (mismo UUID).
+   * - Si no existe → la crea (primer acceso).
+   * - Si existe con estado 'pagado', 'ganador' o 'perdedor' → lanza error.
+   */
   async guardarSelecciones(
     quinielaId: string,
-    selecciones: Record<string, 'local' | 'empate' | 'visitante'>
+    selecciones: Record<string, SeleccionConGoles>
   ) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No autenticado');
 
-    const { data: participacion, error: partError } = await supabase
+    // 1. Buscar participación existente para este usuario + quiniela
+    const { data: existente } = await supabase
       .from('participaciones')
-      .insert({
-        user_id: user.id,
-        quiniela_id: quinielaId,
-        monto_pagado: 0,
-        estado: 'pendiente',
-      })
-      .select()
-      .single();
-    if (partError) throw partError;
+      .select('id, estado')
+      .eq('user_id', user.id)
+      .eq('quiniela_id', quinielaId)
+      .maybeSingle();
 
-    const seleccionesArray = Object.entries(selecciones).map(([partido_id, prediccion]) => ({
-      participacion_id: participacion.id,
-      partido_id,
-      prediccion,
-    }));
-    const { error: selError } = await supabase.from('selecciones').insert(seleccionesArray);
+    // 2. Si ya pagó, no permitir otra participación
+    if (existente && ['pagado', 'ganador', 'perdedor'].includes(existente.estado)) {
+      throw new Error('Ya tienes una participación pagada en esta quiniela.');
+    }
+
+    // 3. Calcular total de goles predichos (para desempate)
+    const totalGolesPredichos = Object.values(selecciones).reduce(
+      (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0),
+      0
+    );
+
+    let participacion: any;
+
+    if (existente) {
+      // 4a. Reutilizar participación pendiente → actualizar total_goles_predichos
+      const { error: updErr } = await supabase
+        .from('participaciones')
+        .update({ total_goles_predichos: totalGolesPredichos })
+        .eq('id', existente.id);
+      if (updErr) throw updErr;
+      participacion = existente;
+    } else {
+      // 4b. Primera vez → crear participación con total_goles_predichos
+      const { data: nueva, error: partError } = await supabase
+        .from('participaciones')
+        .insert({
+          user_id:               user.id,
+          quiniela_id:           quinielaId,
+          monto_pagado:          0,
+          estado:                'pendiente',
+          total_goles_predichos: totalGolesPredichos,
+        })
+        .select()
+        .single();
+      if (partError) throw partError;
+      participacion = nueva;
+    }
+
+    // 5. Upsert de selecciones con goles incluidos
+    const seleccionesArray = Object.entries(selecciones).map(
+      ([partido_id, sel]) => ({
+        participacion_id:           participacion.id,
+        partido_id,
+        prediccion:                 sel.prediccion,
+        goles_local_predichos:      sel.golesLocal,
+        goles_visitante_predichos:  sel.golesVisitante,
+      })
+    );
+
+    const { error: selError } = await supabase
+      .from('selecciones')
+      .upsert(seleccionesArray, { onConflict: 'participacion_id,partido_id' });
     if (selError) throw selError;
 
     return participacion;

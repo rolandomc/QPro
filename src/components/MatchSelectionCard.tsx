@@ -1,6 +1,14 @@
 import React from 'react';
-import { StyleSheet, Text, View, Pressable } from 'react-native';
+import {
+  StyleSheet, Text, View, TouchableOpacity,
+} from 'react-native';
 import * as Haptics from 'expo-haptics';
+
+export interface SeleccionConGoles {
+  prediccion: 'local' | 'empate' | 'visitante';
+  golesLocal: number;
+  golesVisitante: number;
+}
 
 interface Partido {
   id: string;
@@ -12,79 +20,176 @@ interface Partido {
 interface Props {
   partido: Partido;
   index: number;
-  seleccionActual: 'local' | 'empate' | 'visitante' | null;
-  onSelect: (opcion: 'local' | 'empate' | 'visitante') => void;
+  seleccionActual: SeleccionConGoles | null;
+  onSelect: (seleccion: SeleccionConGoles) => void;
+  disabled?: boolean;
 }
 
-export default function MatchSelectionCard({ partido, index, seleccionActual, onSelect }: Props) {
+/** Deduce la predicción automáticamente a partir del marcador */
+function deducirPrediccion(
+  golesLocal: number,
+  golesVisitante: number
+): 'local' | 'empate' | 'visitante' {
+  if (golesLocal > golesVisitante) return 'local';
+  if (golesVisitante > golesLocal) return 'visitante';
+  return 'empate';
+}
+
+export default function MatchSelectionCard({
+  partido, index, seleccionActual, onSelect, disabled = false,
+}: Props) {
   const fecha = partido.fecha_partido
-    ? new Date(partido.fecha_partido).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })
+    ? new Date(partido.fecha_partido).toLocaleString('es-MX', {
+        dateStyle: 'medium', timeStyle: 'short',
+      })
     : 'Fecha por confirmar';
 
-  const opciones: { key: 'local' | 'empate' | 'visitante'; label: string; sublabel: string }[] = [
-    { key: 'local',     label: '1', sublabel: partido.equipo_local },
-    { key: 'empate',    label: 'X', sublabel: 'Empate' },
-    { key: 'visitante', label: '2', sublabel: partido.equipo_visitante },
-  ];
+  // Valores actuales — 0-0 por defecto
+  const golesLocal     = seleccionActual?.golesLocal     ?? 0;
+  const golesVisitante = seleccionActual?.golesVisitante ?? 0;
+  const prediccion     = seleccionActual?.prediccion     ?? null;
 
-  const handleSelect = (opcion: 'local' | 'empate' | 'visitante') => {
-    // Vibración distinta si es cambio de pick o primer pick
-    if (seleccionActual === opcion) return; // misma opción, no hacer nada
-    Haptics.impactAsync(
-      seleccionActual === null
-        ? Haptics.ImpactFeedbackStyle.Light   // primer pick: suave
-        : Haptics.ImpactFeedbackStyle.Medium  // cambio de pick: media
-    );
-    onSelect(opcion);
+  const cambiarGoles = (campo: 'local' | 'visitante', delta: number) => {
+    if (disabled) return;
+    const nuevoLocal     = campo === 'local'     ? Math.max(0, golesLocal + delta)     : golesLocal;
+    const nuevoVisitante = campo === 'visitante' ? Math.max(0, golesVisitante + delta) : golesVisitante;
+    const nuevaPrediccion = deducirPrediccion(nuevoLocal, nuevoVisitante);
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    onSelect({
+      prediccion:     nuevaPrediccion,
+      golesLocal:     nuevoLocal,
+      golesVisitante: nuevoVisitante,
+    });
   };
 
+  // Colores según predicción
+  const localSelected    = prediccion === 'local';
+  const visitanteSelected = prediccion === 'visitante';
+  const empateSelected   = prediccion === 'empate';
+
   return (
-    <View style={styles.card}>
-      {/* Numero y fecha */}
-      <View style={styles.cardTop}>
+    <View style={[styles.card, prediccion !== null && styles.cardSeleccionado]}>
+
+      {/* Cabecera: número + fecha */}
+      <View style={styles.header}>
         <View style={styles.numBadge}>
           <Text style={styles.numText}>{index + 1}</Text>
         </View>
         <Text style={styles.fecha}>{fecha}</Text>
-        {seleccionActual && (
-          <View style={styles.checkBadge}>
-            <Text style={styles.checkText}>✓</Text>
+        {/* Badge resultado deducido */}
+        {prediccion ? (
+          <View style={[styles.resultBadge, empateSelected && styles.resultBadgeEmpate]}>
+            <Text style={[styles.resultBadgeText, empateSelected && styles.resultBadgeTextEmpate]}>
+              {prediccion === 'local' ? '1' : prediccion === 'empate' ? 'X' : '2'}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.pendienteBadge}>
+            <Text style={styles.pendienteText}>?</Text>
           </View>
         )}
       </View>
 
-      {/* Equipos */}
+      {/* Equipos con controles de goles */}
       <View style={styles.teamsRow}>
-        <Text style={[styles.teamName, seleccionActual === 'local' && styles.teamSelected]} numberOfLines={1}>
-          {partido.equipo_local}
-        </Text>
-        <Text style={styles.vsText}>vs</Text>
-        <Text style={[styles.teamName, styles.teamRight, seleccionActual === 'visitante' && styles.teamSelected]} numberOfLines={1}>
-          {partido.equipo_visitante}
-        </Text>
+
+        {/* LOCAL */}
+        <View style={[styles.teamBlock, localSelected && styles.teamBlockWinner]}>
+          <Text
+            style={[styles.teamName, localSelected && styles.teamNameWinner]}
+            numberOfLines={2}
+          >
+            {partido.equipo_local}
+          </Text>
+          {!disabled && (
+            <View style={styles.golesRow}>
+              <TouchableOpacity
+                style={styles.golesBtn}
+                onPress={() => cambiarGoles('local', -1)}
+                disabled={golesLocal === 0}
+              >
+                <Text style={[styles.golesBtnTxt, golesLocal === 0 && styles.golesBtnDisabled]}>−</Text>
+              </TouchableOpacity>
+              <View style={[styles.golesBox, localSelected && styles.golesBoxWinner]}>
+                <Text style={[styles.golesNum, localSelected && styles.golesNumWinner]}>
+                  {golesLocal}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.golesBtn}
+                onPress={() => cambiarGoles('local', +1)}
+              >
+                <Text style={styles.golesBtnTxt}>+</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {disabled && (
+            <Text style={[styles.golesReadOnly, localSelected && styles.golesNumWinner]}>
+              {golesLocal}
+            </Text>
+          )}
+        </View>
+
+        {/* CENTRO: vs + indicador */}
+        <View style={styles.centerCol}>
+          <Text style={styles.vsText}>vs</Text>
+          {prediccion === 'empate' && (
+            <View style={styles.empatePill}>
+              <Text style={styles.empateText}>X</Text>
+            </View>
+          )}
+          {localSelected && <Text style={styles.flechaLocal}>◄</Text>}
+          {visitanteSelected && <Text style={styles.flechaVisitante}>►</Text>}
+          {!prediccion && <Text style={styles.flechaInactiva}>-</Text>}
+        </View>
+
+        {/* VISITANTE */}
+        <View style={[styles.teamBlock, styles.teamBlockRight, visitanteSelected && styles.teamBlockWinner]}>
+          <Text
+            style={[styles.teamName, styles.teamNameRight, visitanteSelected && styles.teamNameWinner]}
+            numberOfLines={2}
+          >
+            {partido.equipo_visitante}
+          </Text>
+          {!disabled && (
+            <View style={styles.golesRow}>
+              <TouchableOpacity
+                style={styles.golesBtn}
+                onPress={() => cambiarGoles('visitante', -1)}
+                disabled={golesVisitante === 0}
+              >
+                <Text style={[styles.golesBtnTxt, golesVisitante === 0 && styles.golesBtnDisabled]}>−</Text>
+              </TouchableOpacity>
+              <View style={[styles.golesBox, visitanteSelected && styles.golesBoxWinner]}>
+                <Text style={[styles.golesNum, visitanteSelected && styles.golesNumWinner]}>
+                  {golesVisitante}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.golesBtn}
+                onPress={() => cambiarGoles('visitante', +1)}
+              >
+                <Text style={styles.golesBtnTxt}>+</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {disabled && (
+            <Text style={[styles.golesReadOnly, visitanteSelected && styles.golesNumWinner]}>
+              {golesVisitante}
+            </Text>
+          )}
+        </View>
       </View>
 
-      {/* Botones 1 X 2 */}
-      <View style={styles.optionsRow}>
-        {opciones.map((op) => {
-          const isSelected = seleccionActual === op.key;
-          return (
-            <Pressable
-              key={op.key}
-              onPress={() => handleSelect(op.key)}
-              style={({ pressed }) => [
-                styles.optionBtn,
-                isSelected && styles.optionBtnSelected,
-                pressed && styles.optionBtnPressed,
-              ]}
-            >
-              <Text style={[styles.optionKey, isSelected && styles.optionKeySelected]}>{op.label}</Text>
-              <Text style={[styles.optionSub, isSelected && styles.optionSubSelected]} numberOfLines={1}>
-                {op.sublabel}
-              </Text>
-            </Pressable>
-          );
-        })}
+      {/* Hint inferior */}
+      <View style={styles.hintRow}>
+        <Text style={styles.hintText}>
+          {prediccion
+            ? `🎯 ${prediccion === 'local' ? partido.equipo_local : prediccion === 'visitante' ? partido.equipo_visitante : 'Empate'}  •  ${golesLocal + golesVisitante} goles totales`
+            : 'Ajusta el marcador para hacer tu predicción'}
+        </Text>
       </View>
     </View>
   );
@@ -92,58 +197,138 @@ export default function MatchSelectionCard({ partido, index, seleccionActual, on
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#15181F',
+    backgroundColor: '#12151C',
     borderRadius: 16,
-    padding: 15,
-    marginBottom: 12,
+    padding: 14,
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#2A2D35',
+    borderColor: '#22252E',
   },
-  cardTop: {
+  cardSeleccionado: {
+    borderColor: '#1E2E1E',
+  },
+
+  // Cabecera
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   numBadge: {
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: '#2A2D35',
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: '#1E2128',
     justifyContent: 'center', alignItems: 'center',
     marginRight: 8,
   },
-  numText:    { color: '#A0A0A0', fontSize: 11, fontWeight: 'bold' },
-  fecha:      { color: '#707070', fontSize: 12, flex: 1 },
-  checkBadge: {
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: '#2ECC71',
+  numText:       { color: '#606060', fontSize: 10, fontWeight: 'bold' },
+  fecha:         { color: '#505050', fontSize: 11, flex: 1 },
+  resultBadge: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(46,204,113,0.15)',
+    borderWidth: 1, borderColor: '#2ECC71',
     justifyContent: 'center', alignItems: 'center',
   },
-  checkText: { color: '#000', fontSize: 12, fontWeight: 'bold' },
+  resultBadgeEmpate: {
+    backgroundColor: 'rgba(243,156,18,0.15)',
+    borderColor: '#F39C12',
+  },
+  resultBadgeText:       { color: '#2ECC71', fontSize: 11, fontWeight: 'bold' },
+  resultBadgeTextEmpate: { color: '#F39C12' },
+  pendienteBadge: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: '#1A1D24',
+    borderWidth: 1, borderColor: '#2A2D35',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  pendienteText: { color: '#404040', fontSize: 13, fontWeight: 'bold' },
 
+  // Equipos
   teamsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
+    marginBottom: 10,
   },
-  teamName:     { flex: 1, color: '#A0A0A0', fontSize: 14, fontWeight: '600' },
-  teamRight:    { textAlign: 'right' },
-  teamSelected: { color: '#2ECC71' },
-  vsText:       { color: '#505050', fontSize: 12, fontWeight: 'bold', paddingHorizontal: 4 },
-
-  optionsRow:        { flexDirection: 'row', gap: 8 },
-  optionBtn:         {
+  teamBlock: {
     flex: 1,
-    backgroundColor: '#1C1F26',
-    paddingVertical: 10,
-    borderRadius: 10,
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#2A2D35',
+    gap: 8,
+    paddingVertical: 8,
+    borderRadius: 10,
   },
-  optionBtnSelected: { backgroundColor: 'rgba(46,204,113,0.12)', borderColor: '#2ECC71' },
-  optionBtnPressed:  { opacity: 0.7 },
-  optionKey:         { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 2 },
-  optionKeySelected: { color: '#2ECC71' },
-  optionSub:         { color: '#707070', fontSize: 9, textAlign: 'center' },
-  optionSubSelected: { color: '#2ECC71' },
+  teamBlockRight:  {},
+  teamBlockWinner: {
+    backgroundColor: 'rgba(46,204,113,0.06)',
+  },
+  teamName: {
+    color: '#808080',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  teamNameRight:  { textAlign: 'center' },
+  teamNameWinner: { color: '#E0E0E0' },
+
+  // Controles goles
+  golesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  golesBtn: {
+    width: 28, height: 28, borderRadius: 8,
+    backgroundColor: '#1A1D24',
+    borderWidth: 1, borderColor: '#2A2D35',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  golesBtnTxt:      { color: '#C0C0C0', fontSize: 18, lineHeight: 20, fontWeight: '300' },
+  golesBtnDisabled: { color: '#2A2D35' },
+  golesBox: {
+    width: 40, height: 40, borderRadius: 10,
+    backgroundColor: '#1A1D24',
+    borderWidth: 1.5, borderColor: '#2A2D35',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  golesBoxWinner: {
+    borderColor: '#2ECC71',
+    backgroundColor: 'rgba(46,204,113,0.1)',
+  },
+  golesNum:       { color: '#808080', fontSize: 20, fontWeight: 'bold', fontVariant: ['tabular-nums'] },
+  golesNumWinner: { color: '#2ECC71' },
+
+  // Modo solo lectura (disabled)
+  golesReadOnly: {
+    color: '#606060',
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+
+  // Centro
+  centerCol: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  vsText:            { color: '#303030', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
+  empatePill: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(243,156,18,0.15)',
+    borderWidth: 1, borderColor: '#F39C12',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  empateText:       { color: '#F39C12', fontSize: 13, fontWeight: 'bold' },
+  flechaLocal:      { color: '#2ECC71', fontSize: 16 },
+  flechaVisitante:  { color: '#2ECC71', fontSize: 16 },
+  flechaInactiva:   { color: '#303030', fontSize: 14 },
+
+  // Hint
+  hintRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#1A1D24',
+    paddingTop: 8,
+    alignItems: 'center',
+  },
+  hintText: { color: '#404040', fontSize: 11 },
 });

@@ -7,6 +7,7 @@ import { supabase } from '../src/config/supabase';
 export default function RootLayout() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [session, setSession] = useState<any>(null);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
   const router = useRouter();
   const segments = useSegments();
 
@@ -42,7 +43,18 @@ export default function RootLayout() {
       setSession(session);
       setIsInitialized(true);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        // Marcar que estamos en flujo de recuperación y redirigir a reset
+        setIsPasswordRecovery(true);
+        setSession(session);
+        router.replace('/auth/reset-password');
+        return;
+      }
+      if (event === 'USER_UPDATED') {
+        // Contraseña actualizada, limpiar flag de recovery
+        setIsPasswordRecovery(false);
+      }
       setSession(session);
     });
     return () => subscription.unsubscribe();
@@ -50,11 +62,19 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (!isInitialized) return;
+    // Si estamos en flujo de recovery, no redirigir
+    if (isPasswordRecovery) return;
+
     const inAuthGroup = segments[0] === 'auth';
     const inPagoGroup = segments[0] === 'pago';
-    if (!session && !inAuthGroup && !inPagoGroup) router.replace('/auth/login');
-    else if (session && inAuthGroup) router.replace('/(tabs)');
-  }, [session, isInitialized, segments]);
+    const inResetPassword = segments[1] === 'reset-password';
+
+    if (!session && !inAuthGroup && !inPagoGroup) {
+      router.replace('/auth/login');
+    } else if (session && inAuthGroup && !inResetPassword) {
+      router.replace('/(tabs)');
+    }
+  }, [session, isInitialized, segments, isPasswordRecovery]);
 
   if (!isInitialized) {
     return (
@@ -70,6 +90,8 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="auth/login" />
         <Stack.Screen name="auth/register" />
+        <Stack.Screen name="auth/forgot-password" />
+        <Stack.Screen name="auth/reset-password" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="quiniela/details" />
         <Stack.Screen name="admin/index" />

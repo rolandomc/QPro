@@ -5,6 +5,21 @@ export default function PagoFallo() {
   const router = useRouter();
   const params = useLocalSearchParams();
 
+  // quinielaId puede venir como parámetro directo o dentro de external_reference (UUID de participación)
+  // MercadoPago devuelve external_reference = participacionId, pero también pasamos quinielaId como param
+  const quinielaId = params.quinielaId as string | undefined;
+
+  const handleReintentar = () => {
+    if (quinielaId) {
+      // Navegar de regreso a la pantalla de detalles de la quiniela,
+      // que ya tiene el banner de "Pago incompleto" y el botón Pagar ahora
+      router.replace(`/quiniela/details?id=${quinielaId}`);
+    } else {
+      // Fallback: ir al home para que el usuario busque su quiniela
+      router.replace('/(tabs)');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.icon}>❌</Text>
@@ -15,7 +30,7 @@ export default function PagoFallo() {
       {params.external_reference ? (
         <Text style={styles.ref}>Ref: {params.external_reference}</Text>
       ) : null}
-      <TouchableOpacity style={styles.btnPrimary} onPress={() => router.back()}>
+      <TouchableOpacity style={styles.btnPrimary} onPress={handleReintentar}>
         <Text style={styles.btnPrimaryText}>Intentar de nuevo</Text>
       </TouchableOpacity>
       <TouchableOpacity style={styles.btnSecondary} onPress={() => router.replace('/(tabs)')}>

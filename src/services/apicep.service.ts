@@ -20,10 +20,16 @@ export interface CepResult {
   cuentaBeneficiario: string; // CLABE destino
 }
 
+export interface ValidarResult {
+  valid: boolean;
+  cep?: CepResult;
+  errorMsg?: string;
+}
+
 export const ApiCepService = {
   /**
    * Consulta un CEP por clave de rastreo.
-   * Lanza error si no existe o no está liquidada.
+   * Lanza error si la respuesta HTTP no es OK.
    */
   async consultarCEP(claveRastreo: string): Promise<CepResult> {
     const apiKey = process.env.EXPO_PUBLIC_APICEP_API_KEY;
@@ -49,21 +55,35 @@ export const ApiCepService = {
    * 1. Exista y esté LIQUIDADA
    * 2. El monto sea >= montoEsperado
    * 3. La cuenta beneficiario sea nuestra CLABE
+   *
+   * Devuelve { valid, cep?, errorMsg? } — nunca lanza excepción.
    */
-  async validarPago(claveRastreo: string, montoEsperado: number): Promise<CepResult> {
-    const cep = await ApiCepService.consultarCEP(claveRastreo);
-    const clabeDestino = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? '';
+  async validarCEP(claveRastreo: string, montoEsperado: number): Promise<ValidarResult> {
+    try {
+      const cep = await ApiCepService.consultarCEP(claveRastreo);
+      const clabeDestino = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? '';
 
-    if (cep.estado !== 'LIQUIDADA') {
-      throw new Error(`La transferencia aún no está liquidada (estado: ${cep.estado})`);
-    }
-    if (clabeDestino && cep.cuentaBeneficiario !== clabeDestino) {
-      throw new Error('La transferencia no está dirigida a la cuenta correcta');
-    }
-    if (cep.monto < montoEsperado) {
-      throw new Error(`Monto insuficiente. Se esperaban $${montoEsperado} MXN, se recibieron $${cep.monto}`);
-    }
+      if (cep.estado !== 'LIQUIDADA') {
+        return { valid: false, errorMsg: `Transferencia no liquidada (estado: ${cep.estado})` };
+      }
+      if (clabeDestino && cep.cuentaBeneficiario !== clabeDestino) {
+        return { valid: false, errorMsg: 'La transferencia no está dirigida a la cuenta correcta' };
+      }
+      if (cep.monto < montoEsperado) {
+        return { valid: false, errorMsg: `Monto insuficiente. Esperado: $${montoEsperado} MXN, recibido: $${cep.monto}` };
+      }
 
-    return cep;
+      return { valid: true, cep };
+    } catch (e: any) {
+      return { valid: false, errorMsg: e.message ?? 'Error al consultar apiCEP' };
+    }
+  },
+
+  /**
+   * Alias semántico — igual que validarCEP.
+   * Mantenido para compatibilidad con código que llame validarPago.
+   */
+  async validarPago(claveRastreo: string, montoEsperado: number): Promise<ValidarResult> {
+    return ApiCepService.validarCEP(claveRastreo, montoEsperado);
   },
 };

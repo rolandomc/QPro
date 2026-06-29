@@ -234,7 +234,7 @@ export default function QuinielaDetailsScreen() {
     (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0), 0
   );
 
-  // ─── Pantallas de estado ───────────────────────────────────
+  // ─── Pantallas de estado ────────────────────────────
 
   if (loading) {
     return (
@@ -335,7 +335,7 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Pantalla principal ─────────────────────────────────────
+  // ─── Pantalla principal ───────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
 
@@ -355,7 +355,7 @@ export default function QuinielaDetailsScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      {/* Barra de progreso */}
+      {/* Barra de progreso (solo cuando no ha participado o está editando) */}
       {(!yaParticipo || modoEdicion) && (
         <View style={styles.progressWrap}>
           <ProgressBar current={totalSeleccionados} total={partidos.length} />
@@ -365,16 +365,26 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Banner: ya participó */}
+      {/* Banner verde + botón editar — visible al entrar sin hacer scroll */}
       {yaParticipo && !modoEdicion && (
-        <View style={styles.participandoBanner}>
-          <Text style={styles.participandoText}>
-            ✅ Ya tienes picks guardados  •  🎯 {golesPredichosTotales} goles predichos
-          </Text>
+        <View style={styles.participandoWrap}>
+          <View style={styles.participandoBanner}>
+            <Text style={styles.participandoText}>
+              ✅ Ya tienes picks guardados  •  🎯 {golesPredichosTotales} goles predichos
+            </Text>
+          </View>
+          {puedeEditar && (
+            <TouchableOpacity
+              style={styles.editBtn}
+              onPress={() => setModoEdicion(true)}
+            >
+              <Text style={styles.editBtnTxt}>✏️ Editar mis picks</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
-      {/* Banner: pago pendiente */}
+      {/* Banner pago pendiente */}
       {pagoPendiente && !modoEdicion && (
         <View style={styles.pendingBanner}>
           <Text style={styles.pendingBannerText}>
@@ -419,7 +429,7 @@ export default function QuinielaDetailsScreen() {
           <View style={styles.footer}>
             {faltanMsg ? <Text style={styles.faltanMsg}>{faltanMsg}</Text> : null}
 
-            {/* Primera vez */}
+            {/* Primera vez: confirmar y pagar */}
             {!yaParticipo && (
               <TouchableOpacity
                 style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
@@ -427,16 +437,6 @@ export default function QuinielaDetailsScreen() {
                 disabled={!isComplete}
               >
                 <Text style={styles.confirmBtnTxt}>Confirmar picks y pagar</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Botón editar — solo en el footer */}
-            {yaParticipo && !modoEdicion && puedeEditar && (
-              <TouchableOpacity
-                style={styles.editBtn}
-                onPress={() => setModoEdicion(true)}
-              >
-                <Text style={styles.editBtnTxt}>✏️ Editar mis picks</Text>
               </TouchableOpacity>
             )}
 
@@ -483,16 +483,28 @@ const styles = StyleSheet.create({
   progressWrap: { paddingHorizontal: 16, paddingTop: 12 },
   progressText: { color: '#606060', fontSize: 12, marginTop: 6, marginBottom: 4 },
 
+  // Bloque verde: banner + botón editar juntos
+  participandoWrap: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    gap: 8,
+  },
   participandoBanner: {
-    marginHorizontal: 16, marginTop: 10,
     backgroundColor: 'rgba(46,204,113,0.08)',
     borderWidth: 1, borderColor: 'rgba(46,204,113,0.25)',
     borderRadius: 10, padding: 10, alignItems: 'center',
   },
   participandoText: { color: '#2ECC71', fontSize: 12, fontWeight: '500' },
 
+  editBtn: {
+    borderWidth: 1.5, borderColor: '#2ECC71', borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center',
+    backgroundColor: 'rgba(46,204,113,0.06)',
+  },
+  editBtnTxt: { color: '#2ECC71', fontWeight: '700', fontSize: 15 },
+
   pendingBanner: {
-    margin: 16, marginBottom: 0,
+    marginHorizontal: 16, marginTop: 8,
     backgroundColor: 'rgba(243,156,18,0.1)',
     borderWidth: 1, borderColor: '#F39C12',
     borderRadius: 12, padding: 14, gap: 10,
@@ -525,13 +537,6 @@ const styles = StyleSheet.create({
   confirmBtn:    { backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   confirmBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 15 },
   btnDisabled:   { opacity: 0.35 },
-
-  editBtn: {
-    borderWidth: 1.5, borderColor: '#2ECC71', borderRadius: 14,
-    paddingVertical: 14, alignItems: 'center',
-    backgroundColor: 'rgba(46,204,113,0.06)',
-  },
-  editBtnTxt: { color: '#2ECC71', fontWeight: '700', fontSize: 15 },
 
   editActions:  { gap: 10 },
   cancelBtn:    { paddingVertical: 14, alignItems: 'center' },

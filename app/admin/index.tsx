@@ -1,5 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Alert, ActivityIndicator, RefreshControl, Modal, FlatList } from 'react-native';
+import {
+  StyleSheet, Text, View, ScrollView, TouchableOpacity,
+  Alert, ActivityIndicator, RefreshControl, Modal, FlatList, Linking,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { AdminService } from '../../src/services/admin.service';
@@ -30,9 +33,14 @@ export default function AdminDashboardScreen() {
   const [pickerVisible,        setPickerVisible]        = useState(false);
   const [retirosPendientes,    setRetirosPendientes]    = useState(0);
 
+  // ── Comprobantes SPEI pendientes ──────────────────────────────────
+  const [speiPendientes,       setSpeiPendientes]       = useState<any[]>([]);
+  const [speiExpanded,         setSpeiExpanded]         = useState(false);
+  const [aprobandoId,          setAprobandoId]          = useState<string | null>(null);
+
   const loadQuinielas = useCallback(async () => {
     try {
-      const [data, fecha, { count }] = await Promise.all([
+      const [data, fecha, { count }, { data: speiData }] = await Promise.all([
         AdminService.getQuinielas(),
         QuinielasService.getProximaFecha(),
         supabase
@@ -40,10 +48,35 @@ export default function AdminDashboardScreen() {
           .select('id', { count: 'exact', head: true })
           .eq('estado', 'pendiente')
           .then(r => ({ count: r.count ?? 0 })),
+        // Cargar participaciones SPEI con comprobante subido pero sin validar
+        supabase
+          .from('participaciones')
+          .select('id, user_id, monto_pagado, clave_rastreo, comprobante_url, comprobante_enviado_at, ultimo_error_spei, created_at, quiniela_id')
+          .eq('estado', 'spei_pendiente')
+          .eq('comprobante_validado', false)
+          .not('comprobante_url', 'is', null)
+          .order('comprobante_enviado_at', { ascending: true }),
       ]);
       setQuinielas(data || []);
       setProximaFecha(fecha ?? '');
       setRetirosPendientes(count);
+
+      // Enriquecer con username
+      const parts = speiData || [];
+      if (parts.length > 0) {
+        const userIds = parts.map((p: any) => p.user_id);
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('id, username')
+          .in('id', userIds);
+        const profsMap: Record<string, string> = {};
+        (profs || []).forEach((p: any) => { profsMap[p.id] = p.username; });
+        setSpeiPendientes(parts.map((p: any) => ({ ...p, username: profsMap[p.user_id] ?? 'usuario' })));
+        // Auto-expandir si hay pendientes
+        if (parts.length > 0) setSpeiExpanded(true);
+      } else {
+        setSpeiPendientes([]);
+      }
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -53,6 +86,47 @@ export default function AdminDashboardScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
+
+  // ── Aprobar comprobante SPEI manualmente ─────────────────────────
+  const handleAprobarSPEI = (item: any) => {
+    Alert.alert(
+      '✅ Aprobar Pago',
+      `¿Confirmas que el pago de @${item.username} es válido?\n\nClave: ${item.clave_rastreo ?? 'N/A'}`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Aprobar',
+          onPress: async () => {
+            setAprobandoId(item.id);
+            try {
+              const { error } = await supabase
+                .from('participaciones')
+                .update({
+                  estado:               'pagado',
+                  comprobante_validado: true,
+                  monto_pagado:         item.monto_pagado || 50,
+                  fecha_pago:           new Date().toISOString(),
+                  ultimo_error_spei:    null,
+                })
+                .eq('id', item.id);
+              if (error) throw error;
+              // Marcar notificación como leída
+              await supabase
+                .from('admin_notificaciones')
+                .update({ leida: true })
+                .eq('participacion_id', item.id);
+              setSpeiPendientes(prev => prev.filter(p => p.id !== item.id));
+              Alert.alert('¡Aprobado!', `El pago de @${item.username} fue confirmado.`);
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setAprobandoId(null);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const handlePickerConfirm = (date: Date) => {
     setPickerVisible(false);
@@ -172,6 +246,79 @@ export default function AdminDashboardScreen() {
             <Text style={styles.statLabel}>Bolsa Total</Text>
           </View>
         </View>
+
+        {/* ── Comprobantes SPEI pendientes ── */}
+        <TouchableOpacity
+          style={[styles.speiHeader, speiPendientes.length > 0 && styles.speiHeaderAlert]}
+          onPress={() => setSpeiExpanded(v => !v)}
+        >
+          <View style={styles.speiHeaderLeft}>
+            <Text style={styles.speiEmoji}>🧾</Text>
+            <View>
+              <Text style={styles.speiHeaderTitle}>Comprobantes SPEI</Text>
+              <Text style={styles.speiHeaderSub}>
+                {speiPendientes.length > 0
+                  ? `${speiPendientes.length} pago${speiPendientes.length > 1 ? 's' : ''} por revisar`
+                  : 'Sin pagos pendientes'}
+              </Text>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {speiPendientes.length > 0 && (
+              <View style={styles.speiBadge}>
+                <Text style={styles.speiBadgeCount}>{speiPendientes.length}</Text>
+              </View>
+            )}
+            <Text style={styles.speiChevron}>{speiExpanded ? '▲' : '▼'}</Text>
+          </View>
+        </TouchableOpacity>
+
+        {speiExpanded && (
+          <View style={styles.speiList}>
+            {speiPendientes.length === 0 ? (
+              <Text style={styles.speiEmpty}>✅ Todos los comprobantes están al día.</Text>
+            ) : (
+              speiPendientes.map((item) => (
+                <View key={item.id} style={styles.speiCard}>
+                  <View style={styles.speiCardHeader}>
+                    <Text style={styles.speiUser}>@{item.username}</Text>
+                    <Text style={styles.speiMonto}>${item.monto_pagado || '?'}</Text>
+                  </View>
+                  {item.clave_rastreo ? (
+                    <Text style={styles.speiClave}>🔑 {item.clave_rastreo}</Text>
+                  ) : (
+                    <Text style={styles.speiClaveNull}>⚠️ Sin clave de rastreo</Text>
+                  )}
+                  {item.ultimo_error_spei ? (
+                    <Text style={styles.speiError} numberOfLines={2}>{item.ultimo_error_spei}</Text>
+                  ) : null}
+                  <Text style={styles.speiDate}>
+                    {item.comprobante_enviado_at ? formatDisplay(item.comprobante_enviado_at) : ''}
+                  </Text>
+                  <View style={styles.speiActions}>
+                    {item.comprobante_url ? (
+                      <TouchableOpacity
+                        style={styles.speiVerBtn}
+                        onPress={() => Linking.openURL(item.comprobante_url)}
+                      >
+                        <Text style={styles.speiVerText}>🖼 Ver comprobante</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    <TouchableOpacity
+                      style={[styles.speiAprobarBtn, aprobandoId === item.id && { opacity: 0.6 }]}
+                      onPress={() => handleAprobarSPEI(item)}
+                      disabled={aprobandoId === item.id}
+                    >
+                      {aprobandoId === item.id
+                        ? <ActivityIndicator size="small" color="#000" />
+                        : <Text style={styles.speiAprobarText}>✅ Aprobar</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        )}
 
         {/* Acceso rápido retiros */}
         <TouchableOpacity
@@ -343,6 +490,32 @@ const styles = StyleSheet.create({
   statBox:              { flex: 1, alignItems: 'center' },
   statValue:            { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
   statLabel:            { color: '#A0A0A0', fontSize: 12 },
+
+  // ── SPEI pendientes ──
+  speiHeader:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: '#2A2D35' },
+  speiHeaderAlert:      { borderColor: '#2ECC71' },
+  speiHeaderLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  speiEmoji:            { fontSize: 28 },
+  speiHeaderTitle:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  speiHeaderSub:        { color: '#A0A0A0', fontSize: 12, marginTop: 2 },
+  speiBadge:            { backgroundColor: '#2ECC71', borderRadius: 12, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
+  speiBadgeCount:       { color: '#000', fontWeight: 'bold', fontSize: 12 },
+  speiChevron:          { color: '#2ECC71', fontSize: 12 },
+  speiList:             { backgroundColor: '#15181F', borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35', gap: 10 },
+  speiEmpty:            { color: '#2ECC71', fontSize: 13, textAlign: 'center', paddingVertical: 12 },
+  speiCard:             { backgroundColor: '#1C1F26', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2A2D35' },
+  speiCardHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  speiUser:             { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
+  speiMonto:            { color: '#2ECC71', fontWeight: 'bold', fontSize: 16 },
+  speiClave:            { color: '#A0A0A0', fontSize: 11, marginBottom: 4, fontFamily: 'monospace' },
+  speiClaveNull:        { color: '#F39C12', fontSize: 11, marginBottom: 4 },
+  speiError:            { color: '#E74C3C', fontSize: 10, marginBottom: 4, fontStyle: 'italic' },
+  speiDate:             { color: '#505050', fontSize: 10, marginBottom: 8 },
+  speiActions:          { flexDirection: 'row', gap: 8 },
+  speiVerBtn:           { flex: 1, backgroundColor: '#1C1F26', paddingVertical: 9, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#3498DB' },
+  speiVerText:          { color: '#3498DB', fontSize: 12, fontWeight: '600' },
+  speiAprobarBtn:       { flex: 1, backgroundColor: '#2ECC71', paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
+  speiAprobarText:      { color: '#000', fontSize: 12, fontWeight: 'bold' },
 
   retirosBtn:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1.5, borderColor: '#F39C12' },
   retirosBtnLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12 },

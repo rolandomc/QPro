@@ -1,62 +1,69 @@
 /**
  * apiCEP Service
- * Valida comprobantes SPEI contra Banxico vía apiCEP.
+ * Valida un comprobante SPEI contra Banxico vía apiCEP.
  * Docs: https://www.apicep.cloud
  *
- * Variables de entorno requeridas:
- *   EXPO_PUBLIC_APICEP_API_KEY  — tu API key de apiCEP
- *   EXPO_PUBLIC_CLABE_DESTINO   — tu CLABE para recibir transferencias
+ * Variables de entorno necesarias:
+ *   EXPO_PUBLIC_APICEP_API_KEY  → tu API key de apiCEP
+ *   EXPO_PUBLIC_CLABE_DESTINO  → tu CLABE donde recibes los pagos
  */
 
-const APICEP_BASE = 'https://api.apicep.cloud/v1';
+const APICEP_BASE = 'https://www.apicep.cloud/api/v1';
 
-export interface CepValidationResult {
-  valid: boolean;
-  amount?: number;
-  sender?: string;
-  trackingKey?: string;
-  date?: string;
-  errorMsg?: string;
+export interface CepResult {
+  claveRastreo: string;
+  monto: number;           // en pesos
+  emisor: string;
+  receptor: string;
+  fechaOperacion: string;  // ISO
+  estado: 'LIQUIDADA' | 'DEVUELTA' | string;
+  cuentaBeneficiario: string; // CLABE destino
 }
 
 export const ApiCepService = {
   /**
-   * Valida una clave de rastreo SPEI (CEP) contra Banxico.
+   * Consulta un CEP por clave de rastreo.
+   * Lanza error si no existe o no está liquidada.
    */
-  async validarCEP(claveRastreo: string, monto: number): Promise<CepValidationResult> {
+  async consultarCEP(claveRastreo: string): Promise<CepResult> {
     const apiKey = process.env.EXPO_PUBLIC_APICEP_API_KEY;
     if (!apiKey) throw new Error('EXPO_PUBLIC_APICEP_API_KEY no configurada');
 
-    try {
-      const res = await fetch(`${APICEP_BASE}/cep/validate`, {
-        method: 'POST',
+    const res = await fetch(
+      `${APICEP_BASE}/cep?claveRastreo=${encodeURIComponent(claveRastreo)}`,
+      {
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          tracking_key: claveRastreo.trim(),
-          amount: monto,
-          destination_clabe: process.env.EXPO_PUBLIC_CLABE_DESTINO,
-        }),
-      });
-
-      const json = await res.json();
-
-      if (!res.ok) {
-        return { valid: false, errorMsg: json.message ?? 'No se pudo validar el comprobante' };
       }
+    );
 
-      return {
-        valid:       json.valid === true,
-        amount:      json.amount,
-        sender:      json.sender_name,
-        trackingKey: json.tracking_key,
-        date:        json.operation_date,
-        errorMsg:    json.valid ? undefined : 'El comprobante no coincide con el pago esperado',
-      };
-    } catch (e: any) {
-      return { valid: false, errorMsg: e.message ?? 'Error de red al validar CEP' };
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message ?? 'Error al consultar CEP');
+    return json as CepResult;
+  },
+
+  /**
+   * Valida que el CEP:
+   * 1. Exista y esté LIQUIDADA
+   * 2. El monto sea >= montoEsperado
+   * 3. La cuenta beneficiario sea nuestra CLABE
+   */
+  async validarPago(claveRastreo: string, montoEsperado: number): Promise<CepResult> {
+    const cep = await ApiCepService.consultarCEP(claveRastreo);
+    const clabeDestino = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? '';
+
+    if (cep.estado !== 'LIQUIDADA') {
+      throw new Error(`La transferencia aún no está liquidada (estado: ${cep.estado})`);
     }
+    if (clabeDestino && cep.cuentaBeneficiario !== clabeDestino) {
+      throw new Error('La transferencia no está dirigida a la cuenta correcta');
+    }
+    if (cep.monto < montoEsperado) {
+      throw new Error(`Monto insuficiente. Se esperaban $${montoEsperado} MXN, se recibieron $${cep.monto}`);
+    }
+
+    return cep;
   },
 };

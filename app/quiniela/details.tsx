@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ActivityIndicator,
   TouchableOpacity, FlatList, Alert, Linking, Platform,
-  TextInput, ScrollView,
+  TextInput, ScrollView, KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -10,29 +10,22 @@ import ProgressBar from '../../src/components/ProgressBar';
 import MatchSelectionCard, { type SeleccionConGoles } from '../../src/components/MatchSelectionCard';
 import { QuinielasService } from '../../src/services/quinielas.service';
 import { MercadoPagoService } from '../../src/services/mercadopago.service';
-import { SpeiService } from '../../src/services/spei.service';
+import { ApiCepService } from '../../src/services/apicep.service';
 import { supabase } from '../../src/config/supabase';
 
-type PayMethod = 'mp' | 'spei';
+type MetodoPago = 'mp' | 'spei';
 type ConfirmState =
   | 'idle'
-  | 'choosingPayment'
-  | 'confirmingMP'
+  | 'choosingPayment'   // pantalla selector de método
+  | 'confirmingMP'      // resumen antes de ir a MP
   | 'confirmingEdit'
-  | 'speiInstructions'   // Datos bancarios + subir comprobante
-  | 'speiUploading'      // Subiendo imagen
-  | 'speiWaitingKey'     // Imagen subida, esperando clave de rastreo
-  | 'validatingSpei'     // Spinner apiCEP
-  | 'speiSuccess'        // Validado OK
-  | 'speiPending'        // Comprobante enviado, en revisión (sin clave o apiCEP no pudo)
-  | 'speiError'          // Comprobante inválido
+  | 'speiPendiente'     // usuario ingresa clave de rastreo
+  | 'validandoSpei'     // spinner mientras apiCEP valida
   | 'success'
   | 'successEdit'
   | 'error';
 
 const PENDING_KEY = 'qpro_pago_pendiente';
-const CLABE_DESTINO = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? '000000000000000000';
-const BANCO_NOMBRE  = process.env.EXPO_PUBLIC_BANCO_NOMBRE  ?? 'STP';
 
 function checkPendingPago(quinielaId: string): boolean {
   if (Platform.OS !== 'web') return false;
@@ -46,6 +39,7 @@ function checkPendingPago(quinielaId: string): boolean {
 export default function QuinielaDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+
   const isPendingPago = useRef(checkPendingPago(id as string));
 
   const [quiniela,        setQuiniela]        = useState<any>(null);
@@ -60,19 +54,16 @@ export default function QuinielaDetailsScreen() {
   const [confirmState,    setConfirmState]    = useState<ConfirmState>(
     isPendingPago.current ? 'success' : 'idle'
   );
-  const [errorMsg,         setErrorMsg]         = useState('');
-  const [faltanMsg,        setFaltanMsg]         = useState('');
-  const [retryingPago,     setRetryingPago]      = useState(false);
-  const [payMethod,        setPayMethod]         = useState<PayMethod>('mp');
-  const [claveRastreo,     setClaveRastreo]      = useState('');
-  const [speiResultMsg,    setSpeiResultMsg]     = useState('');
-  const [comprobanteUrl,   setComprobanteUrl]    = useState<string | null>(null);
+  const [errorMsg,      setErrorMsg]      = useState('');
+  const [faltanMsg,     setFaltanMsg]     = useState('');
+  const [retryingPago,  setRetryingPago]  = useState(false);
+  const [claveRastreo,  setClaveRastreo]  = useState('');
+  const [speiError,     setSpeiError]     = useState('');
+  const [metodoPago,    setMetodoPago]    = useState<MetodoPago>('mp');
 
-  const openingRef           = useRef(false);
-  const picksOriginalesRef   = useRef<Record<string, SeleccionConGoles>>({});
-  const participacionIdRef   = useRef<string | null>(null);
-
-  // ─── Helpers ────────────────────────────────────────────────────────────────
+  const openingRef            = useRef(false);
+  const picksOriginalesRef    = useRef<Record<string, SeleccionConGoles>>({});
+  const participacionIdRef    = useRef<string | null>(null);
 
   const cargarPicksActuales = useCallback(async (partId: string) => {
     const { data: sels } = await supabase
@@ -91,8 +82,6 @@ export default function QuinielaDetailsScreen() {
     setSelecciones(map);
     return map;
   }, []);
-
-  // ─── Carga inicial ───────────────────────────────────────────────────────────
 
   useFocusEffect(
     useCallback(() => {
@@ -138,8 +127,6 @@ export default function QuinielaDetailsScreen() {
     }, [id, cargarPicksActuales])
   );
 
-  // ─── Picks ───────────────────────────────────────────────────────────────────
-
   const handleSelect = (partidoId: string, seleccion: SeleccionConGoles) => {
     if (yaParticipo && !modoEdicion) return;
     setSelecciones(prev => ({ ...prev, [partidoId]: seleccion }));
@@ -151,8 +138,6 @@ export default function QuinielaDetailsScreen() {
     if (participacionId) setSelecciones({ ...picksOriginalesRef.current });
   }, [participacionId]);
 
-  // ─── Edición ─────────────────────────────────────────────────────────────────
-
   const handleGuardarEdicion = async () => {
     if (!participacionId) return;
     setSaving(true);
@@ -161,24 +146,23 @@ export default function QuinielaDetailsScreen() {
         (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0), 0
       );
       const rows = Object.entries(selecciones).map(([partido_id, sel]) => ({
-        participacion_id:          participacionId,
+        participacion_id:           participacionId,
         partido_id,
-        prediccion:                sel.prediccion,
-        goles_local_predichos:     sel.golesLocal,
-        goles_visitante_predichos: sel.golesVisitante,
+        prediccion:                 sel.prediccion,
+        goles_local_predichos:      sel.golesLocal,
+        goles_visitante_predichos:  sel.golesVisitante,
       }));
       const [{ error: selErr }] = await Promise.all([
         supabase.from('selecciones').upsert(rows, { onConflict: 'participacion_id,partido_id' }),
-        supabase.from('participaciones')
-          .update({ total_goles_predichos: totalGolesPredichos })
-          .eq('id', participacionId),
+        supabase.from('participaciones').update({ total_goles_predichos: totalGolesPredichos }).eq('id', participacionId),
       ]);
       if (selErr) throw selErr;
       picksOriginalesRef.current = { ...selecciones };
       setModoEdicion(false);
       setConfirmState('successEdit');
     } catch (e: any) {
-      setErrorMsg(e.message); setConfirmState('error');
+      setErrorMsg(e.message);
+      setConfirmState('error');
     } finally {
       setSaving(false);
     }
@@ -191,8 +175,7 @@ export default function QuinielaDetailsScreen() {
     setConfirmState('confirmingEdit');
   };
 
-  // ─── Primera participación ───────────────────────────────────────────────────
-
+  // Abre pantalla de selección de método
   const handleConfirmarClick = () => {
     if (yaParticipo) return;
     const faltan = partidos.filter(p => !selecciones[p.id]);
@@ -201,9 +184,8 @@ export default function QuinielaDetailsScreen() {
     setConfirmState('choosingPayment');
   };
 
-  // ─── Pago MP ─────────────────────────────────────────────────────────────────
-
-  const handleIrAPagarMP = async () => {
+  // Guardar picks y luego redirigir a MP
+  const handlePagarConMP = async () => {
     if (openingRef.current) return;
     openingRef.current = true;
     setSaving(true);
@@ -228,80 +210,54 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── Pago SPEI ───────────────────────────────────────────────────────────────
-
-  const handleIrASPEI = async () => {
-    if (openingRef.current) return;
-    openingRef.current = true;
+  // Guardar picks con estado spei_pendiente y mostrar instrucciones
+  const handlePagarConSpei = async () => {
     setSaving(true);
     try {
-      const participacion = await QuinielasService.guardarSelecciones(id, selecciones);
+      const participacion = await QuinielasService.guardarSelecciones(
+        id, selecciones, 'spei_pendiente'
+      );
       const partId = participacion.id ?? participacionId;
-      participacionIdRef.current = partId;
       setParticipacionId(partId);
-      await SpeiService.registrarIntencionSPEI(partId!);
-      setConfirmState('speiInstructions');
+      participacionIdRef.current = partId;
+      setConfirmState('speiPendiente');
     } catch (e: any) {
-      openingRef.current = false;
       setErrorMsg(e.message);
       setConfirmState('error');
     } finally {
       setSaving(false);
-      openingRef.current = false;
     }
   };
 
-  /** Abre galería y sube imagen */
-  const handleSubirComprobante = async () => {
-    const partId = participacionIdRef.current ?? participacionId;
-    if (!partId) return;
-    setConfirmState('speiUploading');
-    try {
-      const url = await SpeiService.subirComprobante(partId);
-      if (!url) {
-        // Usuario canceló el picker
-        setConfirmState('speiInstructions');
-        return;
-      }
-      setComprobanteUrl(url);
-      setConfirmState('speiWaitingKey');
-    } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'No se pudo subir el comprobante.');
-      setConfirmState('speiInstructions');
-    }
-  };
-
-  /** Valida clave de rastreo con apiCEP */
-  const handleValidarSPEI = async () => {
-    if (!claveRastreo.trim()) {
-      Alert.alert('Falta la clave', 'Ingresa la clave de rastreo de tu comprobante SPEI.');
-      return;
-    }
-    const partId = participacionIdRef.current ?? participacionId;
-    if (!partId) return;
-    setConfirmState('validatingSpei');
+  // Validar CEP y activar participación
+  const handleValidarSpei = async () => {
+    if (!claveRastreo.trim()) { setSpeiError('Ingresa la clave de rastreo'); return; }
+    setSpeiError('');
+    setConfirmState('validandoSpei');
     try {
       const monto = quiniela?.precio_entrada ?? 0;
-      const result = await SpeiService.validarYConfirmar(partId, claveRastreo.trim(), monto);
-      if (result.valid) {
-        setSpeiResultMsg(`✅ Pago confirmado por $${result.amount} MXN`);
-        setConfirmState('speiSuccess');
-      } else {
-        setSpeiResultMsg(result.errorMsg ?? 'Comprobante inválido');
-        setConfirmState('speiError');
-      }
-    } catch (e: any) {
-      setSpeiResultMsg(e.message);
-      setConfirmState('speiError');
-    }
-  };
+      const cep = await ApiCepService.validarPago(claveRastreo.trim(), monto);
+      const partId = participacionIdRef.current;
+      if (!partId) throw new Error('No se encontró la participación');
 
-  /** Sin clave rastreo → queda en revisión manual */
-  const handleEnviarSinClave = async () => {
-    const partId = participacionIdRef.current ?? participacionId;
-    if (!partId) return;
-    await SpeiService.marcarPendienteRevision(partId);
-    setConfirmState('speiPending');
+      // Activar participación en Supabase
+      const { error } = await supabase
+        .from('participaciones')
+        .update({
+          estado:           'pagado',
+          metodo_pago:      'spei',
+          clave_rastreo:    claveRastreo.trim(),
+          monto_pagado:     cep.monto,
+          fecha_pago:       cep.fechaOperacion,
+        })
+        .eq('id', partId);
+      if (error) throw error;
+
+      setConfirmState('success');
+    } catch (e: any) {
+      setSpeiError(e.message);
+      setConfirmState('speiPendiente');
+    }
   };
 
   const handleReintentarPago = async () => {
@@ -315,17 +271,16 @@ export default function QuinielaDetailsScreen() {
         window.location.href = init_point;
         return;
       } else {
+        setConfirmState('success');
         Linking.openURL(init_point);
       }
     } catch (e: any) {
       openingRef.current = false;
-      Alert.alert('Error', e.message ?? 'No pudimos abrir el pago.');
+      Alert.alert('Error', e.message ?? 'No pudimos abrir el pago. Intenta más tarde.');
     } finally {
       setRetryingPago(false);
     }
   };
-
-  // ─── Computed ────────────────────────────────────────────────────────────────
 
   const totalSeleccionados    = Object.keys(selecciones).length;
   const isComplete            = totalSeleccionados === partidos.length && partidos.length > 0;
@@ -333,383 +288,304 @@ export default function QuinielaDetailsScreen() {
   const golesPredichosTotales = Object.values(selecciones).reduce(
     (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0), 0
   );
-  const precioEntrada         = quiniela?.precio_entrada ?? 0;
+  const clabe = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? 'CLABE no configurada';
+  const monto = quiniela?.precio_entrada ?? 0;
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // PANTALLAS DE ESTADO
-  // ════════════════════════════════════════════════════════════════════════════
-
+  // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
           <ActivityIndicator size="large" color="#2ECC71" />
-          <Text style={s.loadingText}>Cargando partidos...</Text>
+          <Text style={styles.loadingText}>Cargando partidos...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ── Éxito MP ────────────────────────────────────────────────────────────────
+  // ─── Éxito pago ──────────────────────────────────────────────────────────
   if (confirmState === 'success') {
     return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
-          <Text style={s.bigEmoji}>🎉</Text>
-          <Text style={s.stateTitle}>¡Pago en proceso!</Text>
-          <Text style={s.stateSub}>Tus picks fueron guardados.{`\n`}Tu participación se confirma cuando MP apruebe el pago.</Text>
-          <TouchableOpacity style={s.primaryBtn} onPress={() => router.replace('/results')}>
-            <Text style={s.primaryBtnTxt}>Ver mis quinielas</Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>🎉</Text>
+          <Text style={styles.successTitle}>¡Listo, ya estás dentro!</Text>
+          <Text style={styles.successSub}>
+            Tus picks fueron guardados y tu participación está confirmada.
+          </Text>
+          <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/results')}>
+            <Text style={styles.successBtnTxt}>Ver mis quinielas</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ── Éxito edición ────────────────────────────────────────────────────────────
+  // ─── Éxito edición ───────────────────────────────────────────────────────
   if (confirmState === 'successEdit') {
     return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
-          <Text style={s.bigEmoji}>✅</Text>
-          <Text style={s.stateTitle}>¡Picks actualizados!</Text>
-          <Text style={s.stateSub}>Tus cambios quedaron guardados.</Text>
-          <TouchableOpacity style={s.primaryBtn} onPress={() => setConfirmState('idle')}>
-            <Text style={s.primaryBtnTxt}>Ver mis picks</Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>✅</Text>
+          <Text style={styles.successTitle}>¡Picks actualizados!</Text>
+          <Text style={styles.successSub}>Tus cambios quedaron guardados.</Text>
+          <TouchableOpacity style={styles.successBtn} onPress={() => setConfirmState('idle')}>
+            <Text style={styles.successBtnTxt}>Ver mis picks</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ── Error genérico ───────────────────────────────────────────────────────────
+  // ─── Error ────────────────────────────────────────────────────────────────
   if (confirmState === 'error') {
     return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
-          <Text style={s.bigEmoji}>❌</Text>
-          <Text style={s.stateTitle}>Algo salió mal</Text>
-          <Text style={s.stateSub}>{errorMsg}</Text>
-          <TouchableOpacity style={s.primaryBtn} onPress={() => setConfirmState('idle')}>
-            <Text style={s.primaryBtnTxt}>Reintentar</Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>❌</Text>
+          <Text style={styles.successTitle}>Algo salió mal</Text>
+          <Text style={styles.successSub}>{errorMsg}</Text>
+          <TouchableOpacity style={styles.successBtn} onPress={() => setConfirmState('idle')}>
+            <Text style={styles.successBtnTxt}>Reintentar</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ── Confirmación edición ─────────────────────────────────────────────────────
+  // ─── Confirmar edición ───────────────────────────────────────────────────
   if (confirmState === 'confirmingEdit') {
     return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
-          <Text style={s.bigEmoji}>📝</Text>
-          <Text style={s.stateTitle}>Confirmar cambios</Text>
-          <Text style={s.stateSub}>Se guardarán tus picks actualizados.</Text>
-          <View style={s.summaryBox}>
-            <Text style={s.summaryLabel}>🎯 Goles totales predichos</Text>
-            <Text style={s.summaryValue}>{golesPredichosTotales}</Text>
-            <Text style={s.summaryHint}>Desempate: quien más se acerque al total real gana.</Text>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>📝</Text>
+          <Text style={styles.successTitle}>Confirmar cambios</Text>
+          <Text style={styles.successSub}>Se guardarán tus picks actualizados.</Text>
+          <View style={styles.desempateSummary}>
+            <Text style={styles.desempateLabel}>🎯 Tus goles totales predichos</Text>
+            <Text style={styles.desempateValue}>{golesPredichosTotales}</Text>
+            <Text style={styles.desempateHint}>
+              En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
+            </Text>
           </View>
-          <TouchableOpacity style={[s.primaryBtn, saving && s.disabled]} onPress={handleGuardarEdicion} disabled={saving}>
-            {saving ? <ActivityIndicator color="#000" /> : <Text style={s.primaryBtnTxt}>Guardar cambios</Text>}
-          </TouchableOpacity>
-          <TouchableOpacity style={s.ghostBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
-            <Text style={s.ghostBtnTxt}>Cancelar</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ── Selector de método de pago ───────────────────────────────────────────────
-  if (confirmState === 'choosingPayment') {
-    return (
-      <SafeAreaView style={s.container}>
-        <ScrollView contentContainerStyle={s.centered}>
-          <Text style={s.bigEmoji}>💳</Text>
-          <Text style={s.stateTitle}>¿Cómo quieres pagar?</Text>
-          <Text style={s.stateSub}>Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${precioEntrada} MXN</Text></Text>
-
-          <View style={s.summaryBox}>
-            <Text style={s.summaryLabel}>🎯 Goles totales predichos</Text>
-            <Text style={s.summaryValue}>{golesPredichosTotales}</Text>
-            <Text style={s.summaryHint}>Criterio de desempate si hay empate en aciertos.</Text>
-          </View>
-
-          <View style={s.methodRow}>
-            <TouchableOpacity
-              style={[s.methodCard, payMethod === 'mp' && s.methodCardActive]}
-              onPress={() => setPayMethod('mp')}
-            >
-              <Text style={s.methodEmoji}>💙</Text>
-              <Text style={s.methodTitle}>Mercado Pago</Text>
-              <Text style={s.methodDesc}>Tarjeta, OXXO, saldo MP{`\n`}Aprobación instantánea</Text>
-              {payMethod === 'mp' && <View style={s.methodCheck}><Text style={s.methodCheckTxt}>✓</Text></View>}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[s.methodCard, payMethod === 'spei' && s.methodCardActive]}
-              onPress={() => setPayMethod('spei')}
-            >
-              <Text style={s.methodEmoji}>🏦</Text>
-              <Text style={s.methodTitle}>Transferencia SPEI</Text>
-              <Text style={s.methodDesc}>Desde cualquier banco{`\n`}Sin comisión de pasarela</Text>
-              {payMethod === 'spei' && <View style={s.methodCheck}><Text style={s.methodCheckTxt}>✓</Text></View>}
-            </TouchableOpacity>
-          </View>
-
-          {payMethod === 'mp' ? (
-            <View style={s.methodInfoBox}>
-              <Text style={s.methodInfoText}>Se abrirá el checkout de Mercado Pago. Puedes pagar con tarjeta, saldo MP u OXXO. Tu participación se confirma automáticamente.</Text>
-            </View>
-          ) : (
-            <View style={s.methodInfoBox}>
-              <Text style={s.methodInfoText}>Verás los datos para transferir. Sube tu comprobante y se validará automáticamente vía Banxico.</Text>
-            </View>
-          )}
-
           <TouchableOpacity
-            style={[s.primaryBtn, saving && s.disabled]}
-            onPress={payMethod === 'mp' ? handleIrAPagarMP : handleIrASPEI}
+            style={[styles.successBtn, saving && styles.btnDisabled]}
+            onPress={handleGuardarEdicion}
             disabled={saving}
           >
             {saving
               ? <ActivityIndicator color="#000" />
-              : <Text style={s.primaryBtnTxt}>
-                  {payMethod === 'mp' ? 'Pagar con Mercado Pago →' : 'Ver datos de transferencia →'}
-                </Text>}
+              : <Text style={styles.successBtnTxt}>Guardar cambios</Text>}
           </TouchableOpacity>
-
-          <TouchableOpacity style={s.ghostBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
-            <Text style={s.ghostBtnTxt}>← Volver a mis picks</Text>
+          <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
+            <Text style={styles.cancelBtnTxt}>Cancelar</Text>
           </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // ── Instrucciones SPEI ───────────────────────────────────────────────────────
-  if (confirmState === 'speiInstructions') {
-    return (
-      <SafeAreaView style={s.container}>
-        <ScrollView contentContainerStyle={s.speiScroll}>
-          <Text style={s.bigEmoji}>🏦</Text>
-          <Text style={s.stateTitle}>Transferencia SPEI</Text>
-          <Text style={s.stateSub}>Realiza la transferencia y luego sube tu comprobante.</Text>
-
-          {/* Datos bancarios */}
-          <View style={s.bankBox}>
-            <View style={s.bankRow}>
-              <Text style={s.bankLabel}>Banco</Text>
-              <Text style={s.bankValue}>{BANCO_NOMBRE}</Text>
-            </View>
-            <View style={s.divider} />
-            <View style={s.bankRow}>
-              <Text style={s.bankLabel}>CLABE</Text>
-              <Text style={[s.bankValue, s.clabe]} selectable>{CLABE_DESTINO}</Text>
-            </View>
-            <View style={s.divider} />
-            <View style={s.bankRow}>
-              <Text style={s.bankLabel}>Monto exacto</Text>
-              <Text style={[s.bankValue, { color: '#2ECC71' }]}>${precioEntrada}.00 MXN</Text>
-            </View>
-            <View style={s.divider} />
-            <View style={s.bankRow}>
-              <Text style={s.bankLabel}>Concepto</Text>
-              <Text style={s.bankValue}>QPro participación</Text>
-            </View>
-          </View>
-
-          <View style={s.speiWarning}>
-            <Text style={s.speiWarningTxt}>⚠️ Transfiere el monto exacto (${precioEntrada}.00 MXN) para validación automática.</Text>
-          </View>
-
-          {/* Botón subir comprobante */}
-          <TouchableOpacity style={s.uploadBtn} onPress={handleSubirComprobante}>
-            <Text style={s.uploadBtnIcon}>📎</Text>
-            <Text style={s.uploadBtnTxt}>Subir comprobante (foto o captura)</Text>
-          </TouchableOpacity>
-
-          <Text style={s.inputHint}>Sube la foto o captura de pantalla de tu comprobante SPEI.</Text>
-
-          <TouchableOpacity style={s.ghostBtn} onPress={() => setConfirmState('choosingPayment')}>
-            <Text style={s.ghostBtnTxt}>← Cambiar método de pago</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // ── Subiendo imagen ──────────────────────────────────────────────────────────
-  if (confirmState === 'speiUploading') {
-    return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
-          <ActivityIndicator size="large" color="#2ECC71" style={{ marginBottom: 20 }} />
-          <Text style={s.stateTitle}>Subiendo comprobante…</Text>
-          <Text style={s.stateSub}>Espera un momento.</Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ── Imagen subida → ingresar clave rastreo ───────────────────────────────────
-  if (confirmState === 'speiWaitingKey') {
+  // ─── SELECTOR DE MÉTODO DE PAGO ──────────────────────────────────────────
+  if (confirmState === 'choosingPayment') {
     return (
-      <SafeAreaView style={s.container}>
-        <ScrollView contentContainerStyle={s.speiScroll}>
-          <Text style={s.bigEmoji}>✅</Text>
-          <Text style={s.stateTitle}>Comprobante recibido</Text>
-          <Text style={s.stateSub}>Ingresa la clave de rastreo para confirmar tu pago automáticamente.</Text>
+      <SafeAreaView style={styles.container}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+          <ScrollView contentContainerStyle={styles.centered}>
 
-          <View style={s.comprobanteOkBox}>
-            <Text style={s.comprobanteOkTxt}>📎 Imagen subida correctamente</Text>
-          </View>
+            <Text style={styles.payTitle}>¿Cómo quieres pagar?</Text>
+            <Text style={styles.paySub}>Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${monto} MXN</Text></Text>
 
-          <Text style={s.inputLabel}>Clave de rastreo (CEP)</Text>
-          <TextInput
-            style={s.input}
-            placeholder="Ej. 2026062912345678901234"
-            placeholderTextColor="#404040"
-            value={claveRastreo}
-            onChangeText={setClaveRastreo}
-            autoCapitalize="characters"
-            autoCorrect={false}
-          />
-          <Text style={s.inputHint}>La encuentras en el comprobante de tu banco (PDF o notificación).</Text>
+            {/* Resumen desempate */}
+            <View style={styles.desempateSummary}>
+              <Text style={styles.desempateLabel}>🎯 Goles totales predichos</Text>
+              <Text style={styles.desempateValue}>{golesPredichosTotales}</Text>
+              <Text style={styles.desempateHint}>
+                En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
+              </Text>
+            </View>
 
-          <TouchableOpacity
-            style={[s.primaryBtn, !claveRastreo.trim() && s.disabled]}
-            onPress={handleValidarSPEI}
-            disabled={!claveRastreo.trim()}
-          >
-            <Text style={s.primaryBtnTxt}>Validar y confirmar pago ✓</Text>
-          </TouchableOpacity>
-
-          {/* Opción sin clave */}
-          <View style={s.sinClaveBox}>
-            <Text style={s.sinClaveTxt}>¿No tienes la clave de rastreo?</Text>
-            <TouchableOpacity onPress={handleEnviarSinClave}>
-              <Text style={s.sinClaveLink}>Enviar para revisión manual →</Text>
+            {/* Opción MP */}
+            <TouchableOpacity
+              style={[styles.payOptionCard, metodoPago === 'mp' && styles.payOptionCardActive]}
+              onPress={() => setMetodoPago('mp')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.payOptionRow}>
+                <View style={styles.payOptionIconWrap}>
+                  <Text style={styles.payOptionIcon}>💳</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.payOptionTitle}>Mercado Pago</Text>
+                  <Text style={styles.payOptionDesc}>Tarjeta, OXXO, saldo MP — pago instantáneo</Text>
+                </View>
+                <View style={[styles.radioOuter, metodoPago === 'mp' && styles.radioOuterActive]}>
+                  {metodoPago === 'mp' && <View style={styles.radioInner} />}
+                </View>
+              </View>
+              {metodoPago === 'mp' && (
+                <View style={styles.payOptionDetail}>
+                  <Text style={styles.payOptionDetailTxt}>✅ Confirmación automática al pagar</Text>
+                  <Text style={styles.payOptionDetailTxt}>✅ Acepta tarjeta, débito, OXXO</Text>
+                </View>
+              )}
             </TouchableOpacity>
-          </View>
-        </ScrollView>
+
+            {/* Opción SPEI */}
+            <TouchableOpacity
+              style={[styles.payOptionCard, metodoPago === 'spei' && styles.payOptionCardActive]}
+              onPress={() => setMetodoPago('spei')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.payOptionRow}>
+                <View style={styles.payOptionIconWrap}>
+                  <Text style={styles.payOptionIcon}>🏦</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.payOptionTitle}>Transferencia SPEI</Text>
+                  <Text style={styles.payOptionDesc}>Desde cualquier banco mexicano, sin comisión extra</Text>
+                </View>
+                <View style={[styles.radioOuter, metodoPago === 'spei' && styles.radioOuterActive]}>
+                  {metodoPago === 'spei' && <View style={styles.radioInner} />}
+                </View>
+              </View>
+              {metodoPago === 'spei' && (
+                <View style={styles.payOptionDetail}>
+                  <Text style={styles.payOptionDetailTxt}>✅ Sin comisión adicional</Text>
+                  <Text style={styles.payOptionDetailTxt}>✅ Desde cualquier banco (BBVA, HSBC, Santander…)</Text>
+                  <Text style={styles.payOptionDetailTxt}>⚡ Validación automática con tu comprobante</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {/* Botón continuar */}
+            <TouchableOpacity
+              style={[styles.confirmBtn, saving && styles.btnDisabled]}
+              onPress={metodoPago === 'mp' ? handlePagarConMP : handlePagarConSpei}
+              disabled={saving}
+            >
+              {saving
+                ? <ActivityIndicator color="#000" />
+                : <Text style={styles.confirmBtnTxt}>
+                    {metodoPago === 'mp' ? 'Continuar con Mercado Pago →' : 'Continuar con SPEI →'}
+                  </Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
+              <Text style={styles.cancelBtnTxt}>← Volver a mis picks</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
 
-  // ── Validando SPEI ───────────────────────────────────────────────────────────
-  if (confirmState === 'validatingSpei') {
+  // ─── VALIDAR SPEI ─────────────────────────────────────────────────────────
+  if (confirmState === 'speiPendiente' || confirmState === 'validandoSpei') {
+    const validando = confirmState === 'validandoSpei';
     return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
-          <ActivityIndicator size="large" color="#2ECC71" style={{ marginBottom: 20 }} />
-          <Text style={s.stateTitle}>Validando pago…</Text>
-          <Text style={s.stateSub}>Consultando Banxico vía apiCEP.{`\n`}Esto puede tardar unos segundos.</Text>
-        </View>
+      <SafeAreaView style={styles.container}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+          <ScrollView contentContainerStyle={styles.centered}>
+
+            <Text style={{ fontSize: 52, marginBottom: 16 }}>🏦</Text>
+            <Text style={styles.payTitle}>Paga y confirma</Text>
+            <Text style={styles.paySub}>Realiza una transferencia SPEI por <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${monto} MXN</Text> a:</Text>
+
+            {/* Datos bancarios */}
+            <View style={styles.clabeBanner}>
+              <Text style={styles.clabeLabel}>CLABE Interbancaria</Text>
+              <Text style={styles.clabeValue} selectable>{clabe}</Text>
+              <Text style={styles.clabeHint}>Concepto: QPro - {id?.toString().slice(0, 8).toUpperCase()}</Text>
+            </View>
+
+            <View style={styles.spaySeparator}>
+              <View style={styles.spaySeparatorLine} />
+              <Text style={styles.spaySeparatorTxt}>Una vez que pagues</Text>
+              <View style={styles.spaySeparatorLine} />
+            </View>
+
+            <Text style={styles.speiInstruccion}>
+              Ingresa la <Text style={{ color: '#E0E0E0', fontWeight: '600' }}>clave de rastreo</Text> de tu comprobante para confirmar tu participación automáticamente.
+            </Text>
+
+            <View style={styles.inputWrap}>
+              <Text style={styles.inputLabel}>Clave de rastreo CEP</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ej. 2026062912345678"
+                placeholderTextColor="#404040"
+                value={claveRastreo}
+                onChangeText={setClaveRastreo}
+                autoCapitalize="none"
+                keyboardType="default"
+                editable={!validando}
+              />
+              {speiError ? <Text style={styles.speiErrorTxt}>{speiError}</Text> : null}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.confirmBtn, (validando || !claveRastreo.trim()) && styles.btnDisabled]}
+              onPress={handleValidarSpei}
+              disabled={validando || !claveRastreo.trim()}
+            >
+              {validando
+                ? <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                    <ActivityIndicator color="#000" size="small" />
+                    <Text style={styles.confirmBtnTxt}>Validando con Banxico...</Text>
+                  </View>
+                : <Text style={styles.confirmBtnTxt}>✓ Validar y confirmar entrada</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('choosingPayment')} disabled={validando}>
+              <Text style={styles.cancelBtnTxt}>← Cambiar método de pago</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
 
-  // ── SPEI confirmado ──────────────────────────────────────────────────────────
-  if (confirmState === 'speiSuccess') {
-    return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
-          <Text style={s.bigEmoji}>🎉</Text>
-          <Text style={s.stateTitle}>¡Participación confirmada!</Text>
-          <Text style={s.stateSub}>{speiResultMsg}</Text>
-          <Text style={s.stateSub}>Tu pago SPEI fue verificado.{`\n`}¡Ya estás dentro!</Text>
-          <TouchableOpacity style={s.primaryBtn} onPress={() => router.replace('/results')}>
-            <Text style={s.primaryBtnTxt}>Ver mis quinielas</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ── SPEI en revisión (sin clave o apiCEP no pudo confirmar) ──────────────────
-  if (confirmState === 'speiPending') {
-    return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
-          <Text style={s.bigEmoji}>⏳</Text>
-          <Text style={s.stateTitle}>Pago en revisión</Text>
-          <Text style={s.stateSub}>
-            Recibimos tu comprobante.{`\n`}Lo revisaremos y confirmaremos tu participación en breve.
-          </Text>
-          <View style={s.pendingInfoBox}>
-            <Text style={s.pendingInfoTxt}>📱 Te notificaremos cuando tu pago sea aprobado.</Text>
-          </View>
-          <TouchableOpacity style={s.primaryBtn} onPress={() => router.replace('/(tabs)')}>
-            <Text style={s.primaryBtnTxt}>Ir al inicio</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.ghostBtn} onPress={() => router.replace('/results')}>
-            <Text style={s.ghostBtnTxt}>Ver mis quinielas</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ── SPEI inválido ────────────────────────────────────────────────────────────
-  if (confirmState === 'speiError') {
-    return (
-      <SafeAreaView style={s.container}>
-        <View style={s.centered}>
-          <Text style={s.bigEmoji}>⚠️</Text>
-          <Text style={s.stateTitle}>Comprobante no válido</Text>
-          <Text style={s.stateSub}>{speiResultMsg}</Text>
-          <Text style={s.stateSub}>Verifica la clave de rastreo y que el monto sea exacto.</Text>
-          <TouchableOpacity style={s.primaryBtn} onPress={() => setConfirmState('speiWaitingKey')}>
-            <Text style={s.primaryBtnTxt}>Intentar de nuevo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.ghostBtn} onPress={handleEnviarSinClave}>
-            <Text style={s.ghostBtnTxt}>Enviar para revisión manual →</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // PANTALLA PRINCIPAL
-  // ════════════════════════════════════════════════════════════════════════════
+  // ─── Pantalla principal ───────────────────────────────────────────────────
   return (
-    <SafeAreaView style={s.container}>
+    <SafeAreaView style={styles.container}>
 
       {/* Header */}
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backIcon}>‹</Text>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
-        <View style={s.headerCenter}>
-          <Text style={s.headerTitle} numberOfLines={1}>{quiniela?.titulo ?? 'Quiniela'}</Text>
-          <Text style={s.headerSub}>{quiniela?.estado === 'abierta' ? '🟢 Abierta' : '🔴 Cerrada'}</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {quiniela?.titulo ?? 'Quiniela'}
+          </Text>
+          <Text style={styles.headerSub}>
+            {quiniela?.estado === 'abierta' ? '🟢 Abierta' : '🔴 Cerrada'}
+          </Text>
         </View>
         <View style={{ width: 36 }} />
       </View>
 
-      {/* Progress */}
+      {/* Barra de progreso */}
       {(!yaParticipo || modoEdicion) && (
-        <View style={s.progressWrap}>
+        <View style={styles.progressWrap}>
           <ProgressBar current={totalSeleccionados} total={partidos.length} />
-          <Text style={s.progressText}>{totalSeleccionados}/{partidos.length} picks</Text>
+          <Text style={styles.progressText}>
+            {totalSeleccionados}/{partidos.length} picks
+          </Text>
         </View>
       )}
 
       {/* Banner verde + botón editar */}
       {yaParticipo && !modoEdicion && (
-        <View style={s.participandoWrap}>
-          <View style={s.participandoBanner}>
-            <Text style={s.participandoText}>
+        <View style={styles.participandoWrap}>
+          <View style={styles.participandoBanner}>
+            <Text style={styles.participandoText}>
               ✅ Ya tienes picks guardados  •  🎯 {golesPredichosTotales} goles predichos
             </Text>
           </View>
           {puedeEditar && (
-            <TouchableOpacity style={s.editBtn} onPress={() => setModoEdicion(true)}>
-              <Text style={s.editBtnTxt}>✏️ Editar mis picks</Text>
+            <TouchableOpacity style={styles.editBtn} onPress={() => setModoEdicion(true)}>
+              <Text style={styles.editBtnTxt}>✏️ Editar mis picks</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -717,30 +593,32 @@ export default function QuinielaDetailsScreen() {
 
       {/* Banner pago pendiente */}
       {pagoPendiente && !modoEdicion && (
-        <View style={s.pendingBanner}>
-          <Text style={s.pendingBannerText}>⏳ Tu pago está pendiente. Tus picks están guardados.</Text>
-          <TouchableOpacity style={s.pendingBannerBtn} onPress={handleReintentarPago} disabled={retryingPago}>
+        <View style={styles.pendingBanner}>
+          <Text style={styles.pendingBannerText}>
+            ⏳ Tu pago está pendiente. Tus picks están guardados.
+          </Text>
+          <TouchableOpacity style={styles.pendingBannerBtn} onPress={handleReintentarPago} disabled={retryingPago}>
             {retryingPago
               ? <ActivityIndicator color="#000" size="small" />
-              : <Text style={s.pendingBannerBtnTxt}>Reintentar pago</Text>}
+              : <Text style={styles.pendingBannerBtnTxt}>Reintentar pago con MP</Text>}
           </TouchableOpacity>
         </View>
       )}
 
       {/* Hint desempate */}
       {(!yaParticipo || modoEdicion) && (
-        <View style={s.desempateHintBanner}>
-          <Text style={s.desempateHintText}>
-            ⚔️ <Text style={{ fontWeight: '600' }}>Desempate por goles:</Text> ingresa el marcador exacto. En empate de aciertos gana quien más se acerque al total real.
+        <View style={styles.desempateInfoBanner}>
+          <Text style={styles.desempateInfoText}>
+            ⚔️ <Text style={{ fontWeight: '600' }}>Desempate por goles:</Text> ingresa el marcador exacto que predices. En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
           </Text>
         </View>
       )}
 
-      {/* Lista */}
+      {/* Lista de partidos */}
       <FlatList
         data={partidos}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={s.list}
+        contentContainerStyle={styles.list}
         renderItem={({ item, index }) => (
           <MatchSelectionCard
             partido={item}
@@ -751,32 +629,32 @@ export default function QuinielaDetailsScreen() {
           />
         )}
         ListFooterComponent={
-          <View style={s.footer}>
-            {faltanMsg ? <Text style={s.faltanMsg}>{faltanMsg}</Text> : null}
+          <View style={styles.footer}>
+            {faltanMsg ? <Text style={styles.faltanMsg}>{faltanMsg}</Text> : null}
 
             {!yaParticipo && (
               <TouchableOpacity
-                style={[s.primaryBtn, !isComplete && s.disabled]}
+                style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
                 onPress={handleConfirmarClick}
                 disabled={!isComplete}
               >
-                <Text style={s.primaryBtnTxt}>Confirmar picks →</Text>
+                <Text style={styles.confirmBtnTxt}>Confirmar picks y elegir pago →</Text>
               </TouchableOpacity>
             )}
 
             {modoEdicion && (
-              <View style={{ gap: 10 }}>
+              <View style={styles.editActions}>
                 <TouchableOpacity
-                  style={[s.primaryBtn, (!isComplete || saving) && s.disabled]}
+                  style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
                   onPress={handleConfirmarEdicionClick}
                   disabled={!isComplete || saving}
                 >
                   {saving
                     ? <ActivityIndicator color="#000" />
-                    : <Text style={s.primaryBtnTxt}>Guardar cambios</Text>}
+                    : <Text style={styles.confirmBtnTxt}>Guardar cambios</Text>}
                 </TouchableOpacity>
-                <TouchableOpacity style={s.ghostBtn} onPress={handleCancelarEdicion} disabled={saving}>
-                  <Text style={s.ghostBtnTxt}>Cancelar edición</Text>
+                <TouchableOpacity style={styles.cancelBtn} onPress={handleCancelarEdicion} disabled={saving}>
+                  <Text style={styles.cancelBtnTxt}>Cancelar edición</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -787,17 +665,10 @@ export default function QuinielaDetailsScreen() {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// STYLES
-// ════════════════════════════════════════════════════════════════════════════
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: '#0A0C12' },
-  centered:    { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  centered:    { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   loadingText: { color: '#A0A0A0', marginTop: 12 },
-  bigEmoji:    { fontSize: 60, marginBottom: 16 },
-
-  stateTitle:  { color: '#E0E0E0', fontSize: 22, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
-  stateSub:    { color: '#808080', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 16 },
 
   header: {
     flexDirection: 'row', alignItems: 'center',
@@ -813,86 +684,122 @@ const s = StyleSheet.create({
   progressWrap: { paddingHorizontal: 16, paddingTop: 12 },
   progressText: { color: '#606060', fontSize: 12, marginTop: 6, marginBottom: 4 },
 
-  participandoWrap:   { marginHorizontal: 16, marginTop: 12, gap: 8 },
+  participandoWrap: { marginHorizontal: 16, marginTop: 12, gap: 8 },
   participandoBanner: {
     backgroundColor: 'rgba(46,204,113,0.08)',
     borderWidth: 1, borderColor: 'rgba(46,204,113,0.25)',
     borderRadius: 10, padding: 10, alignItems: 'center',
   },
   participandoText: { color: '#2ECC71', fontSize: 12, fontWeight: '500' },
-  editBtn:    { borderWidth: 1.5, borderColor: '#2ECC71', borderRadius: 14, paddingVertical: 14, alignItems: 'center', backgroundColor: 'rgba(46,204,113,0.06)' },
+
+  editBtn: {
+    borderWidth: 1.5, borderColor: '#2ECC71', borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center',
+    backgroundColor: 'rgba(46,204,113,0.06)',
+  },
   editBtnTxt: { color: '#2ECC71', fontWeight: '700', fontSize: 15 },
 
-  pendingBanner:      { marginHorizontal: 16, marginTop: 8, backgroundColor: 'rgba(243,156,18,0.1)', borderWidth: 1, borderColor: '#F39C12', borderRadius: 12, padding: 14, gap: 10 },
-  pendingBannerText:  { color: '#F39C12', fontSize: 13 },
-  pendingBannerBtn:   { backgroundColor: '#F39C12', borderRadius: 8, padding: 10, alignItems: 'center' },
-  pendingBannerBtnTxt:{ color: '#000', fontWeight: 'bold', fontSize: 13 },
-
-  desempateHintBanner: { marginHorizontal: 16, marginTop: 12, marginBottom: 4, backgroundColor: 'rgba(46,204,113,0.06)', borderWidth: 1, borderColor: 'rgba(46,204,113,0.2)', borderRadius: 10, padding: 12 },
-  desempateHintText:   { color: '#6ABD8A', fontSize: 12, lineHeight: 17 },
-
-  summaryBox:   { width: '100%', backgroundColor: '#15181F', borderRadius: 14, padding: 18, marginVertical: 16, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
-  summaryLabel: { color: '#A0A0A0', fontSize: 13, marginBottom: 8 },
-  summaryValue: { color: '#2ECC71', fontSize: 42, fontWeight: 'bold', marginBottom: 8 },
-  summaryHint:  { color: '#505050', fontSize: 11, textAlign: 'center', lineHeight: 16 },
-
-  methodRow: { flexDirection: 'row', gap: 12, width: '100%', marginBottom: 16 },
-  methodCard: {
-    flex: 1, backgroundColor: '#13161E', borderWidth: 1.5, borderColor: '#2A2D35',
-    borderRadius: 16, padding: 16, alignItems: 'center', gap: 6, position: 'relative',
+  pendingBanner: {
+    marginHorizontal: 16, marginTop: 8,
+    backgroundColor: 'rgba(243,156,18,0.1)',
+    borderWidth: 1, borderColor: '#F39C12',
+    borderRadius: 12, padding: 14, gap: 10,
   },
-  methodCardActive: { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.06)' },
-  methodEmoji: { fontSize: 28 },
-  methodTitle: { color: '#E0E0E0', fontSize: 14, fontWeight: '700', textAlign: 'center' },
-  methodDesc:  { color: '#606060', fontSize: 11, textAlign: 'center', lineHeight: 16 },
-  methodCheck: { position: 'absolute', top: 8, right: 8, backgroundColor: '#2ECC71', width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  methodCheckTxt: { color: '#000', fontSize: 11, fontWeight: 'bold' },
-  methodInfoBox:  { width: '100%', backgroundColor: '#13161E', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
-  methodInfoText: { color: '#808080', fontSize: 13, lineHeight: 19, textAlign: 'center' },
+  pendingBannerText:   { color: '#F39C12', fontSize: 13 },
+  pendingBannerBtn:    { backgroundColor: '#F39C12', borderRadius: 8, padding: 10, alignItems: 'center' },
+  pendingBannerBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 13 },
 
-  speiScroll:  { padding: 24, alignItems: 'center' },
-  bankBox:     { width: '100%', backgroundColor: '#13161E', borderRadius: 16, padding: 16, marginVertical: 16, borderWidth: 1, borderColor: '#2A2D35' },
-  bankRow:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
-  bankLabel:   { color: '#606060', fontSize: 13 },
-  bankValue:   { color: '#E0E0E0', fontSize: 13, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
-  clabe:       { color: '#2ECC71', fontSize: 12, letterSpacing: 1 },
-  divider:     { height: 1, backgroundColor: '#1E2128' },
-  speiWarning: { width: '100%', backgroundColor: 'rgba(243,156,18,0.08)', borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(243,156,18,0.3)' },
-  speiWarningTxt: { color: '#F39C12', fontSize: 12, textAlign: 'center' },
-
-  // Upload button
-  uploadBtn: {
-    width: '100%', backgroundColor: '#13161E', borderWidth: 1.5, borderColor: '#2ECC71',
-    borderRadius: 14, paddingVertical: 18, flexDirection: 'row',
-    alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 10,
+  desempateInfoBanner: {
+    marginHorizontal: 16, marginTop: 12, marginBottom: 4,
+    backgroundColor: 'rgba(46,204,113,0.06)',
+    borderWidth: 1, borderColor: 'rgba(46,204,113,0.2)',
+    borderRadius: 10, padding: 12,
   },
-  uploadBtnIcon: { fontSize: 22 },
-  uploadBtnTxt:  { color: '#2ECC71', fontWeight: '700', fontSize: 15 },
+  desempateInfoText: { color: '#6ABD8A', fontSize: 12, lineHeight: 17 },
 
-  // Comprobante OK chip
-  comprobanteOkBox: { backgroundColor: 'rgba(46,204,113,0.08)', borderWidth: 1, borderColor: 'rgba(46,204,113,0.25)', borderRadius: 10, padding: 10, marginBottom: 20, width: '100%', alignItems: 'center' },
-  comprobanteOkTxt: { color: '#2ECC71', fontSize: 13, fontWeight: '500' },
+  desempateSummary: {
+    width: '100%', backgroundColor: '#15181F',
+    borderRadius: 14, padding: 18, marginVertical: 20, alignItems: 'center',
+    borderWidth: 1, borderColor: '#2A2D35',
+  },
+  desempateLabel: { color: '#A0A0A0', fontSize: 13, marginBottom: 8 },
+  desempateValue: { color: '#2ECC71', fontSize: 42, fontWeight: 'bold', marginBottom: 8 },
+  desempateHint:  { color: '#505050', fontSize: 11, textAlign: 'center', lineHeight: 16 },
 
-  // Pending info box
-  pendingInfoBox: { backgroundColor: 'rgba(243,156,18,0.08)', borderWidth: 1, borderColor: 'rgba(243,156,18,0.3)', borderRadius: 12, padding: 14, marginBottom: 24, width: '100%', alignItems: 'center' },
-  pendingInfoTxt: { color: '#F39C12', fontSize: 13, textAlign: 'center' },
+  list:      { padding: 16, paddingBottom: 24 },
+  footer:    { marginTop: 8, gap: 10 },
+  faltanMsg: { color: '#F39C12', textAlign: 'center', fontSize: 13, marginBottom: 4 },
 
-  // Sin clave option
-  sinClaveBox:  { marginTop: 20, alignItems: 'center', gap: 6 },
-  sinClaveTxt:  { color: '#505050', fontSize: 12 },
-  sinClaveLink: { color: '#4A7CFF', fontSize: 13, fontWeight: '600' },
+  confirmBtn:    { backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 16, alignItems: 'center', width: '100%' },
+  confirmBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 15 },
+  btnDisabled:   { opacity: 0.35 },
 
-  inputLabel:  { alignSelf: 'flex-start', color: '#A0A0A0', fontSize: 13, marginBottom: 6, fontWeight: '600' },
-  input:       { width: '100%', backgroundColor: '#13161E', borderWidth: 1, borderColor: '#2A2D35', borderRadius: 12, padding: 14, color: '#E0E0E0', fontSize: 14, marginBottom: 6, letterSpacing: 0.5 },
-  inputHint:   { alignSelf: 'flex-start', color: '#404040', fontSize: 11, marginBottom: 20 },
+  editActions:  { gap: 10 },
+  cancelBtn:    { paddingVertical: 14, alignItems: 'center' },
+  cancelBtnTxt: { color: '#606060', fontSize: 14 },
 
-  primaryBtn:    { width: '100%', backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 8 },
-  primaryBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 15 },
-  ghostBtn:      { width: '100%', paddingVertical: 14, alignItems: 'center' },
-  ghostBtnTxt:   { color: '#606060', fontSize: 14 },
-  disabled:      { opacity: 0.35 },
+  successTitle:  { color: '#E0E0E0', fontSize: 22, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
+  successSub:    { color: '#808080', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
+  successBtn:    { backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 40, marginBottom: 12 },
+  successBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 15 },
 
-  list:     { padding: 16, paddingBottom: 24 },
-  footer:   { marginTop: 8, gap: 10 },
-  faltanMsg:{ color: '#F39C12', textAlign: 'center', fontSize: 13, marginBottom: 4 },
+  // ── Selector de método de pago ──────────────────────────────────────────
+  payTitle: { color: '#E0E0E0', fontSize: 22, fontWeight: 'bold', marginBottom: 6, textAlign: 'center' },
+  paySub:   { color: '#808080', fontSize: 14, textAlign: 'center', marginBottom: 4 },
+
+  payOptionCard: {
+    width: '100%', borderRadius: 16,
+    borderWidth: 1.5, borderColor: '#2A2D35',
+    backgroundColor: '#13151C',
+    padding: 16, marginBottom: 12,
+  },
+  payOptionCardActive: {
+    borderColor: '#2ECC71',
+    backgroundColor: 'rgba(46,204,113,0.05)',
+  },
+  payOptionRow:     { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  payOptionIconWrap: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: '#1E2128',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  payOptionIcon:  { fontSize: 22 },
+  payOptionTitle: { color: '#E0E0E0', fontSize: 15, fontWeight: '700', marginBottom: 2 },
+  payOptionDesc:  { color: '#707070', fontSize: 12 },
+  payOptionDetail: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#1E2128', gap: 4 },
+  payOptionDetailTxt: { color: '#5A9E6A', fontSize: 12 },
+
+  radioOuter: {
+    width: 20, height: 20, borderRadius: 10,
+    borderWidth: 2, borderColor: '#404040',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  radioOuterActive: { borderColor: '#2ECC71' },
+  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#2ECC71' },
+
+  // ── Pantalla SPEI ───────────────────────────────────────────────────────
+  clabeBanner: {
+    width: '100%', backgroundColor: '#0F1117',
+    borderWidth: 1, borderColor: '#2A2D35',
+    borderRadius: 16, padding: 20, marginVertical: 16, alignItems: 'center',
+  },
+  clabeLabel: { color: '#606060', fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 },
+  clabeValue: { color: '#E0E0E0', fontSize: 18, fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
+  clabeHint:  { color: '#404040', fontSize: 11 },
+
+  spaySeparator:    { flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%', marginVertical: 4 },
+  spaySeparatorLine: { flex: 1, height: 1, backgroundColor: '#1E2128' },
+  spaySeparatorTxt:  { color: '#404040', fontSize: 11 },
+
+  speiInstruccion: { color: '#808080', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 16, width: '100%' },
+
+  inputWrap:  { width: '100%', marginBottom: 16 },
+  inputLabel: { color: '#A0A0A0', fontSize: 12, marginBottom: 6 },
+  input: {
+    backgroundColor: '#13151C',
+    borderWidth: 1, borderColor: '#2A2D35',
+    borderRadius: 12, padding: 14,
+    color: '#E0E0E0', fontSize: 15, letterSpacing: 0.5,
+  },
+  speiErrorTxt: { color: '#E74C3C', fontSize: 12, marginTop: 6 },
 });

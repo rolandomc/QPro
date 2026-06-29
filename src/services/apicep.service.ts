@@ -5,7 +5,7 @@
  *
  * Variables de entorno requeridas:
  *   EXPO_PUBLIC_APICEP_API_KEY  — tu API key de apiCEP
- *   EXPO_PUBLIC_CLABE_DESTINO   — tu CLABE personal para recibir transferencias
+ *   EXPO_PUBLIC_CLABE_DESTINO   — tu CLABE para recibir transferencias
  */
 
 const APICEP_BASE = 'https://api.apicep.cloud/v1';
@@ -22,7 +22,6 @@ export interface CepValidationResult {
 export const ApiCepService = {
   /**
    * Valida una clave de rastreo SPEI (CEP) contra Banxico.
-   * Devuelve si el pago es válido, el monto y el emisor.
    */
   async validarCEP(claveRastreo: string, monto: number): Promise<CepValidationResult> {
     const apiKey = process.env.EXPO_PUBLIC_APICEP_API_KEY;

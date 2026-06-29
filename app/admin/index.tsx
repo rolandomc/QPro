@@ -16,6 +16,11 @@ function formatDisplay(iso: string) {
   const d = new Date(iso);
   return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}  ${pad(d.getHours())}:${pad(d.getMinutes())}h`;
 }
+function formatFecha(iso: string) {
+  return new Date(iso).toLocaleDateString('es-MX', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
 
 export default function AdminDashboardScreen() {
   const router = useRouter();
@@ -38,6 +43,12 @@ export default function AdminDashboardScreen() {
   const [speiExpanded,         setSpeiExpanded]         = useState(false);
   const [aprobandoId,          setAprobandoId]          = useState<string | null>(null);
 
+  // ── Retiros inline ────────────────────────────────────────────────
+  const [retirosExpanded,      setRetirosExpanded]      = useState(false);
+  const [retirosData,          setRetirosData]          = useState<any[]>([]);
+  const [loadingRetiros,       setLoadingRetiros]       = useState(false);
+  const [accionandoRetiro,     setAccionandoRetiro]     = useState<string | null>(null);
+
   const loadQuinielas = useCallback(async () => {
     try {
       const [data, fecha, { count }, { data: speiData }] = await Promise.all([
@@ -48,7 +59,6 @@ export default function AdminDashboardScreen() {
           .select('id', { count: 'exact', head: true })
           .eq('estado', 'pendiente')
           .then(r => ({ count: r.count ?? 0 })),
-        // Cargar participaciones SPEI con comprobante subido pero sin validar
         supabase
           .from('participaciones')
           .select('id, user_id, monto_pagado, clave_rastreo, comprobante_url, comprobante_enviado_at, ultimo_error_spei, created_at, quiniela_id')
@@ -61,7 +71,6 @@ export default function AdminDashboardScreen() {
       setProximaFecha(fecha ?? '');
       setRetirosPendientes(count);
 
-      // Enriquecer con username
       const parts = speiData || [];
       if (parts.length > 0) {
         const userIds = parts.map((p: any) => p.user_id);
@@ -72,7 +81,6 @@ export default function AdminDashboardScreen() {
         const profsMap: Record<string, string> = {};
         (profs || []).forEach((p: any) => { profsMap[p.id] = p.username; });
         setSpeiPendientes(parts.map((p: any) => ({ ...p, username: profsMap[p.user_id] ?? 'usuario' })));
-        // Auto-expandir si hay pendientes
         if (parts.length > 0) setSpeiExpanded(true);
       } else {
         setSpeiPendientes([]);
@@ -87,7 +95,96 @@ export default function AdminDashboardScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
 
-  // ── Aprobar comprobante SPEI manualmente ─────────────────────────
+  // ── Cargar retiros al expandir ────────────────────────────────────
+  const handleToggleRetiros = async () => {
+    const next = !retirosExpanded;
+    setRetirosExpanded(next);
+    if (next && retirosData.length === 0) {
+      setLoadingRetiros(true);
+      try {
+        const { data, error } = await supabase
+          .from('retiro_solicitudes')
+          .select('id, user_id, monto, metodo, clabe, alias_mp, estado, nota_admin, created_at, profiles:user_id ( username )')
+          .eq('estado', 'pendiente')
+          .order('created_at', { ascending: true });
+        if (error) throw error;
+        setRetirosData(data ?? []);
+      } catch (e: any) {
+        Alert.alert('Error', e.message);
+      } finally {
+        setLoadingRetiros(false);
+      }
+    }
+  };
+
+  const llamarEdgeFunction = async (solicitud_id: string, accion: 'pagar' | 'rechazar') => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('No autenticado');
+    const res = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/procesar-retiro`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ solicitud_id, accion }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? 'Error al procesar');
+    return json;
+  };
+
+  const handlePagarRetiro = (item: any) => {
+    const destino = item.metodo === 'spei' ? `CLABE: ${item.clabe}` : `Alias MP: ${item.alias_mp}`;
+    Alert.alert(
+      '💸 Confirmar pago',
+      `¿Marcar como pagado el retiro de\n\n@${item.profiles?.username}\n$${item.monto} MXN\n${destino}?\n\n⚠️ Solo confirma si ya hiciste la transferencia.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sí, ya pagué',
+          onPress: async () => {
+            setAccionandoRetiro(item.id + '_pagar');
+            try {
+              await llamarEdgeFunction(item.id, 'pagar');
+              setRetirosData(prev => prev.filter(r => r.id !== item.id));
+              setRetirosPendientes(p => Math.max(0, p - 1));
+              Alert.alert('✅ Listo', 'Retiro marcado como pagado.');
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setAccionandoRetiro(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRechazarRetiro = (item: any) => {
+    Alert.alert(
+      '❌ Rechazar retiro',
+      `¿Rechazar el retiro de @${item.profiles?.username} por $${item.monto} MXN?\n\nEl saldo será devuelto automáticamente.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Rechazar',
+          style: 'destructive',
+          onPress: async () => {
+            setAccionandoRetiro(item.id + '_rechazar');
+            try {
+              await llamarEdgeFunction(item.id, 'rechazar');
+              setRetirosData(prev => prev.filter(r => r.id !== item.id));
+              setRetirosPendientes(p => Math.max(0, p - 1));
+              Alert.alert('Rechazado', 'Solicitud rechazada y saldo devuelto.');
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setAccionandoRetiro(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // ── Aprobar comprobante SPEI ──────────────────────────────────────
   const handleAprobarSPEI = (item: any) => {
     Alert.alert(
       '✅ Aprobar Pago',
@@ -110,7 +207,6 @@ export default function AdminDashboardScreen() {
                 })
                 .eq('id', item.id);
               if (error) throw error;
-              // Marcar notificación como leída
               await supabase
                 .from('admin_notificaciones')
                 .update({ leida: true })
@@ -233,7 +329,7 @@ export default function AdminDashboardScreen() {
 
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); }} tintColor="#9B59B6" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); setRetirosData([]); }} tintColor="#9B59B6" />}
       >
         {/* Stats */}
         <View style={styles.statsContainer}>
@@ -320,10 +416,10 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
-        {/* Acceso rápido retiros */}
+        {/* ── Gestionar Retiros (acordeón) ── */}
         <TouchableOpacity
-          style={styles.retirosBtn}
-          onPress={() => router.push('/admin/retiros')}
+          style={[styles.retirosBtn, retirosPendientes > 0 && styles.retirosBtnAlert]}
+          onPress={handleToggleRetiros}
         >
           <View style={styles.retirosBtnLeft}>
             <Text style={styles.retirosEmoji}>💸</Text>
@@ -342,9 +438,74 @@ export default function AdminDashboardScreen() {
                 <Text style={styles.badgeCount}>{retirosPendientes}</Text>
               </View>
             )}
-            <Text style={styles.retirosChevron}>›</Text>
+            <Text style={styles.retirosChevron}>{retirosExpanded ? '▲' : '▼'}</Text>
           </View>
         </TouchableOpacity>
+
+        {retirosExpanded && (
+          <View style={styles.retirosList}>
+            {loadingRetiros ? (
+              <ActivityIndicator color="#F39C12" style={{ paddingVertical: 20 }} />
+            ) : retirosData.length === 0 ? (
+              <Text style={styles.retirosEmpty}>🎉 Sin retiros pendientes por procesar.</Text>
+            ) : (
+              retirosData.map((item) => {
+                const pagando   = accionandoRetiro === item.id + '_pagar';
+                const rechazando = accionandoRetiro === item.id + '_rechazar';
+                const ocupado   = pagando || rechazando;
+                return (
+                  <View key={item.id} style={styles.retiroCard}>
+                    <View style={styles.retiroCardHeader}>
+                      <View style={styles.retiroAvatarCircle}>
+                        <Text style={styles.retiroAvatarTxt}>{(item.profiles?.username ?? 'U')[0].toUpperCase()}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.retiroUser}>@{item.profiles?.username ?? 'usuario'}</Text>
+                        <Text style={styles.retiroFecha}>{formatFecha(item.created_at)}</Text>
+                      </View>
+                      <View style={[styles.retiroMetodoBadge, item.metodo === 'spei' ? styles.retiroMetodoSPEI : styles.retiroMetodoMP]}>
+                        <Text style={[styles.retiroMetodoTxt, item.metodo === 'spei' ? { color: '#3498DB' } : { color: '#00B1EA' }]}>
+                          {item.metodo === 'spei' ? '🏦 SPEI' : '💳 MP'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.retiroMonto}>${Number(item.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })} <Text style={styles.retiroMxn}>MXN</Text></Text>
+                    <View style={styles.retiroDestinoBox}>
+                      <Text style={styles.retiroDestinoLabel}>{item.metodo === 'spei' ? 'CLABE' : 'Alias / CVU'}</Text>
+                      <Text style={styles.retiroDestinoVal} numberOfLines={1}>
+                        {item.metodo === 'spei' ? item.clabe : item.alias_mp}
+                      </Text>
+                    </View>
+                    <View style={styles.retiroAcciones}>
+                      <TouchableOpacity
+                        style={[styles.retiroRechazarBtn, ocupado && { opacity: 0.4 }]}
+                        onPress={() => handleRechazarRetiro(item)}
+                        disabled={ocupado}
+                      >
+                        {rechazando
+                          ? <ActivityIndicator color="#E74C3C" size="small" />
+                          : <Text style={styles.retiroRechazarTxt}>✕ Rechazar</Text>}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.retiroPagarBtn, ocupado && { opacity: 0.4 }]}
+                        onPress={() => handlePagarRetiro(item)}
+                        disabled={ocupado}
+                      >
+                        {pagando
+                          ? <ActivityIndicator color="#000" size="small" />
+                          : <Text style={styles.retiroPagarTxt}>✓ Ya pagué</Text>}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+            {/* Botón para ir a la pantalla completa */}
+            <TouchableOpacity style={styles.retirosVerTodosBtn} onPress={() => router.push('/admin/retiros')}>
+              <Text style={styles.retirosVerTodosTxt}>Ver todos los retiros →</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Configurar próxima quiniela */}
         <TouchableOpacity style={styles.configHeader} onPress={() => setConfigExpanded(v => !v)}>
@@ -517,7 +678,9 @@ const styles = StyleSheet.create({
   speiAprobarBtn:       { flex: 1, backgroundColor: '#2ECC71', paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
   speiAprobarText:      { color: '#000', fontSize: 12, fontWeight: 'bold' },
 
-  retirosBtn:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1.5, borderColor: '#F39C12' },
+  // ── Retiros acordeón ──
+  retirosBtn:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: '#2A2D35' },
+  retirosBtnAlert:      { borderColor: '#F39C12' },
   retirosBtnLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
   retirosEmoji:         { fontSize: 28 },
   retirosBtnTitle:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
@@ -525,7 +688,32 @@ const styles = StyleSheet.create({
   retirosBtnRight:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge:                { backgroundColor: '#E74C3C', borderRadius: 12, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
   badgeCount:           { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
-  retirosChevron:       { color: '#F39C12', fontSize: 24 },
+  retirosChevron:       { color: '#F39C12', fontSize: 12 },
+
+  retirosList:          { backgroundColor: '#15181F', borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35', gap: 10 },
+  retirosEmpty:         { color: '#2ECC71', fontSize: 13, textAlign: 'center', paddingVertical: 12 },
+  retiroCard:           { backgroundColor: '#1C1F26', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2A2D35' },
+  retiroCardHeader:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  retiroAvatarCircle:   { width: 36, height: 36, borderRadius: 18, backgroundColor: '#15181F', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2A2D35' },
+  retiroAvatarTxt:      { color: '#F39C12', fontWeight: 'bold', fontSize: 15 },
+  retiroUser:           { color: '#FFF', fontWeight: '700', fontSize: 13 },
+  retiroFecha:          { color: '#505050', fontSize: 10, marginTop: 1 },
+  retiroMetodoBadge:    { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1 },
+  retiroMetodoSPEI:     { backgroundColor: 'rgba(52,152,219,0.1)', borderColor: 'rgba(52,152,219,0.3)' },
+  retiroMetodoMP:       { backgroundColor: 'rgba(0,177,234,0.1)', borderColor: 'rgba(0,177,234,0.3)' },
+  retiroMetodoTxt:      { fontSize: 11, fontWeight: '700' },
+  retiroMonto:          { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 8 },
+  retiroMxn:            { color: '#505050', fontSize: 13 },
+  retiroDestinoBox:     { backgroundColor: '#12151C', borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#2A2D35' },
+  retiroDestinoLabel:   { color: '#505050', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
+  retiroDestinoVal:     { color: '#E0E0E0', fontWeight: '600', fontSize: 12 },
+  retiroAcciones:       { flexDirection: 'row', gap: 8 },
+  retiroRechazarBtn:    { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', borderWidth: 1.5, borderColor: '#E74C3C', backgroundColor: 'rgba(231,76,60,0.07)' },
+  retiroRechazarTxt:    { color: '#E74C3C', fontSize: 12, fontWeight: 'bold' },
+  retiroPagarBtn:       { flex: 2, backgroundColor: '#2ECC71', paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
+  retiroPagarTxt:       { color: '#000', fontSize: 12, fontWeight: 'bold' },
+  retirosVerTodosBtn:   { marginTop: 4, paddingVertical: 10, alignItems: 'center' },
+  retirosVerTodosTxt:   { color: '#F39C12', fontSize: 13, fontWeight: '600' },
 
   configHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 10, padding: 14, marginBottom: 4, borderWidth: 1, borderColor: '#F39C12' },
   configHeaderText:     { color: '#F39C12', fontWeight: 'bold', fontSize: 14 },

@@ -200,6 +200,33 @@ export default function QuinielaDetailScreen() {
     setTimeout(() => setLivePulse(false), 800);
   }, [id]);
 
+  // ─── Recarga solo los resultados de partidos (sin resetear toda la pantalla) ───
+  const reloadPartidos = useCallback(async () => {
+    const { data: pts } = await supabase
+      .from('partidos')
+      .select('*')
+      .eq('quiniela_id', id!)
+      .order('orden', { ascending: true });
+    if (pts) setPartidos(pts);
+
+    // Refrescar también aciertos del usuario actual y ranking
+    if (myUserId.current) {
+      // Actualizar miPart (aciertos, estado)
+      const { data: part } = await supabase
+        .from('participaciones')
+        .select('id, aciertos, estado, premio_ganado, monto_pagado')
+        .eq('quiniela_id', id!)
+        .eq('user_id', myUserId.current)
+        .single();
+      if (part) setMiPart(part);
+
+      await loadRanking(myUserId.current, 0);
+    }
+
+    setLivePulse(true);
+    setTimeout(() => setLivePulse(false), 800);
+  }, [id, loadRanking]);
+
   const load = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -240,13 +267,31 @@ export default function QuinielaDetailScreen() {
 
   useEffect(() => {
     load();
+
     const channel = supabase
       .channel(`ranking-${id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` },
-        () => { if (myUserId.current) loadRanking(myUserId.current, 0); })
+      // Cuando el admin actualiza aciertos en participaciones → refrescar ranking
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'participaciones',
+        filter: `quiniela_id=eq.${id}`,
+      }, () => {
+        if (myUserId.current) loadRanking(myUserId.current, 0);
+      })
+      // ✅ NUEVO: cuando el admin carga un resultado de partido → refrescar picks + aciertos + ranking
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'partidos',
+        filter: `quiniela_id=eq.${id}`,
+      }, () => {
+        reloadPartidos();
+      })
       .subscribe();
+
     return () => { supabase.removeChannel(channel); };
-  }, [id, load, loadRanking]);
+  }, [id, load, loadRanking, reloadPartidos]);
 
   const totalPartidos = partidos.length;
   const conResultado = partidos.filter(p => p.resultado !== null);

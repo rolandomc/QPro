@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import ProgressBar from '../../src/components/ProgressBar';
-import MatchSelectionCard from '../../src/components/MatchSelectionCard';
+import MatchSelectionCard, { type SeleccionConGoles } from '../../src/components/MatchSelectionCard';
 import { QuinielasService } from '../../src/services/quinielas.service';
 import { MercadoPagoService } from '../../src/services/mercadopago.service';
 import { supabase } from '../../src/config/supabase';
@@ -15,7 +15,6 @@ type ConfirmState = 'idle' | 'confirming' | 'confirmingEdit' | 'success' | 'succ
 
 const PENDING_KEY = 'qpro_pago_pendiente';
 
-/** Lee localStorage de forma segura antes del primer render */
 function checkPendingPago(quinielaId: string): boolean {
   if (Platform.OS !== 'web') return false;
   try {
@@ -32,36 +31,42 @@ export default function QuinielaDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  // Inicializar confirmState ANTES del primer render revisando localStorage
   const isPendingPago = useRef(checkPendingPago(id as string));
 
-  const [quiniela,            setQuiniela]            = useState<any>(null);
-  const [partidos,            setPartidos]            = useState<any[]>([]);
-  const [selecciones,         setSelecciones]         = useState<Record<string, 'local' | 'empate' | 'visitante'>>({});
-  const [loading,             setLoading]             = useState(!isPendingPago.current);
-  const [saving,              setSaving]              = useState(false);
-  const [yaParticipo,         setYaParticipo]         = useState(false);
-  const [pagoPendiente,       setPagoPendiente]       = useState(false); // participación existe pero sin pago
-  const [modoEdicion,         setModoEdicion]         = useState(false);
-  const [participacionId,     setParticipacionId]     = useState<string | null>(null);
-  const [confirmState,        setConfirmState]        = useState<ConfirmState>(
+  const [quiniela,        setQuiniela]        = useState<any>(null);
+  const [partidos,        setPartidos]        = useState<any[]>([]);
+  const [selecciones,     setSelecciones]     = useState<Record<string, SeleccionConGoles>>({});
+  const [loading,         setLoading]         = useState(!isPendingPago.current);
+  const [saving,          setSaving]          = useState(false);
+  const [yaParticipo,     setYaParticipo]     = useState(false);
+  const [pagoPendiente,   setPagoPendiente]   = useState(false);
+  const [modoEdicion,     setModoEdicion]     = useState(false);
+  const [participacionId, setParticipacionId] = useState<string | null>(null);
+  const [confirmState,    setConfirmState]    = useState<ConfirmState>(
     isPendingPago.current ? 'success' : 'idle'
   );
-  const [errorMsg,            setErrorMsg]            = useState('');
-  const [faltanMsg,           setFaltanMsg]           = useState('');
-  const [retryingPago,        setRetryingPago]        = useState(false);
+  const [errorMsg,      setErrorMsg]      = useState('');
+  const [faltanMsg,     setFaltanMsg]     = useState('');
+  const [retryingPago,  setRetryingPago]  = useState(false);
 
-  // Ref para bloquear doble tap — persiste entre re-renders
   const openingRef = useRef(false);
-  const picksOriginalesRef = useRef<Record<string, 'local' | 'empate' | 'visitante'>>({});
+  const picksOriginalesRef = useRef<Record<string, SeleccionConGoles>>({});
 
+  /** Carga picks guardados y los transforma a SeleccionConGoles */
   const cargarPicksActuales = useCallback(async (partId: string) => {
     const { data: sels } = await supabase
       .from('selecciones')
-      .select('partido_id, prediccion')
+      .select('partido_id, prediccion, goles_local_predichos, goles_visitante_predichos')
       .eq('participacion_id', partId);
-    const map: Record<string, any> = {};
-    (sels || []).forEach((s: any) => { map[s.partido_id] = s.prediccion; });
+
+    const map: Record<string, SeleccionConGoles> = {};
+    (sels || []).forEach((s: any) => {
+      map[s.partido_id] = {
+        prediccion:    s.prediccion,
+        golesLocal:    s.goles_local_predichos    ?? 0,
+        golesVisitante: s.goles_visitante_predichos ?? 1,
+      };
+    });
     picksOriginalesRef.current = map;
     setSelecciones(map);
     return map;
@@ -69,7 +74,6 @@ export default function QuinielaDetailsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      // Si venimos de regreso de MP (pago pendiente), NO recargar ni pisar el state
       if (isPendingPago.current) return;
 
       async function loadData() {
@@ -96,13 +100,7 @@ export default function QuinielaDetailsScreen() {
               setYaParticipo(true);
               setParticipacionId(part.id);
               await cargarPicksActuales(part.id);
-
-              // ── CLAVE: detectar si el pago quedó incompleto ──
-              if (part.estado === 'pendiente') {
-                setPagoPendiente(true);
-              } else {
-                setPagoPendiente(false);
-              }
+              setPagoPendiente(part.estado === 'pendiente');
             } else {
               setYaParticipo(false);
               setPagoPendiente(false);
@@ -122,9 +120,9 @@ export default function QuinielaDetailsScreen() {
     }, [id, cargarPicksActuales])
   );
 
-  const handleSelect = (partidoId: string, opcion: 'local' | 'empate' | 'visitante') => {
+  const handleSelect = (partidoId: string, seleccion: SeleccionConGoles) => {
     if (yaParticipo && !modoEdicion) return;
-    setSelecciones(prev => ({ ...prev, [partidoId]: opcion }));
+    setSelecciones(prev => ({ ...prev, [partidoId]: seleccion }));
   };
 
   const handleCancelarEdicion = useCallback(async () => {
@@ -137,13 +135,31 @@ export default function QuinielaDetailsScreen() {
     if (!participacionId) return;
     setSaving(true);
     try {
-      const rows = Object.entries(selecciones).map(([partido_id, prediccion]) => ({
-        participacion_id: participacionId, partido_id, prediccion,
+      // Recalcular total goles al editar
+      const totalGolesPredichos = Object.values(selecciones).reduce(
+        (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0),
+        0
+      );
+
+      const rows = Object.entries(selecciones).map(([partido_id, sel]) => ({
+        participacion_id:           participacionId,
+        partido_id,
+        prediccion:                 sel.prediccion,
+        goles_local_predichos:      sel.golesLocal,
+        goles_visitante_predichos:  sel.golesVisitante,
       }));
-      const { error } = await supabase
-        .from('selecciones')
-        .upsert(rows, { onConflict: 'participacion_id,partido_id' });
-      if (error) throw error;
+
+      const [{ error: selErr }] = await Promise.all([
+        supabase
+          .from('selecciones')
+          .upsert(rows, { onConflict: 'participacion_id,partido_id' }),
+        supabase
+          .from('participaciones')
+          .update({ total_goles_predichos: totalGolesPredichos })
+          .eq('id', participacionId),
+      ]);
+      if (selErr) throw selErr;
+
       picksOriginalesRef.current = { ...selecciones };
       setModoEdicion(false);
       setConfirmState('successEdit');
@@ -197,10 +213,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  /**
-   * Reintenta el pago para una participación que quedó en estado 'pendiente'.
-   * NO crea una nueva participación — reutiliza el participacionId existente.
-   */
   const handleReintentarPago = async () => {
     if (!participacionId || openingRef.current) return;
     openingRef.current = true;
@@ -231,6 +243,12 @@ export default function QuinielaDetailsScreen() {
   const totalSeleccionados = Object.keys(selecciones).length;
   const isComplete = totalSeleccionados === partidos.length && partidos.length > 0;
   const puedeEditar = yaParticipo && quiniela?.estado === 'abierta' && !pagoPendiente;
+
+  // Suma total de goles predichos para mostrar en el resumen
+  const golesPredichosTotales = Object.values(selecciones).reduce(
+    (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0),
+    0
+  );
 
   // --- Pantallas de estado ---
 
@@ -266,11 +284,11 @@ export default function QuinielaDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
-          <Text style={{ fontSize: 60, marginBottom: 20 }}>✏️</Text>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>✅</Text>
           <Text style={styles.successTitle}>¡Picks actualizados!</Text>
-          <Text style={styles.successSub}>Tus nuevas selecciones han sido guardadas</Text>
-          <TouchableOpacity style={styles.successBtn} onPress={() => router.back()}>
-            <Text style={styles.successBtnTxt}>Ver mi quiniela</Text>
+          <Text style={styles.successSub}>Tus cambios quedaron guardados.</Text>
+          <TouchableOpacity style={styles.successBtn} onPress={() => setConfirmState('idle')}>
+            <Text style={styles.successBtnTxt}>Ver mis picks</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -281,13 +299,10 @@ export default function QuinielaDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
-          <Text style={{ fontSize: 50, marginBottom: 20 }}>❌</Text>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>❌</Text>
           <Text style={styles.successTitle}>Algo salió mal</Text>
           <Text style={styles.successSub}>{errorMsg}</Text>
-          <TouchableOpacity
-            style={[styles.successBtn, { backgroundColor: '#E74C3C' }]}
-            onPress={() => { openingRef.current = false; setConfirmState('idle'); }}
-          >
+          <TouchableOpacity style={styles.successBtn} onPress={() => setConfirmState('idle')}>
             <Text style={styles.successBtnTxt}>Reintentar</Text>
           </TouchableOpacity>
         </View>
@@ -295,267 +310,250 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  if (confirmState === 'confirmingEdit') {
+  if (confirmState === 'confirming' || confirmState === 'confirmingEdit') {
+    const isEdit = confirmState === 'confirmingEdit';
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
-          <Text style={{ fontSize: 50, marginBottom: 16 }}>✏️</Text>
-          <Text style={styles.confirmTitle}>Actualizar Picks</Text>
-          <View style={styles.confirmCard}>
-            <Text style={styles.confirmLine}>🏆 Quiniela: <Text style={{ color: '#FFF' }}>{quiniela?.titulo}</Text></Text>
-            <Text style={styles.confirmLine}>🎯 Picks: <Text style={{ color: '#00E5FF' }}>{totalSeleccionados} selecciones</Text></Text>
-            <Text style={[styles.confirmLine, { color: '#F39C12', fontSize: 12, marginTop: 8 }]}>
-              ⚠️ Tus picks anteriores serán reemplazados.
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>📝</Text>
+          <Text style={styles.successTitle}>
+            {isEdit ? 'Confirmar cambios' : 'Confirmar participación'}
+          </Text>
+          <Text style={styles.successSub}>
+            {isEdit
+              ? 'Se guardarán tus picks actualizados.'
+              : 'Se procesará tu pago y quedarás inscrito.'}
+          </Text>
+
+          {/* Resumen de goles para desempate */}
+          <View style={styles.desempateSummary}>
+            <Text style={styles.desempateLabel}>🎯 Tus goles totales predichos</Text>
+            <Text style={styles.desempateValue}>{golesPredichosTotales}</Text>
+            <Text style={styles.desempateHint}>
+              En caso de empate en aciertos, el participante cuya predicción de goles
+              totales sea la más cercana a los goles reales ganará.
             </Text>
           </View>
-          <View style={styles.confirmBtns}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
-              <Text style={styles.cancelBtnTxt}>Revisar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: '#F39C12' }]} onPress={handleGuardarEdicion} disabled={saving}>
-              {saving ? <ActivityIndicator color="#000" /> : <Text style={styles.confirmBtnTxt}>Guardar cambios</Text>}
-            </TouchableOpacity>
-          </View>
+
+          <TouchableOpacity
+            style={[styles.successBtn, saving && styles.btnDisabled]}
+            onPress={isEdit ? handleGuardarEdicion : handleConfirmarFinal}
+            disabled={saving}
+          >
+            {saving
+              ? <ActivityIndicator color="#000" />
+              : <Text style={styles.successBtnTxt}>
+                  {isEdit ? 'Guardar cambios' : 'Pagar y participar'}
+                </Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
+            <Text style={styles.cancelBtnTxt}>Cancelar</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  if (confirmState === 'confirming') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centered}>
-          <Text style={{ fontSize: 50, marginBottom: 16 }}>🎉</Text>
-          <Text style={styles.confirmTitle}>Confirmar Participación</Text>
-          <View style={styles.confirmCard}>
-            <Text style={styles.confirmLine}>🏆 Quiniela: <Text style={{ color: '#FFF' }}>{quiniela?.titulo}</Text></Text>
-            <Text style={styles.confirmLine}>💰 Costo: <Text style={{ color: '#2ECC71' }}>${quiniela?.precio_entrada ?? 50} MXN</Text></Text>
-            <Text style={styles.confirmLine}>🎯 Picks: <Text style={{ color: '#00E5FF' }}>{totalSeleccionados} selecciones</Text></Text>
-            <Text style={[styles.confirmLine, { color: '#606060', fontSize: 11, marginTop: 8 }]}>
-              Serás redirigido a Mercado Pago para completar el pago.
-            </Text>
-          </View>
-          <View style={styles.confirmBtns}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
-              <Text style={styles.cancelBtnTxt}>Revisar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.confirmBtn, (saving || openingRef.current) && { opacity: 0.5 }]}
-              onPress={handleConfirmarFinal}
-              disabled={saving || openingRef.current}
-            >
-              {saving
-                ? <ActivityIndicator color="#000" />
-                : <Text style={styles.confirmBtnTxt}>💳 Ir a pagar ${quiniela?.precio_entrada ?? 50}</Text>}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // --- Pantalla principal ---
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => {
-            if (modoEdicion) {
-              Alert.alert('¿Cancelar edición?', 'Perderás los cambios no guardados.', [
-                { text: 'Seguir editando', style: 'cancel' },
-                { text: 'Cancelar', style: 'destructive', onPress: () => { handleCancelarEdicion(); router.back(); } },
-              ]);
-            } else {
-              router.back();
-            }
-          }}
-          style={styles.backBtn}
-        >
-          <Text style={styles.backText}>← Volver</Text>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>{quiniela?.titulo ?? 'Quiniela'}</Text>
-        {puedeEditar && !modoEdicion && (
-          <TouchableOpacity style={styles.editBtn} onPress={() => setModoEdicion(true)}>
-            <Text style={styles.editBtnTxt}>✏️ Editar</Text>
-          </TouchableOpacity>
-        )}
-        {modoEdicion && (
-          <TouchableOpacity
-            style={styles.cancelEditBtn}
-            onPress={() => Alert.alert('¿Cancelar edición?', 'Perderás los cambios no guardados.', [
-              { text: 'Seguir editando', style: 'cancel' },
-              { text: 'Cancelar', style: 'destructive', onPress: handleCancelarEdicion },
-            ])}
-          >
-            <Text style={styles.cancelEditBtnTxt}>✕ Cancelar</Text>
-          </TouchableOpacity>
-        )}
-        {!puedeEditar && !modoEdicion && <View style={styles.spacer} />}
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {quiniela?.titulo ?? 'Quiniela'}
+          </Text>
+          <Text style={styles.headerSub}>
+            {quiniela?.estado === 'abierta' ? '🟢 Abierta' : '🔴 Cerrada'}
+          </Text>
+        </View>
+        <View style={{ width: 36 }} />
       </View>
 
-      {/* ── Banner: pago pendiente / reintentar ── */}
+      {/* Barra de progreso */}
+      {(!yaParticipo || modoEdicion) && (
+        <View style={styles.progressWrap}>
+          <ProgressBar current={totalSeleccionados} total={partidos.length} />
+          <Text style={styles.progressText}>
+            {totalSeleccionados}/{partidos.length} picks
+            {isComplete && !modoEdicion ? '  —  ' : ''}
+            {isComplete && !modoEdicion
+              ? <Text style={styles.golesHint}>🎯 {golesPredichosTotales} goles predichos</Text>
+              : null}
+          </Text>
+        </View>
+      )}
+
+      {/* Banner: pago pendiente */}
       {pagoPendiente && !modoEdicion && (
-        <View style={styles.pagoPendienteBanner}>
-          <View style={styles.pagoPendienteInfo}>
-            <Text style={styles.pagoPendienteTitle}>⚠️ Pago incompleto</Text>
-            <Text style={styles.pagoPendienteSubtitle}>
-              Tus picks están guardados. Solo falta completar el pago.
-            </Text>
-          </View>
+        <View style={styles.pendingBanner}>
+          <Text style={styles.pendingBannerText}>
+            ⏳ Tu pago está pendiente. Tus picks están guardados.
+          </Text>
           <TouchableOpacity
-            style={[styles.reintentarBtn, retryingPago && { opacity: 0.6 }]}
+            style={styles.pendingBannerBtn}
             onPress={handleReintentarPago}
             disabled={retryingPago}
           >
             {retryingPago
-              ? <ActivityIndicator size="small" color="#000" />
-              : <Text style={styles.reintentarBtnTxt}>💳 Pagar ahora</Text>
-            }
+              ? <ActivityIndicator color="#000" size="small" />
+              : <Text style={styles.pendingBannerBtnTxt}>Reintentar pago</Text>}
           </TouchableOpacity>
         </View>
       )}
 
-      {/* ── Banners normales (solo si NO hay pago pendiente) ── */}
-      {yaParticipo && !pagoPendiente && !modoEdicion && (
-        <View style={puedeEditar ? styles.editableBanner : styles.yaParticipoBar}>
-          <Text style={puedeEditar ? styles.editableBannerText : styles.yaParticipoText}>
-            {puedeEditar ? '✏️ Quiniela abierta — puedes editar tus picks' : '✅ Ya registraste tus selecciones — ¡Buena suerte!'}
+      {/* Hint de desempate (banner info) */}
+      {(!yaParticipo || modoEdicion) && (
+        <View style={styles.desempateInfoBanner}>
+          <Text style={styles.desempateInfoText}>
+            ⚔️ <Text style={{ fontWeight: '600' }}>Desempate por goles:</Text> ingresa el marcador exacto que predices para cada partido. En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
           </Text>
         </View>
       )}
-      {modoEdicion && (
-        <View style={styles.editingBanner}>
-          <Text style={styles.editingBannerText}>🟡 Modo edición — cambia tus picks y guarda</Text>
-        </View>
-      )}
 
-      <View style={styles.infoRow}>
-        <View style={styles.infoPill}>
-          <Text style={styles.infoPillText}>🏀 {partidos.length} partidos</Text>
-        </View>
-        <View style={[styles.infoPill, styles.infoPillGreen]}>
-          <Text style={[styles.infoPillText, { color: '#2ECC71' }]}>💰 ${quiniela?.precio_entrada ?? 50} MXN</Text>
-        </View>
-        <View style={[styles.infoPill, styles.infoPillOrange]}>
-          <Text style={[styles.infoPillText, { color: '#F39C12' }]}>🏆 Premio por definir</Text>
-        </View>
-      </View>
-
-      {(modoEdicion || !yaParticipo) && (
-        <ProgressBar current={totalSeleccionados} total={partidos.length} />
-      )}
-
-      {faltanMsg ? (
-        <View style={styles.faltanBanner}>
-          <Text style={styles.faltanTxt}>{faltanMsg}</Text>
-        </View>
-      ) : null}
-
+      {/* Lista de partidos */}
       <FlatList
         data={partidos}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.centered}>
-            <Text style={styles.emptyText}>Esta quiniela no tiene partidos cargados.</Text>
-          </View>
-        }
         renderItem={({ item, index }) => (
           <MatchSelectionCard
             partido={item}
             index={index}
             seleccionActual={selecciones[item.id] ?? null}
-            onSelect={(opcion) => handleSelect(item.id, opcion)}
+            onSelect={(sel) => handleSelect(item.id, sel)}
+            disabled={yaParticipo && !modoEdicion}
           />
         )}
+        ListFooterComponent={
+          <View style={styles.footer}>
+            {faltanMsg ? <Text style={styles.faltanMsg}>{faltanMsg}</Text> : null}
+
+            {/* Boton principal: participar / editar / pago pendiente */}
+            {!yaParticipo && (
+              <TouchableOpacity
+                style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
+                onPress={handleConfirmarClick}
+                disabled={!isComplete}
+              >
+                <Text style={styles.confirmBtnTxt}>Confirmar picks y pagar</Text>
+              </TouchableOpacity>
+            )}
+
+            {yaParticipo && !pagoPendiente && !modoEdicion && puedeEditar && (
+              <TouchableOpacity
+                style={styles.editBtn}
+                onPress={() => setModoEdicion(true)}
+              >
+                <Text style={styles.editBtnTxt}>✏️ Editar mis picks</Text>
+              </TouchableOpacity>
+            )}
+
+            {modoEdicion && (
+              <View style={styles.editActions}>
+                <TouchableOpacity
+                  style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
+                  onPress={handleConfirmarEdicionClick}
+                  disabled={!isComplete}
+                >
+                  <Text style={styles.confirmBtnTxt}>Guardar cambios</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelBtn} onPress={handleCancelarEdicion}>
+                  <Text style={styles.cancelBtnTxt}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        }
       />
-
-      {modoEdicion && (
-        <View style={styles.fab}>
-          <TouchableOpacity
-            style={[styles.fabBtn, isComplete ? styles.fabBtnEdit : styles.fabBtnDisabled]}
-            onPress={handleConfirmarEdicionClick}
-            disabled={saving || !isComplete}
-          >
-            <Text style={[styles.fabText, !isComplete && { color: '#505050' }]}>
-              {isComplete ? '💾 Guardar nuevos picks' : `Selecciona todos (${totalSeleccionados}/${partidos.length})`}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {!yaParticipo && (
-        <View style={styles.fab}>
-          <TouchableOpacity
-            style={[styles.fabBtn, isComplete ? styles.fabBtnActive : styles.fabBtnDisabled]}
-            onPress={handleConfirmarClick}
-            disabled={saving}
-          >
-            <Text style={[styles.fabText, !isComplete && { color: '#505050' }]}>
-              {isComplete
-                ? `💳 Confirmar y Pagar — $${quiniela?.precio_entrada ?? 50} MXN`
-                : `Selecciona todos los partidos (${totalSeleccionados}/${partidos.length})`}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container:             { flex: 1, backgroundColor: '#0A0C10' },
-  centered:              { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  loadingText:           { color: '#A0A0A0', marginTop: 12, fontSize: 14 },
-  emptyText:             { color: '#A0A0A0', fontSize: 14, textAlign: 'center' },
-  header:                { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
-  backBtn:               { width: 60 },
-  backText:              { color: '#2ECC71', fontSize: 15 },
-  title:                 { flex: 1, color: '#FFF', fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
-  spacer:                { width: 60 },
-  editBtn:               { backgroundColor: 'rgba(243,156,18,0.12)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#F39C12' },
-  editBtnTxt:            { color: '#F39C12', fontWeight: 'bold', fontSize: 13 },
-  cancelEditBtn:         { backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#E74C3C' },
-  cancelEditBtnTxt:      { color: '#E74C3C', fontWeight: 'bold', fontSize: 13 },
-  // ── Pago pendiente ──
-  pagoPendienteBanner:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(245,158,11,0.12)', borderBottomWidth: 1, borderBottomColor: '#F59E0B', paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
-  pagoPendienteInfo:     { flex: 1 },
-  pagoPendienteTitle:    { color: '#F59E0B', fontWeight: 'bold', fontSize: 13 },
-  pagoPendienteSubtitle: { color: '#A0A0A0', fontSize: 11, marginTop: 2 },
-  reintentarBtn:         { backgroundColor: '#F59E0B', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9, minWidth: 110, alignItems: 'center' },
-  reintentarBtnTxt:      { color: '#000', fontWeight: 'bold', fontSize: 13 },
-  // ── Banners normales ──
-  yaParticipoBar:        { backgroundColor: 'rgba(46,204,113,0.1)', borderBottomWidth: 1, borderBottomColor: '#2ECC71', padding: 10, alignItems: 'center' },
-  yaParticipoText:       { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
-  editableBanner:        { backgroundColor: 'rgba(243,156,18,0.08)', borderBottomWidth: 1, borderBottomColor: '#F39C12', padding: 10, alignItems: 'center' },
-  editableBannerText:    { color: '#F39C12', fontWeight: 'bold', fontSize: 13 },
-  editingBanner:         { backgroundColor: 'rgba(243,156,18,0.15)', borderBottomWidth: 1, borderBottomColor: '#F39C12', padding: 10, alignItems: 'center' },
-  editingBannerText:     { color: '#FFD700', fontWeight: 'bold', fontSize: 13 },
-  infoRow:               { flexDirection: 'row', gap: 8, paddingHorizontal: 15, paddingVertical: 10 },
-  infoPill:              { flex: 1, backgroundColor: '#15181F', borderRadius: 8, padding: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
-  infoPillGreen:         { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
-  infoPillOrange:        { borderColor: '#F39C12', backgroundColor: 'rgba(243,156,18,0.05)' },
-  infoPillText:          { color: '#A0A0A0', fontSize: 11, fontWeight: '600', textAlign: 'center' },
-  faltanBanner:          { backgroundColor: 'rgba(231,76,60,0.12)', borderBottomWidth: 1, borderBottomColor: '#E74C3C', padding: 10, alignItems: 'center' },
-  faltanTxt:             { color: '#E74C3C', fontWeight: '600', fontSize: 13 },
-  list:                  { paddingHorizontal: 15, paddingTop: 5, paddingBottom: 120 },
-  fab:                   { position: 'absolute', bottom: 25, left: 15, right: 15, zIndex: 100 },
-  fabBtn:                { padding: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1 },
-  fabBtnActive:          { backgroundColor: '#2ECC71', borderColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.7, shadowRadius: 12, elevation: 8 },
-  fabBtnEdit:            { backgroundColor: '#F39C12', borderColor: '#F39C12', shadowColor: '#F39C12', shadowOpacity: 0.7, shadowRadius: 12, elevation: 8 },
-  fabBtnDisabled:        { backgroundColor: '#15181F', borderColor: '#2A2D35' },
-  fabText:               { color: '#000', fontWeight: 'bold', fontSize: 15 },
-  confirmTitle:          { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  confirmCard:           { backgroundColor: '#15181F', borderRadius: 16, padding: 20, width: '100%', borderWidth: 1, borderColor: '#2A2D35', gap: 10, marginBottom: 24 },
-  confirmLine:           { color: '#A0A0A0', fontSize: 14, lineHeight: 22 },
-  confirmBtns:           { flexDirection: 'row', gap: 12, width: '100%' },
-  cancelBtn:             { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
-  cancelBtnTxt:          { color: '#A0A0A0', fontWeight: 'bold', fontSize: 15 },
-  confirmBtn:            { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#2ECC71' },
-  confirmBtnTxt:         { color: '#000', fontWeight: 'bold', fontSize: 15 },
-  successTitle:          { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
-  successSub:            { color: '#A0A0A0', fontSize: 14, marginBottom: 32, textAlign: 'center', lineHeight: 22 },
-  successBtn:            { backgroundColor: '#2ECC71', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 14 },
-  successBtnTxt:         { color: '#000', fontWeight: 'bold', fontSize: 16 },
+  container:  { flex: 1, backgroundColor: '#0A0C12' },
+  centered:   { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  loadingText:{ color: '#A0A0A0', marginTop: 12 },
+
+  // Header
+  header: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#1E2128',
+  },
+  backBtn:      { width: 36, height: 36, justifyContent: 'center' },
+  backIcon:     { color: '#2ECC71', fontSize: 28, lineHeight: 30 },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerTitle:  { color: '#E0E0E0', fontSize: 16, fontWeight: 'bold' },
+  headerSub:    { color: '#606060', fontSize: 11, marginTop: 2 },
+
+  // Progress
+  progressWrap:  { paddingHorizontal: 16, paddingTop: 12 },
+  progressText:  { color: '#606060', fontSize: 12, marginTop: 6, marginBottom: 4 },
+  golesHint:     { color: '#2ECC71', fontWeight: '600' },
+
+  // Pending banner
+  pendingBanner: {
+    margin: 16, marginBottom: 0,
+    backgroundColor: 'rgba(243,156,18,0.1)',
+    borderWidth: 1, borderColor: '#F39C12',
+    borderRadius: 12, padding: 14,
+    gap: 10,
+  },
+  pendingBannerText:   { color: '#F39C12', fontSize: 13 },
+  pendingBannerBtn:    { backgroundColor: '#F39C12', borderRadius: 8, padding: 10, alignItems: 'center' },
+  pendingBannerBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 13 },
+
+  // Desempate info banner
+  desempateInfoBanner: {
+    marginHorizontal: 16, marginTop: 12, marginBottom: 4,
+    backgroundColor: 'rgba(46,204,113,0.06)',
+    borderWidth: 1, borderColor: 'rgba(46,204,113,0.2)',
+    borderRadius: 10, padding: 12,
+  },
+  desempateInfoText: { color: '#6ABD8A', fontSize: 12, lineHeight: 17 },
+
+  // Desempate summary (en confirmación)
+  desempateSummary: {
+    width: '100%', backgroundColor: '#15181F',
+    borderRadius: 14, padding: 18, marginVertical: 20, alignItems: 'center',
+    borderWidth: 1, borderColor: '#2A2D35',
+  },
+  desempateLabel: { color: '#A0A0A0', fontSize: 13, marginBottom: 8 },
+  desempateValue: { color: '#2ECC71', fontSize: 42, fontWeight: 'bold', marginBottom: 8 },
+  desempateHint:  { color: '#505050', fontSize: 11, textAlign: 'center', lineHeight: 16 },
+
+  // List
+  list: { padding: 16, paddingBottom: 24 },
+
+  // Footer
+  footer:   { marginTop: 8, gap: 10 },
+  faltanMsg:{ color: '#F39C12', textAlign: 'center', fontSize: 13, marginBottom: 4 },
+
+  confirmBtn: {
+    backgroundColor: '#2ECC71', borderRadius: 14,
+    paddingVertical: 16, alignItems: 'center',
+  },
+  confirmBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 15 },
+  btnDisabled:   { opacity: 0.35 },
+
+  editBtn: {
+    borderWidth: 1, borderColor: '#2ECC71', borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center',
+  },
+  editBtnTxt: { color: '#2ECC71', fontWeight: '600', fontSize: 14 },
+
+  editActions: { gap: 10 },
+
+  cancelBtn:    { paddingVertical: 14, alignItems: 'center' },
+  cancelBtnTxt: { color: '#606060', fontSize: 14 },
+
+  // Success
+  successTitle:  { color: '#E0E0E0', fontSize: 22, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
+  successSub:    { color: '#808080', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
+  successBtn:    { backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 40, marginBottom: 12 },
+  successBtnTxt: { color: '#000', fontWeight: 'bold', fontSize: 15 },
 });

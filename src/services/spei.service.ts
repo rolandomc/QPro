@@ -6,13 +6,27 @@
  *  2. subirComprobante        — abre picker → sube a Supabase Storage → guarda URL
  *  3. validarYConfirmar       — llama apiCEP con clave de rastreo; si válido → 'pagado'
  *  4. notificarAdmin          — inserta notificación para revisión manual si apiCEP falla
+ *
+ * ⚠️  Variable de entorno requerida:
+ *      EXPO_PUBLIC_APICEP_API_KEY=apicep_665deccc1cb8f1a87b05e7f58850c31150cd4ce778a04a7f08af2bae8e9799f3
  */
 import * as ImagePicker from 'expo-image-picker';
-import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../config/supabase';
 import { ApiCepService } from './apicep.service';
+
+/** Abre un <input type="file"> nativo en web y devuelve el archivo seleccionado */
+function pickFileWeb(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,application/xml,text/xml';
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
 
 export const SpeiService = {
   /** Marca la participación como spei_pendiente */
@@ -27,7 +41,7 @@ export const SpeiService = {
   /**
    * Abre el picker de imágenes/documentos, sube a Supabase Storage
    * y guarda la URL en la participación.
-   * Devuelve la URL pública firmada o null si el usuario canceló.
+   * Devuelve la URL firmada o null si el usuario canceló.
    */
   async subirComprobante(participacionId: string): Promise<string | null> {
     let path: string;
@@ -35,23 +49,14 @@ export const SpeiService = {
     let fileData: ArrayBuffer;
 
     if (Platform.OS === 'web') {
-      // En web usamos DocumentPicker para aceptar XML e imágenes
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/*', 'application/xml', 'text/xml'],
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled || !result.assets?.[0]) return null;
+      const file = await pickFileWeb();
+      if (!file) return null;
 
-      const asset  = result.assets[0];
-      const ext    = asset.name?.split('.').pop()?.toLowerCase() ?? 'jpg';
-      mime         = asset.mimeType ?? (ext === 'xml' ? 'application/xml' : 'image/jpeg');
-      path         = `spei/${participacionId}_${Date.now()}.${ext}`;
-
-      // Fetch the local URI to get ArrayBuffer
-      const response = await fetch(asset.uri);
-      fileData       = await response.arrayBuffer();
+      const ext  = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
+      mime       = file.type || (ext === 'xml' ? 'application/xml' : 'image/jpeg');
+      path       = `spei/${participacionId}_${Date.now()}.${ext}`;
+      fileData   = await file.arrayBuffer();
     } else {
-      // En nativo usamos ImagePicker
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         throw new Error('Necesitas dar permiso para acceder a tu galería.');
@@ -79,7 +84,6 @@ export const SpeiService = {
 
     if (uploadError) throw new Error(`Error al subir comprobante: ${uploadError.message}`);
 
-    // URL firmada válida por 7 días
     const { data: signedData } = await supabase.storage
       .from('comprobantes')
       .createSignedUrl(path, 60 * 60 * 24 * 7);
@@ -124,7 +128,6 @@ export const SpeiService = {
         .eq('id', participacionId);
       if (error) throw error;
     } else {
-      // Guarda el error y notifica al admin para revisión manual
       await supabase
         .from('participaciones')
         .update({
@@ -140,15 +143,18 @@ export const SpeiService = {
   },
 
   /**
-   * Cuando el usuario sube comprobante sin clave de rastreo
-   * queda en 'spei_pendiente' para revisión manual del admin.
+   * Cuando el usuario sube comprobante sin clave de rastreo,
+   * deja la participación en 'spei_pendiente' para revisión manual del admin.
    */
   async marcarPendienteRevision(participacionId: string): Promise<void> {
     await supabase
       .from('participaciones')
       .update({ estado: 'spei_pendiente', comprobante_validado: false })
       .eq('id', participacionId);
-    await SpeiService.notificarAdmin(participacionId, 'Comprobante subido sin clave de rastreo — revisión manual requerida');
+    await SpeiService.notificarAdmin(
+      participacionId,
+      'Comprobante subido sin clave de rastreo — revisión manual requerida',
+    );
   },
 
   /** Inserta una notificación en la tabla admin_notificaciones */

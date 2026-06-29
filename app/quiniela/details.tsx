@@ -35,19 +35,21 @@ export default function QuinielaDetailsScreen() {
   // Inicializar confirmState ANTES del primer render revisando localStorage
   const isPendingPago = useRef(checkPendingPago(id as string));
 
-  const [quiniela,        setQuiniela]        = useState<any>(null);
-  const [partidos,        setPartidos]        = useState<any[]>([]);
-  const [selecciones,     setSelecciones]     = useState<Record<string, 'local' | 'empate' | 'visitante'>>({});
-  const [loading,         setLoading]         = useState(!isPendingPago.current); // si hay pago pendiente no mostramos loader
-  const [saving,          setSaving]          = useState(false);
-  const [yaParticipo,     setYaParticipo]     = useState(false);
-  const [modoEdicion,     setModoEdicion]     = useState(false);
-  const [participacionId, setParticipacionId] = useState<string | null>(null);
-  const [confirmState,    setConfirmState]    = useState<ConfirmState>(
+  const [quiniela,            setQuiniela]            = useState<any>(null);
+  const [partidos,            setPartidos]            = useState<any[]>([]);
+  const [selecciones,         setSelecciones]         = useState<Record<string, 'local' | 'empate' | 'visitante'>>({});
+  const [loading,             setLoading]             = useState(!isPendingPago.current);
+  const [saving,              setSaving]              = useState(false);
+  const [yaParticipo,         setYaParticipo]         = useState(false);
+  const [pagoPendiente,       setPagoPendiente]       = useState(false); // participación existe pero sin pago
+  const [modoEdicion,         setModoEdicion]         = useState(false);
+  const [participacionId,     setParticipacionId]     = useState<string | null>(null);
+  const [confirmState,        setConfirmState]        = useState<ConfirmState>(
     isPendingPago.current ? 'success' : 'idle'
   );
-  const [errorMsg,        setErrorMsg]        = useState('');
-  const [faltanMsg,       setFaltanMsg]       = useState('');
+  const [errorMsg,            setErrorMsg]            = useState('');
+  const [faltanMsg,           setFaltanMsg]           = useState('');
+  const [retryingPago,        setRetryingPago]        = useState(false);
 
   // Ref para bloquear doble tap — persiste entre re-renders
   const openingRef = useRef(false);
@@ -74,29 +76,40 @@ export default function QuinielaDetailsScreen() {
         if (!id) return;
         setLoading(true);
         try {
-          const [partidosData, yaParticipoData, { data: quinielaData }] = await Promise.all([
+          const [partidosData, { data: quinielaData }] = await Promise.all([
             QuinielasService.getPartidos(id),
-            QuinielasService.yaParticipo(id),
             supabase.from('quinielas').select('*').eq('id', id).single(),
           ]);
           setQuiniela(quinielaData);
           setPartidos(partidosData || []);
-          setYaParticipo(yaParticipoData);
 
-          if (yaParticipoData && quinielaData?.estado === 'abierta') {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-              const { data: part } = await supabase
-                .from('participaciones')
-                .select('id')
-                .eq('quiniela_id', id)
-                .eq('user_id', user.id)
-                .single();
-              if (part) {
-                setParticipacionId(part.id);
-                await cargarPicksActuales(part.id);
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { data: part } = await supabase
+              .from('participaciones')
+              .select('id, estado')
+              .eq('quiniela_id', id)
+              .eq('user_id', user.id)
+              .maybeSingle();
+
+            if (part) {
+              setYaParticipo(true);
+              setParticipacionId(part.id);
+              await cargarPicksActuales(part.id);
+
+              // ── CLAVE: detectar si el pago quedó incompleto ──
+              if (part.estado === 'pendiente') {
+                setPagoPendiente(true);
+              } else {
+                setPagoPendiente(false);
               }
+            } else {
+              setYaParticipo(false);
+              setPagoPendiente(false);
             }
+          } else {
+            setYaParticipo(false);
+            setPagoPendiente(false);
           }
         } catch (e: any) {
           setErrorMsg(e.message);
@@ -158,7 +171,6 @@ export default function QuinielaDetailsScreen() {
   };
 
   const handleConfirmarFinal = async () => {
-    // Guard doble tap: ref persiste entre re-renders, state no
     if (openingRef.current) return;
     openingRef.current = true;
     setSaving(true);
@@ -170,26 +182,55 @@ export default function QuinielaDetailsScreen() {
       const { init_point } = await MercadoPagoService.crearPreferencia(partId!, id as string);
 
       if (Platform.OS === 'web') {
-        // Persistir antes de salir — al volver el useRef lo detecta en el primer render
         try { localStorage.setItem(PENDING_KEY, id as string); } catch (_) {}
         window.location.href = init_point;
-        return; // la página navega, no continuar
+        return;
       } else {
         setConfirmState('success');
         Linking.openURL(init_point);
-        // En nativo no reseteamos openingRef para que no se pueda re-abrir
       }
     } catch (e: any) {
-      openingRef.current = false; // solo resetear en error
+      openingRef.current = false;
       setSaving(false);
       setErrorMsg(e.message);
       setConfirmState('error');
     }
   };
 
+  /**
+   * Reintenta el pago para una participación que quedó en estado 'pendiente'.
+   * NO crea una nueva participación — reutiliza el participacionId existente.
+   */
+  const handleReintentarPago = async () => {
+    if (!participacionId || openingRef.current) return;
+    openingRef.current = true;
+    setRetryingPago(true);
+
+    try {
+      const { init_point } = await MercadoPagoService.crearPreferencia(
+        participacionId,
+        id as string
+      );
+
+      if (Platform.OS === 'web') {
+        try { localStorage.setItem(PENDING_KEY, id as string); } catch (_) {}
+        window.location.href = init_point;
+        return;
+      } else {
+        setConfirmState('success');
+        Linking.openURL(init_point);
+      }
+    } catch (e: any) {
+      openingRef.current = false;
+      Alert.alert('Error', e.message ?? 'No pudimos abrir el pago. Intenta más tarde.');
+    } finally {
+      setRetryingPago(false);
+    }
+  };
+
   const totalSeleccionados = Object.keys(selecciones).length;
   const isComplete = totalSeleccionados === partidos.length && partidos.length > 0;
-  const puedeEditar = yaParticipo && quiniela?.estado === 'abierta';
+  const puedeEditar = yaParticipo && quiniela?.estado === 'abierta' && !pagoPendiente;
 
   // --- Pantallas de estado ---
 
@@ -352,7 +393,30 @@ export default function QuinielaDetailsScreen() {
         {!puedeEditar && !modoEdicion && <View style={styles.spacer} />}
       </View>
 
-      {yaParticipo && !modoEdicion && (
+      {/* ── Banner: pago pendiente / reintentar ── */}
+      {pagoPendiente && !modoEdicion && (
+        <View style={styles.pagoPendienteBanner}>
+          <View style={styles.pagoPendienteInfo}>
+            <Text style={styles.pagoPendienteTitle}>⚠️ Pago incompleto</Text>
+            <Text style={styles.pagoPendienteSubtitle}>
+              Tus picks están guardados. Solo falta completar el pago.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.reintentarBtn, retryingPago && { opacity: 0.6 }]}
+            onPress={handleReintentarPago}
+            disabled={retryingPago}
+          >
+            {retryingPago
+              ? <ActivityIndicator size="small" color="#000" />
+              : <Text style={styles.reintentarBtnTxt}>💳 Pagar ahora</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ── Banners normales (solo si NO hay pago pendiente) ── */}
+      {yaParticipo && !pagoPendiente && !modoEdicion && (
         <View style={puedeEditar ? styles.editableBanner : styles.yaParticipoBar}>
           <Text style={puedeEditar ? styles.editableBannerText : styles.yaParticipoText}>
             {puedeEditar ? '✏️ Quiniela abierta — puedes editar tus picks' : '✅ Ya registraste tus selecciones — ¡Buena suerte!'}
@@ -441,49 +505,57 @@ export default function QuinielaDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:          { flex: 1, backgroundColor: '#0A0C10' },
-  centered:           { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  loadingText:        { color: '#A0A0A0', marginTop: 12, fontSize: 14 },
-  emptyText:          { color: '#A0A0A0', fontSize: 14, textAlign: 'center' },
-  header:             { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
-  backBtn:            { width: 60 },
-  backText:           { color: '#2ECC71', fontSize: 15 },
-  title:              { flex: 1, color: '#FFF', fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
-  spacer:             { width: 60 },
-  editBtn:            { backgroundColor: 'rgba(243,156,18,0.12)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#F39C12' },
-  editBtnTxt:         { color: '#F39C12', fontWeight: 'bold', fontSize: 13 },
-  cancelEditBtn:      { backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#E74C3C' },
-  cancelEditBtnTxt:   { color: '#E74C3C', fontWeight: 'bold', fontSize: 13 },
-  yaParticipoBar:     { backgroundColor: 'rgba(46,204,113,0.1)', borderBottomWidth: 1, borderBottomColor: '#2ECC71', padding: 10, alignItems: 'center' },
-  yaParticipoText:    { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
-  editableBanner:     { backgroundColor: 'rgba(243,156,18,0.08)', borderBottomWidth: 1, borderBottomColor: '#F39C12', padding: 10, alignItems: 'center' },
-  editableBannerText: { color: '#F39C12', fontWeight: 'bold', fontSize: 13 },
-  editingBanner:      { backgroundColor: 'rgba(243,156,18,0.15)', borderBottomWidth: 1, borderBottomColor: '#F39C12', padding: 10, alignItems: 'center' },
-  editingBannerText:  { color: '#FFD700', fontWeight: 'bold', fontSize: 13 },
-  infoRow:            { flexDirection: 'row', gap: 8, paddingHorizontal: 15, paddingVertical: 10 },
-  infoPill:           { flex: 1, backgroundColor: '#15181F', borderRadius: 8, padding: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
-  infoPillGreen:      { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
-  infoPillOrange:     { borderColor: '#F39C12', backgroundColor: 'rgba(243,156,18,0.05)' },
-  infoPillText:       { color: '#A0A0A0', fontSize: 11, fontWeight: '600', textAlign: 'center' },
-  faltanBanner:       { backgroundColor: 'rgba(231,76,60,0.12)', borderBottomWidth: 1, borderBottomColor: '#E74C3C', padding: 10, alignItems: 'center' },
-  faltanTxt:          { color: '#E74C3C', fontWeight: '600', fontSize: 13 },
-  list:               { paddingHorizontal: 15, paddingTop: 5, paddingBottom: 120 },
-  fab:                { position: 'absolute', bottom: 25, left: 15, right: 15, zIndex: 100 },
-  fabBtn:             { padding: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1 },
-  fabBtnActive:       { backgroundColor: '#2ECC71', borderColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.7, shadowRadius: 12, elevation: 8 },
-  fabBtnEdit:         { backgroundColor: '#F39C12', borderColor: '#F39C12', shadowColor: '#F39C12', shadowOpacity: 0.7, shadowRadius: 12, elevation: 8 },
-  fabBtnDisabled:     { backgroundColor: '#15181F', borderColor: '#2A2D35' },
-  fabText:            { color: '#000', fontWeight: 'bold', fontSize: 15 },
-  confirmTitle:       { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  confirmCard:        { backgroundColor: '#15181F', borderRadius: 16, padding: 20, width: '100%', borderWidth: 1, borderColor: '#2A2D35', gap: 10, marginBottom: 24 },
-  confirmLine:        { color: '#A0A0A0', fontSize: 14, lineHeight: 22 },
-  confirmBtns:        { flexDirection: 'row', gap: 12, width: '100%' },
-  cancelBtn:          { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
-  cancelBtnTxt:       { color: '#A0A0A0', fontWeight: 'bold', fontSize: 15 },
-  confirmBtn:         { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#2ECC71' },
-  confirmBtnTxt:      { color: '#000', fontWeight: 'bold', fontSize: 15 },
-  successTitle:       { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
-  successSub:         { color: '#A0A0A0', fontSize: 14, marginBottom: 32, textAlign: 'center', lineHeight: 22 },
-  successBtn:         { backgroundColor: '#2ECC71', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 14 },
-  successBtnTxt:      { color: '#000', fontWeight: 'bold', fontSize: 16 },
+  container:             { flex: 1, backgroundColor: '#0A0C10' },
+  centered:              { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  loadingText:           { color: '#A0A0A0', marginTop: 12, fontSize: 14 },
+  emptyText:             { color: '#A0A0A0', fontSize: 14, textAlign: 'center' },
+  header:                { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
+  backBtn:               { width: 60 },
+  backText:              { color: '#2ECC71', fontSize: 15 },
+  title:                 { flex: 1, color: '#FFF', fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
+  spacer:                { width: 60 },
+  editBtn:               { backgroundColor: 'rgba(243,156,18,0.12)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#F39C12' },
+  editBtnTxt:            { color: '#F39C12', fontWeight: 'bold', fontSize: 13 },
+  cancelEditBtn:         { backgroundColor: 'rgba(231,76,60,0.1)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#E74C3C' },
+  cancelEditBtnTxt:      { color: '#E74C3C', fontWeight: 'bold', fontSize: 13 },
+  // ── Pago pendiente ──
+  pagoPendienteBanner:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(245,158,11,0.12)', borderBottomWidth: 1, borderBottomColor: '#F59E0B', paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
+  pagoPendienteInfo:     { flex: 1 },
+  pagoPendienteTitle:    { color: '#F59E0B', fontWeight: 'bold', fontSize: 13 },
+  pagoPendienteSubtitle: { color: '#A0A0A0', fontSize: 11, marginTop: 2 },
+  reintentarBtn:         { backgroundColor: '#F59E0B', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9, minWidth: 110, alignItems: 'center' },
+  reintentarBtnTxt:      { color: '#000', fontWeight: 'bold', fontSize: 13 },
+  // ── Banners normales ──
+  yaParticipoBar:        { backgroundColor: 'rgba(46,204,113,0.1)', borderBottomWidth: 1, borderBottomColor: '#2ECC71', padding: 10, alignItems: 'center' },
+  yaParticipoText:       { color: '#2ECC71', fontWeight: 'bold', fontSize: 13 },
+  editableBanner:        { backgroundColor: 'rgba(243,156,18,0.08)', borderBottomWidth: 1, borderBottomColor: '#F39C12', padding: 10, alignItems: 'center' },
+  editableBannerText:    { color: '#F39C12', fontWeight: 'bold', fontSize: 13 },
+  editingBanner:         { backgroundColor: 'rgba(243,156,18,0.15)', borderBottomWidth: 1, borderBottomColor: '#F39C12', padding: 10, alignItems: 'center' },
+  editingBannerText:     { color: '#FFD700', fontWeight: 'bold', fontSize: 13 },
+  infoRow:               { flexDirection: 'row', gap: 8, paddingHorizontal: 15, paddingVertical: 10 },
+  infoPill:              { flex: 1, backgroundColor: '#15181F', borderRadius: 8, padding: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
+  infoPillGreen:         { borderColor: '#2ECC71', backgroundColor: 'rgba(46,204,113,0.05)' },
+  infoPillOrange:        { borderColor: '#F39C12', backgroundColor: 'rgba(243,156,18,0.05)' },
+  infoPillText:          { color: '#A0A0A0', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  faltanBanner:          { backgroundColor: 'rgba(231,76,60,0.12)', borderBottomWidth: 1, borderBottomColor: '#E74C3C', padding: 10, alignItems: 'center' },
+  faltanTxt:             { color: '#E74C3C', fontWeight: '600', fontSize: 13 },
+  list:                  { paddingHorizontal: 15, paddingTop: 5, paddingBottom: 120 },
+  fab:                   { position: 'absolute', bottom: 25, left: 15, right: 15, zIndex: 100 },
+  fabBtn:                { padding: 16, borderRadius: 14, alignItems: 'center', borderWidth: 1 },
+  fabBtnActive:          { backgroundColor: '#2ECC71', borderColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.7, shadowRadius: 12, elevation: 8 },
+  fabBtnEdit:            { backgroundColor: '#F39C12', borderColor: '#F39C12', shadowColor: '#F39C12', shadowOpacity: 0.7, shadowRadius: 12, elevation: 8 },
+  fabBtnDisabled:        { backgroundColor: '#15181F', borderColor: '#2A2D35' },
+  fabText:               { color: '#000', fontWeight: 'bold', fontSize: 15 },
+  confirmTitle:          { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  confirmCard:           { backgroundColor: '#15181F', borderRadius: 16, padding: 20, width: '100%', borderWidth: 1, borderColor: '#2A2D35', gap: 10, marginBottom: 24 },
+  confirmLine:           { color: '#A0A0A0', fontSize: 14, lineHeight: 22 },
+  confirmBtns:           { flexDirection: 'row', gap: 12, width: '100%' },
+  cancelBtn:             { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
+  cancelBtnTxt:          { color: '#A0A0A0', fontWeight: 'bold', fontSize: 15 },
+  confirmBtn:            { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#2ECC71' },
+  confirmBtnTxt:         { color: '#000', fontWeight: 'bold', fontSize: 15 },
+  successTitle:          { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
+  successSub:            { color: '#A0A0A0', fontSize: 14, marginBottom: 32, textAlign: 'center', lineHeight: 22 },
+  successBtn:            { backgroundColor: '#2ECC71', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 14 },
+  successBtnTxt:         { color: '#000', fontWeight: 'bold', fontSize: 16 },
 });

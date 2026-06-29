@@ -92,6 +92,11 @@ export default function LoginScreen() {
             </View>
           </View>
 
+          {/* Olvidaste tu contraseña */}
+          <TouchableOpacity style={styles.forgotBtn} onPress={() => router.push('/auth/forgot-password')}>
+            <Text style={styles.forgotText}>¿Olvidaste tu contraseña?</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.loginBtn, styles.neonBgGreen]}
             onPress={handleLogin}
@@ -130,6 +135,9 @@ const styles = StyleSheet.create({
   checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: '#2ECC71', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   checkboxActive: { backgroundColor: '#2ECC71' },
   checkLabel: { color: '#A0A0A0', fontSize: 13 },
+
+  forgotBtn: { alignItems: 'flex-end', marginTop: -8, marginBottom: 16 },
+  forgotText: { color: '#2ECC71', fontSize: 13 },
 
   loginBtn: { padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 10 },
   neonBgGreen: { backgroundColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 0.6, shadowRadius: 10, elevation: 8 },

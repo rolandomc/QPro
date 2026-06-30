@@ -35,7 +35,6 @@ export default function QuinielasScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
 
-  // Filtrar por deporte cuando el campo exista; mientras tanto fútbol muestra todo
   const quinielasFiltradas = deporteActivo === 'futbol'
     ? quinielas
     : quinielas.filter((q) => q.deporte === deporteActivo);
@@ -71,6 +70,7 @@ export default function QuinielasScreen() {
       <FlatList
         data={quinielasFiltradas}
         keyExtractor={(item) => item.id}
+        style={{ flex: 1 }}
         contentContainerStyle={[styles.listContent, quinielasFiltradas.length === 0 && { flex: 1 }]}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={

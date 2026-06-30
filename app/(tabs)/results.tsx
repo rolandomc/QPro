@@ -50,12 +50,10 @@ export default function ResultsScreen() {
 
       if (error) throw error;
 
-      // Obtener ids de quinielas únicas
       const quinielaIds = [...new Set(
         (data || []).map((item: any) => item.quinielas?.id).filter(Boolean)
       )] as string[];
 
-      // Traer primer partido (por orden) de cada quiniela
       const primerPartidoMap: Record<string, string> = {};
       if (quinielaIds.length > 0) {
         const { data: primerosPartidos } = await supabase
@@ -124,6 +122,7 @@ export default function ResultsScreen() {
         <FlatList
           data={lista}
           keyExtractor={item => item.id}
+          style={{ flex: 1 }}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
           refreshControl={

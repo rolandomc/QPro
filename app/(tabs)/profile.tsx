@@ -13,53 +13,28 @@ import { AuthService } from '../../src/services/auth.service';
 import { AdminService } from '../../src/services/admin.service';
 import { supabase } from '../../src/config/supabase';
 
-const TIPO_CONFIG: Record<string, { icon: string; color: string }> = {
-  ganador:  { icon: '🏆', color: '#FFD700' },
-  perdedor: { icon: '😔', color: '#606060' },
-  info:     { icon: '📢', color: '#00E5FF' },
-};
-
-const AUTO_DELETE_MS = 5000;
-
 export default function ProfileScreen() {
   const router = useRouter();
-  const [username,      setUsername]      = useState('');
-  const [displayName,   setDisplayName]   = useState('');
-  const [fullName,      setFullName]      = useState<string | null>(null);
-  const [avatarUrl,     setAvatarUrl]     = useState<string | null>(null);
-  const [isAdmin,       setIsAdmin]       = useState(false);
-  const [loading,       setLoading]       = useState(true);
-  const [refreshing,    setRefreshing]    = useState(false);
-  const [signingOut,    setSigningOut]    = useState(false);
-  const [notifs,        setNotifs]        = useState<any[]>([]);
-  const [notifExpanded, setNotifExpanded] = useState(false);
-  const [userId,        setUserId]        = useState<string>('');
-  const [deletingIds,   setDeletingIds]   = useState<Set<string>>(new Set());
-  const deleteTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [username,    setUsername]    = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [fullName,    setFullName]    = useState<string | null>(null);
+  const [avatarUrl,   setAvatarUrl]   = useState<string | null>(null);
+  const [isAdmin,     setIsAdmin]     = useState(false);
+  const [loading,     setLoading]     = useState(true);
+  const [refreshing,  setRefreshing]  = useState(false);
+  const [signingOut,  setSigningOut]  = useState(false);
+  const [userId,      setUserId]      = useState<string>('');
 
-  const [editModal,     setEditModal]     = useState(false);
-  const [editFullName,  setEditFullName]  = useState('');
-  const [editUsername,  setEditUsername]  = useState('');
-  const [editAvatar,    setEditAvatar]    = useState<string | null>(null);
-  const [saving,        setSaving]        = useState(false);
+  const [editModal,    setEditModal]    = useState(false);
+  const [editFullName, setEditFullName] = useState('');
+  const [editUsername, setEditUsername] = useState('');
+  const [editAvatar,   setEditAvatar]   = useState<string | null>(null);
+  const [saving,       setSaving]       = useState(false);
 
   const [stats, setStats] = useState({
     jugadas: 0, ganadas: 0, pctAcierto: 0,
     roi: 0, invertido: 0, ganado: 0, mejorPos: null as number | null,
   });
-
-  const fetchNotifications = useCallback(async (uid: string) => {
-    const { data, error } = await supabase
-      .from('notificaciones')
-      .select('*')
-      .eq('user_id', uid)
-      .order('created_at', { ascending: false })
-      .limit(20);
-
-    if (error) throw error;
-    setNotifs(data || []);
-    return data || [];
-  }, []);
 
   const loadUserData = useCallback(async () => {
     try {
@@ -138,24 +113,13 @@ export default function ProfileScreen() {
       }
 
       setStats({ jugadas, ganadas, pctAcierto, roi, invertido, ganado, mejorPos });
-
-      const notifsData = await fetchNotifications(user.id);
-      if ((notifsData || []).some((n: any) => !n.leida)) {
-        const { error: readError } = await supabase
-          .from('notificaciones')
-          .update({ leida: true })
-          .eq('user_id', user.id)
-          .eq('leida', false);
-        if (readError) throw readError;
-        await fetchNotifications(user.id);
-      }
     } catch (e: any) {
       console.error(e.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [fetchNotifications]);
+  }, []);
 
   useFocusEffect(useCallback(() => { setLoading(true); loadUserData(); }, [loadUserData]));
 
@@ -163,81 +127,6 @@ export default function ProfileScreen() {
     setRefreshing(true);
     loadUserData();
   }, [loadUserData]);
-
-  const handleTapNotif = useCallback((n: any) => {
-    if (!n.leida) return;
-    if (deleteTimers.current[n.id]) return;
-
-    setDeletingIds(prev => new Set(prev).add(n.id));
-
-    deleteTimers.current[n.id] = setTimeout(async () => {
-      try {
-        const { error } = await supabase
-          .from('notificaciones')
-          .delete()
-          .eq('id', n.id)
-          .eq('user_id', userId);
-
-        if (error) throw error;
-
-        await fetchNotifications(userId);
-      } catch (e: any) {
-        Alert.alert('Error', e.message || 'No se pudo borrar la notificación.');
-      } finally {
-        setDeletingIds(prev => {
-          const s = new Set(prev);
-          s.delete(n.id);
-          return s;
-        });
-        delete deleteTimers.current[n.id];
-      }
-    }, AUTO_DELETE_MS);
-  }, [fetchNotifications, userId]);
-
-  const handleCancelDelete = useCallback((id: string) => {
-    if (deleteTimers.current[id]) {
-      clearTimeout(deleteTimers.current[id]);
-      delete deleteTimers.current[id];
-      setDeletingIds(prev => {
-        const s = new Set(prev);
-        s.delete(id);
-        return s;
-      });
-    }
-  }, []);
-
-  const handleBorrarLeidas = useCallback(async () => {
-    const leidas = notifs.filter(n => n.leida);
-    if (leidas.length === 0) return;
-
-    Alert.alert(
-      'Limpiar notificaciones',
-      `¿Eliminar ${leidas.length} notificación${leidas.length > 1 ? 'es' : ''} leída${leidas.length > 1 ? 's' : ''}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const ids = leidas.map(n => n.id);
-              const { error } = await supabase
-                .from('notificaciones')
-                .delete()
-                .in('id', ids)
-                .eq('user_id', userId);
-
-              if (error) throw error;
-
-              await fetchNotifications(userId);
-            } catch (e: any) {
-              Alert.alert('Error', e.message || 'No se pudieron borrar las notificaciones.');
-            }
-          }
-        },
-      ]
-    );
-  }, [fetchNotifications, notifs, userId]);
 
   const handleSignOut = async () => {
     Alert.alert('Cerrar Sesión', '¿Estás seguro que quieres salir?', [
@@ -321,14 +210,11 @@ export default function ProfileScreen() {
     ? (displayName || username).substring(0, 2).toUpperCase()
     : '?';
 
-  const roiColor   = stats.roi >= 0 ? '#2ECC71' : '#E91E63';
-  const noLeidas   = notifs.filter(n => !n.leida).length;
-  const hayLeidas  = notifs.some(n => n.leida);
-
-  const nivel  = stats.jugadas >= 20 ? 'Oráculo' : stats.jugadas >= 10 ? 'Estratéga' : stats.jugadas >= 5 ? 'Analista' : 'Novato';
-  const niveXP = stats.jugadas * 100;
-  const nextXP = Math.ceil((stats.jugadas + 1) / 5) * 5 * 100;
-  const xpPct  = Math.min((niveXP / nextXP) * 100, 100);
+  const roiColor  = stats.roi >= 0 ? '#2ECC71' : '#E91E63';
+  const nivel     = stats.jugadas >= 20 ? 'Oráculo' : stats.jugadas >= 10 ? 'Estratéga' : stats.jugadas >= 5 ? 'Analista' : 'Novato';
+  const niveXP    = stats.jugadas * 100;
+  const nextXP    = Math.ceil((stats.jugadas + 1) / 5) * 5 * 100;
+  const xpPct     = Math.min((niveXP / nextXP) * 100, 100);
 
   if (loading) return (
     <SafeAreaView style={st.container}>
@@ -355,6 +241,7 @@ export default function ProfileScreen() {
           />
         }
       >
+        {/* Hero / Avatar */}
         <View style={st.heroSection}>
           <View style={st.avatarWrap}>
             <View style={st.avatarNeonRing}>
@@ -402,6 +289,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* Estadísticas */}
         <View style={st.statsCard}>
           <View style={st.statsNeonLine} />
           <Text style={st.statsTitle}>ESTADÍSTICAS DE TEMPORADA</Text>
@@ -441,6 +329,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* Logros */}
         <View style={st.sectionHeader}>
           <View style={st.sectionLine} />
           <Text style={st.sectionTitle}>LOGROS</Text>
@@ -455,6 +344,7 @@ export default function ProfileScreen() {
           </View>
         </ScrollView>
 
+        {/* Panel Admin */}
         {isAdmin && (
           <TouchableOpacity style={st.adminCard} onPress={() => router.push('/admin')}>
             <View style={st.adminCardNeonLine} />
@@ -469,73 +359,13 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
 
-        <View style={st.notifHeader}>
-          <TouchableOpacity style={[st.notifToggle, { flex: 1 }]} onPress={() => setNotifExpanded(v => !v)}>
-            <Text style={st.notifToggleTxt}>🔔 NOTIFICACIONES</Text>
-            {noLeidas > 0 && (
-              <View style={st.notifDot}>
-                <Text style={st.notifDotTxt}>{noLeidas}</Text>
-              </View>
-            )}
-            <Text style={st.notifChevron}>{notifExpanded ? '▲' : '▼'}</Text>
-          </TouchableOpacity>
-
-          {hayLeidas && (
-            <TouchableOpacity style={st.clearBtn} onPress={handleBorrarLeidas}>
-              <Text style={st.clearBtnTxt}>🗑️</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {notifExpanded && (
-          <View style={{ gap: 8, marginBottom: 16 }}>
-            {notifs.length === 0 ? (
-              <Text style={st.emptyTxt}>Sin notificaciones todavía</Text>
-            ) : notifs.map(n => {
-              const cfg = TIPO_CONFIG[n.tipo] ?? TIPO_CONFIG.info;
-              const fecha = new Date(n.created_at).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
-              const borrandose = deletingIds.has(n.id);
-
-              return (
-                <TouchableOpacity
-                  key={n.id}
-                  activeOpacity={0.75}
-                  onPress={() => borrandose ? handleCancelDelete(n.id) : handleTapNotif(n)}
-                >
-                  <View style={[
-                    st.notifCard,
-                    !n.leida && { borderColor: cfg.color },
-                    borrandose && st.notifCardDeleting,
-                  ]}>
-                    <Text style={{ fontSize: 20 }}>{cfg.icon}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[st.notifTitulo, !n.leida && { color: '#FFF' }]}>{n.titulo}</Text>
-                      <Text style={st.notifMsg}>{n.mensaje}</Text>
-                      <Text style={st.notifFecha}>{fecha}</Text>
-                      {borrandose && (
-                        <Text style={st.notifDeleteHint}>Toca para cancelar · Borrando en 5s…</Text>
-                      )}
-                    </View>
-                    {!n.leida && <View style={[st.dotUnread, { backgroundColor: cfg.color }]} />}
-                    {borrandose && <Text style={st.notifTrash}>🗑️</Text>}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-
-            {hayLeidas && (
-              <TouchableOpacity style={st.limpiarAllBtn} onPress={handleBorrarLeidas}>
-                <Text style={st.limpiarAllTxt}>🗑️ Limpiar notificaciones leídas</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
+        {/* Cerrar sesión */}
         <TouchableOpacity style={st.signOutBtn} onPress={handleSignOut} disabled={signingOut}>
           {signingOut ? <ActivityIndicator color="#E74C3C" /> : <Text style={st.signOutTxt}>🚨 Cerrar Sesión</Text>}
         </TouchableOpacity>
       </ScrollView>
 
+      {/* Modal editar perfil */}
       <Modal visible={editModal} transparent animationType="slide" onRequestClose={() => setEditModal(false)}>
         <TouchableWithoutFeedback onPress={() => setEditModal(false)}>
           <View style={st.modalOverlay}>
@@ -649,25 +479,6 @@ const st = StyleSheet.create({
   adminCardTitle:        { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
   adminCardSub:          { color: '#404040', fontSize: 12, marginTop: 2 },
   adminCardArrow:        { color: '#FFD700', fontSize: 24 },
-  notifHeader:           { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  notifToggle:           { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0D1117', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#1E2330', gap: 8 },
-  notifToggleTxt:        { color: '#404040', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, flex: 1 },
-  notifDot:              { backgroundColor: '#E74C3C', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  notifDotTxt:           { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  notifChevron:          { color: '#303030', fontSize: 11 },
-  clearBtn:              { backgroundColor: '#0D1117', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#1E2330', alignItems: 'center', justifyContent: 'center' },
-  clearBtnTxt:           { fontSize: 18 },
-  notifCard:             { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#0D1117', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#1E2330' },
-  notifCardDeleting:     { borderColor: '#E74C3C', backgroundColor: 'rgba(231,76,60,0.06)', opacity: 0.75 },
-  notifTitulo:           { color: '#606060', fontWeight: 'bold', fontSize: 13, marginBottom: 2 },
-  notifMsg:              { color: '#404040', fontSize: 12, lineHeight: 17 },
-  notifFecha:            { color: '#303030', fontSize: 10, marginTop: 4 },
-  notifDeleteHint:       { color: '#E74C3C', fontSize: 10, marginTop: 4, fontStyle: 'italic' },
-  notifTrash:            { fontSize: 16, alignSelf: 'center' },
-  dotUnread:             { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
-  limpiarAllBtn:         { alignItems: 'center', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(231,76,60,0.3)', backgroundColor: 'rgba(231,76,60,0.05)' },
-  limpiarAllTxt:         { color: '#E74C3C', fontSize: 12, fontWeight: '600' },
-  emptyTxt:              { color: '#404040', textAlign: 'center', padding: 20, letterSpacing: 1 },
   signOutBtn:            { marginTop: 8, padding: 15, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)', alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)', shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
   signOutTxt:            { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
   modalOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },

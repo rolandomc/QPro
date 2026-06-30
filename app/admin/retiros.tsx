@@ -40,6 +40,15 @@ export default function AdminRetirosScreen() {
   const [notaRechazo, setNotaRechazo] = useState('');
   const [retiroActivo, setRetiroActivo] = useState<any | null>(null);
 
+  // Navegación segura: evita que router.back() falle si no hay historial
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/admin');
+    }
+  };
+
   const loadRetiros = useCallback(async () => {
     try {
       let query = supabase
@@ -140,14 +149,22 @@ export default function AdminRetirosScreen() {
     }
   };
 
-  const pendientesCount = retiros.filter(r => r.estado === 'pendiente').length;
-  const totalPendiente = retiros.filter(r => r.estado === 'pendiente').reduce((s, r) => s + Number(r.monto), 0);
+  // ── Stats siempre calculadas según el filtro activo ──────────────
   const filtroActivo = FILTROS.find(f => f.key === filtro)!;
+
+  const statsCount = filtro === 'todos' ? retiros.length : retiros.filter(r => r.estado === filtro).length;
+  const statsTotal = retiros
+    .filter(r => filtro === 'todos' || r.estado === filtro)
+    .reduce((s, r) => s + Number(r.monto), 0);
+
+  const statsLabelCount = filtro === 'pendiente' ? 'Solicitudes' : filtro === 'pagado' ? 'Pagados' : filtro === 'rechazado' ? 'Rechazados' : 'Total';
+  const statsLabelTotal = filtro === 'pendiente' ? 'Total MXN' : filtro === 'pagado' ? 'Monto pagado' : filtro === 'rechazado' ? 'Monto rechazado' : 'Monto total';
+  const pendientesCount = retiros.filter(r => r.estado === 'pendiente').length;
 
   return (
     <SafeAreaView style={s.container}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+        <TouchableOpacity onPress={handleBack} style={s.backBtn}>
           <Text style={s.backTxt}>← Volver</Text>
         </TouchableOpacity>
         <View style={s.headerCenter}>
@@ -161,19 +178,22 @@ export default function AdminRetirosScreen() {
         </TouchableOpacity>
       </View>
 
-      {filtro === 'pendiente' && pendientesCount > 0 && (
-        <View style={s.statsBanner}>
-          <View style={s.statBox}>
-            <Text style={s.statNum}>{pendientesCount}</Text>
-            <Text style={s.statLbl}>Solicitudes</Text>
-          </View>
-          <View style={s.statDivider} />
-          <View style={s.statBox}>
-            <Text style={[s.statNum, { color: '#F39C12' }]}>${totalPendiente.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</Text>
-            <Text style={s.statLbl}>Total MXN</Text>
-          </View>
+      {/* ── Banner de stats: siempre visible, cambia según filtro ── */}
+      <View style={[s.statsBanner, { borderBottomColor: `${filtroActivo.color}30` }]}>
+        <View style={s.statBox}>
+          <Text style={[s.statNum, { color: filtroActivo.color }]}>
+            {loading ? '–' : statsCount}
+          </Text>
+          <Text style={s.statLbl}>{statsLabelCount}</Text>
         </View>
-      )}
+        <View style={s.statDivider} />
+        <View style={s.statBox}>
+          <Text style={[s.statNum, { color: filtroActivo.color }]}>
+            {loading ? '–' : `$${statsTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`}
+          </Text>
+          <Text style={s.statLbl}>{statsLabelTotal}</Text>
+        </View>
+      </View>
 
       <View style={s.filtrosWrap}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filtrosRow}>
@@ -353,9 +373,9 @@ const s = StyleSheet.create({
   badgeTxt:         { color: '#000', fontSize: 11, fontWeight: 'bold' },
   refreshBtn:       { width: 56, alignItems: 'flex-end' },
   refreshTxt:       { color: '#606060', fontSize: 22 },
-  statsBanner:      { flexDirection: 'row', backgroundColor: '#0F1116', borderBottomWidth: 1, borderBottomColor: '#1E2128', paddingVertical: 14 },
+  statsBanner:      { flexDirection: 'row', backgroundColor: '#0F1116', borderBottomWidth: 1, paddingVertical: 14 },
   statBox:          { flex: 1, alignItems: 'center' },
-  statNum:          { color: '#FFF', fontSize: 24, fontWeight: 'bold' },
+  statNum:          { fontSize: 24, fontWeight: 'bold' },
   statLbl:          { color: '#505060', fontSize: 11, marginTop: 2, fontWeight: '500' },
   statDivider:      { width: 1, backgroundColor: '#1E2128', marginVertical: 4 },
   filtrosWrap:      { borderBottomWidth: 1, borderBottomColor: '#1E2128', paddingVertical: 10 },

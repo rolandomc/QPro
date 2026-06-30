@@ -16,6 +16,21 @@ function formatDisplay(iso: string) {
   const d = new Date(iso);
   return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}  ${pad(d.getHours())}:${pad(d.getMinutes())}h`;
 }
+function formatFecha(iso: string) {
+  return new Date(iso).toLocaleDateString('es-MX', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+type FiltroEstado = 'todas' | 'abierta' | 'cerrada' | 'finalizada' | 'nula';
+
+const FILTROS: { key: FiltroEstado; label: string; color: string }[] = [
+  { key: 'todas',     label: 'Todas',     color: '#9B59B6' },
+  { key: 'abierta',  label: 'Abiertas',  color: '#2ECC71' },
+  { key: 'cerrada',  label: 'Cerradas',  color: '#3498DB' },
+  { key: 'finalizada', label: 'Canceladas', color: '#E74C3C' },
+  { key: 'nula',     label: 'Nulas',     color: '#A0A0A0' },
+];
 
 export default function AdminDashboardScreen() {
   const router = useRouter();
@@ -33,10 +48,28 @@ export default function AdminDashboardScreen() {
   const [pickerVisible,        setPickerVisible]        = useState(false);
   const [retirosPendientes,    setRetirosPendientes]    = useState(0);
 
+  // ── Filtro de quinielas ───────────────────────────────────────────
+  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('todas');
+
   // ── Comprobantes SPEI pendientes ──────────────────────────────────
   const [speiPendientes,       setSpeiPendientes]       = useState<any[]>([]);
   const [speiExpanded,         setSpeiExpanded]         = useState(false);
   const [aprobandoId,          setAprobandoId]          = useState<string | null>(null);
+
+  // ── Retiros inline ────────────────────────────────────────────────
+  const [retirosExpanded,      setRetirosExpanded]      = useState(false);
+  const [retirosData,          setRetirosData]          = useState<any[]>([]);
+  const [loadingRetiros,       setLoadingRetiros]       = useState(false);
+  const [accionandoRetiro,     setAccionandoRetiro]     = useState<string | null>(null);
+
+  // Navegación segura: evita que router.back() falle si no hay historial
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
+  };
 
   const loadQuinielas = useCallback(async () => {
     try {
@@ -48,7 +81,6 @@ export default function AdminDashboardScreen() {
           .select('id', { count: 'exact', head: true })
           .eq('estado', 'pendiente')
           .then(r => ({ count: r.count ?? 0 })),
-        // Cargar participaciones SPEI con comprobante subido pero sin validar
         supabase
           .from('participaciones')
           .select('id, user_id, monto_pagado, clave_rastreo, comprobante_url, comprobante_enviado_at, ultimo_error_spei, created_at, quiniela_id')
@@ -61,7 +93,6 @@ export default function AdminDashboardScreen() {
       setProximaFecha(fecha ?? '');
       setRetirosPendientes(count);
 
-      // Enriquecer con username
       const parts = speiData || [];
       if (parts.length > 0) {
         const userIds = parts.map((p: any) => p.user_id);
@@ -72,7 +103,6 @@ export default function AdminDashboardScreen() {
         const profsMap: Record<string, string> = {};
         (profs || []).forEach((p: any) => { profsMap[p.id] = p.username; });
         setSpeiPendientes(parts.map((p: any) => ({ ...p, username: profsMap[p.user_id] ?? 'usuario' })));
-        // Auto-expandir si hay pendientes
         if (parts.length > 0) setSpeiExpanded(true);
       } else {
         setSpeiPendientes([]);
@@ -87,7 +117,103 @@ export default function AdminDashboardScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
 
-  // ── Aprobar comprobante SPEI manualmente ─────────────────────────
+  // ── Quinielas filtradas ───────────────────────────────────────────
+  const quinielasFiltradas = filtroEstado === 'todas'
+    ? quinielas
+    : filtroEstado === 'nula'
+      ? quinielas.filter(q => !q.estado || q.estado === 'nula')
+      : quinielas.filter(q => q.estado === filtroEstado);
+
+  // ── Cargar retiros al expandir ────────────────────────────────────
+  const handleToggleRetiros = async () => {
+    const next = !retirosExpanded;
+    setRetirosExpanded(next);
+    if (next && retirosData.length === 0) {
+      setLoadingRetiros(true);
+      try {
+        const { data, error } = await supabase
+          .from('retiro_solicitudes')
+          .select('id, user_id, monto, metodo, clabe, alias_mp, estado, nota_admin, created_at, profiles:user_id ( username )')
+          .eq('estado', 'pendiente')
+          .order('created_at', { ascending: true });
+        if (error) throw error;
+        setRetirosData(data ?? []);
+      } catch (e: any) {
+        Alert.alert('Error', e.message);
+      } finally {
+        setLoadingRetiros(false);
+      }
+    }
+  };
+
+  const llamarEdgeFunction = async (solicitud_id: string, accion: 'pagar' | 'rechazar') => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('No autenticado');
+    const res = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/procesar-retiro`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ solicitud_id, accion }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? 'Error al procesar');
+    return json;
+  };
+
+  const handlePagarRetiro = (item: any) => {
+    const destino = item.metodo === 'spei' ? `CLABE: ${item.clabe}` : `Alias MP: ${item.alias_mp}`;
+    Alert.alert(
+      '💸 Confirmar pago',
+      `¿Marcar como pagado el retiro de\n\n@${item.profiles?.username}\n$${item.monto} MXN\n${destino}?\n\n⚠️ Solo confirma si ya hiciste la transferencia.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sí, ya pagué',
+          onPress: async () => {
+            setAccionandoRetiro(item.id + '_pagar');
+            try {
+              await llamarEdgeFunction(item.id, 'pagar');
+              setRetirosData(prev => prev.filter(r => r.id !== item.id));
+              setRetirosPendientes(p => Math.max(0, p - 1));
+              Alert.alert('✅ Listo', 'Retiro marcado como pagado.');
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setAccionandoRetiro(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRechazarRetiro = (item: any) => {
+    Alert.alert(
+      '❌ Rechazar retiro',
+      `¿Rechazar el retiro de @${item.profiles?.username} por $${item.monto} MXN?\n\nEl saldo será devuelto automáticamente.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Rechazar',
+          style: 'destructive',
+          onPress: async () => {
+            setAccionandoRetiro(item.id + '_rechazar');
+            try {
+              await llamarEdgeFunction(item.id, 'rechazar');
+              setRetirosData(prev => prev.filter(r => r.id !== item.id));
+              setRetirosPendientes(p => Math.max(0, p - 1));
+              Alert.alert('Rechazado', 'Solicitud rechazada y saldo devuelto.');
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setAccionandoRetiro(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // ── Aprobar comprobante SPEI ──────────────────────────────────────
   const handleAprobarSPEI = (item: any) => {
     Alert.alert(
       '✅ Aprobar Pago',
@@ -110,7 +236,6 @@ export default function AdminDashboardScreen() {
                 })
                 .eq('id', item.id);
               if (error) throw error;
-              // Marcar notificación como leída
               await supabase
                 .from('admin_notificaciones')
                 .update({ leida: true })
@@ -224,7 +349,7 @@ export default function AdminDashboardScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <Text style={styles.backText}>← Volver</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Panel Admin</Text>
@@ -233,7 +358,7 @@ export default function AdminDashboardScreen() {
 
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); }} tintColor="#9B59B6" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); setRetirosData([]); }} tintColor="#9B59B6" />}
       >
         {/* Stats */}
         <View style={styles.statsContainer}>
@@ -320,10 +445,10 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
-        {/* Acceso rápido retiros */}
+        {/* ── Gestionar Retiros (acordeón) ── */}
         <TouchableOpacity
-          style={styles.retirosBtn}
-          onPress={() => router.push('/admin/retiros')}
+          style={[styles.retirosBtn, retirosPendientes > 0 && styles.retirosBtnAlert]}
+          onPress={handleToggleRetiros}
         >
           <View style={styles.retirosBtnLeft}>
             <Text style={styles.retirosEmoji}>💸</Text>
@@ -342,9 +467,74 @@ export default function AdminDashboardScreen() {
                 <Text style={styles.badgeCount}>{retirosPendientes}</Text>
               </View>
             )}
-            <Text style={styles.retirosChevron}>›</Text>
+            <Text style={styles.retirosChevron}>{retirosExpanded ? '▲' : '▼'}</Text>
           </View>
         </TouchableOpacity>
+
+        {retirosExpanded && (
+          <View style={styles.retirosList}>
+            {loadingRetiros ? (
+              <ActivityIndicator color="#F39C12" style={{ paddingVertical: 20 }} />
+            ) : retirosData.length === 0 ? (
+              <Text style={styles.retirosEmpty}>🎉 Sin retiros pendientes por procesar.</Text>
+            ) : (
+              retirosData.map((item) => {
+                const pagando   = accionandoRetiro === item.id + '_pagar';
+                const rechazando = accionandoRetiro === item.id + '_rechazar';
+                const ocupado   = pagando || rechazando;
+                return (
+                  <View key={item.id} style={styles.retiroCard}>
+                    <View style={styles.retiroCardHeader}>
+                      <View style={styles.retiroAvatarCircle}>
+                        <Text style={styles.retiroAvatarTxt}>{(item.profiles?.username ?? 'U')[0].toUpperCase()}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.retiroUser}>@{item.profiles?.username ?? 'usuario'}</Text>
+                        <Text style={styles.retiroFecha}>{formatFecha(item.created_at)}</Text>
+                      </View>
+                      <View style={[styles.retiroMetodoBadge, item.metodo === 'spei' ? styles.retiroMetodoSPEI : styles.retiroMetodoMP]}>
+                        <Text style={[styles.retiroMetodoTxt, item.metodo === 'spei' ? { color: '#3498DB' } : { color: '#00B1EA' }]}>
+                          {item.metodo === 'spei' ? '🏦 SPEI' : '💳 MP'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.retiroMonto}>${Number(item.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })} <Text style={styles.retiroMxn}>MXN</Text></Text>
+                    <View style={styles.retiroDestinoBox}>
+                      <Text style={styles.retiroDestinoLabel}>{item.metodo === 'spei' ? 'CLABE' : 'Alias / CVU'}</Text>
+                      <Text style={styles.retiroDestinoVal} numberOfLines={1}>
+                        {item.metodo === 'spei' ? item.clabe : item.alias_mp}
+                      </Text>
+                    </View>
+                    <View style={styles.retiroAcciones}>
+                      <TouchableOpacity
+                        style={[styles.retiroRechazarBtn, ocupado && { opacity: 0.4 }]}
+                        onPress={() => handleRechazarRetiro(item)}
+                        disabled={ocupado}
+                      >
+                        {rechazando
+                          ? <ActivityIndicator color="#E74C3C" size="small" />
+                          : <Text style={styles.retiroRechazarTxt}>✕ Rechazar</Text>}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.retiroPagarBtn, ocupado && { opacity: 0.4 }]}
+                        onPress={() => handlePagarRetiro(item)}
+                        disabled={ocupado}
+                      >
+                        {pagando
+                          ? <ActivityIndicator color="#000" size="small" />
+                          : <Text style={styles.retiroPagarTxt}>✓ Ya pagué</Text>}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+            {/* Botón para ir a la pantalla completa */}
+            <TouchableOpacity style={styles.retirosVerTodosBtn} onPress={() => router.push('/admin/retiros')}>
+              <Text style={styles.retirosVerTodosTxt}>Ver todos los retiros →</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Configurar próxima quiniela */}
         <TouchableOpacity style={styles.configHeader} onPress={() => setConfigExpanded(v => !v)}>
@@ -379,19 +569,64 @@ export default function AdminDashboardScreen() {
           <Text style={styles.createBtnText}>+ Diseñar Nueva Quiniela</Text>
         </TouchableOpacity>
 
-        <Text style={styles.sectionTitle}>Quinielas</Text>
-        {quinielas.length === 0 && (
+        {/* ── Sección Quinielas con filtros ── */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Quinielas</Text>
+          <Text style={styles.sectionCount}>
+            {quinielasFiltradas.length}{filtroEstado !== 'todas' ? ` / ${quinielas.length}` : ''}
+          </Text>
+        </View>
+
+        {/* Filtros */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filtrosContainer}
+        >
+          {FILTROS.map(f => {
+            const activo = filtroEstado === f.key;
+            const count = f.key === 'todas'
+              ? quinielas.length
+              : f.key === 'nula'
+                ? quinielas.filter(q => !q.estado || q.estado === 'nula').length
+                : quinielas.filter(q => q.estado === f.key).length;
+            return (
+              <TouchableOpacity
+                key={f.key}
+                style={[
+                  styles.filtroPill,
+                  activo && { backgroundColor: f.color, borderColor: f.color },
+                  !activo && { borderColor: f.color },
+                ]}
+                onPress={() => setFiltroEstado(f.key)}
+              >
+                <Text style={[styles.filtroPillText, { color: activo ? '#000' : f.color }]}>
+                  {f.label}
+                </Text>
+                <View style={[styles.filtroCount, activo ? { backgroundColor: 'rgba(0,0,0,0.2)' } : { backgroundColor: `${f.color}22` }]}>
+                  <Text style={[styles.filtroCountText, { color: activo ? '#000' : f.color }]}>{count}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {quinielasFiltradas.length === 0 && (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>No hay quinielas creadas aún.</Text>
+            <Text style={styles.emptyText}>
+              {quinielas.length === 0
+                ? 'No hay quinielas creadas aún.'
+                : `No hay quinielas con estado "${filtroEstado}".`}
+            </Text>
           </View>
         )}
 
-        {quinielas.map((q) => (
+        {quinielasFiltradas.map((q) => (
           <TouchableOpacity key={q.id} style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
               <View style={[styles.estadoBadge, { borderColor: getEstadoColor(q.estado) }]}>
-                <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado.toUpperCase()}</Text>
+                <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado?.toUpperCase() ?? 'NULA'}</Text>
               </View>
               <Text style={styles.cardArrow}>›</Text>
             </View>
@@ -517,7 +752,9 @@ const styles = StyleSheet.create({
   speiAprobarBtn:       { flex: 1, backgroundColor: '#2ECC71', paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
   speiAprobarText:      { color: '#000', fontSize: 12, fontWeight: 'bold' },
 
-  retirosBtn:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1.5, borderColor: '#F39C12' },
+  // ── Retiros acordeón ──
+  retirosBtn:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: '#2A2D35' },
+  retirosBtnAlert:      { borderColor: '#F39C12' },
   retirosBtnLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
   retirosEmoji:         { fontSize: 28 },
   retirosBtnTitle:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
@@ -525,7 +762,32 @@ const styles = StyleSheet.create({
   retirosBtnRight:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge:                { backgroundColor: '#E74C3C', borderRadius: 12, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
   badgeCount:           { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
-  retirosChevron:       { color: '#F39C12', fontSize: 24 },
+  retirosChevron:       { color: '#F39C12', fontSize: 12 },
+
+  retirosList:          { backgroundColor: '#15181F', borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35', gap: 10 },
+  retirosEmpty:         { color: '#2ECC71', fontSize: 13, textAlign: 'center', paddingVertical: 12 },
+  retiroCard:           { backgroundColor: '#1C1F26', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2A2D35' },
+  retiroCardHeader:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  retiroAvatarCircle:   { width: 36, height: 36, borderRadius: 18, backgroundColor: '#15181F', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2A2D35' },
+  retiroAvatarTxt:      { color: '#F39C12', fontWeight: 'bold', fontSize: 15 },
+  retiroUser:           { color: '#FFF', fontWeight: '700', fontSize: 13 },
+  retiroFecha:          { color: '#505050', fontSize: 10, marginTop: 1 },
+  retiroMetodoBadge:    { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1 },
+  retiroMetodoSPEI:     { backgroundColor: 'rgba(52,152,219,0.1)', borderColor: 'rgba(52,152,219,0.3)' },
+  retiroMetodoMP:       { backgroundColor: 'rgba(0,177,234,0.1)', borderColor: 'rgba(0,177,234,0.3)' },
+  retiroMetodoTxt:      { fontSize: 11, fontWeight: '700' },
+  retiroMonto:          { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 8 },
+  retiroMxn:            { color: '#505050', fontSize: 13 },
+  retiroDestinoBox:     { backgroundColor: '#12151C', borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#2A2D35' },
+  retiroDestinoLabel:   { color: '#505050', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
+  retiroDestinoVal:     { color: '#E0E0E0', fontWeight: '600', fontSize: 12 },
+  retiroAcciones:       { flexDirection: 'row', gap: 8 },
+  retiroRechazarBtn:    { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center', borderWidth: 1.5, borderColor: '#E74C3C', backgroundColor: 'rgba(231,76,60,0.07)' },
+  retiroRechazarTxt:    { color: '#E74C3C', fontSize: 12, fontWeight: 'bold' },
+  retiroPagarBtn:       { flex: 2, backgroundColor: '#2ECC71', paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
+  retiroPagarTxt:       { color: '#000', fontSize: 12, fontWeight: 'bold' },
+  retirosVerTodosBtn:   { marginTop: 4, paddingVertical: 10, alignItems: 'center' },
+  retirosVerTodosTxt:   { color: '#F39C12', fontSize: 13, fontWeight: '600' },
 
   configHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 10, padding: 14, marginBottom: 4, borderWidth: 1, borderColor: '#F39C12' },
   configHeaderText:     { color: '#F39C12', fontWeight: 'bold', fontSize: 14 },
@@ -540,43 +802,55 @@ const styles = StyleSheet.create({
   configBtn:            { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   configBtnSave:        { backgroundColor: '#F39C12' },
   configBtnSaveText:    { color: '#000', fontWeight: 'bold', fontSize: 14 },
-  configBtnClear:       { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
-  configBtnClearText:   { color: '#A0A0A0', fontSize: 14 },
+  configBtnClear:       { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#555' },
+  configBtnClearText:   { color: '#A0A0A0', fontWeight: 'bold', fontSize: 14 },
 
-  createBtn:            { backgroundColor: '#1C1F26', padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 12, marginBottom: 24, borderWidth: 1.5 },
-  neonBorderPurple:     { borderColor: '#9B59B6' },
+  createBtn:            { padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1 },
+  neonBorderPurple:     { borderColor: '#9B59B6', backgroundColor: 'rgba(155,89,182,0.1)' },
   createBtnText:        { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
-  sectionTitle:         { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 15 },
-  emptyBox:             { alignItems: 'center', padding: 30 },
-  emptyText:            { color: '#A0A0A0', fontSize: 14, textAlign: 'center' },
 
-  card:                 { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: '#2A2D35' },
-  cardHeader:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  cardTitle:            { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1, marginRight: 8 },
-  cardArrow:            { color: '#9B59B6', fontSize: 22, marginLeft: 4 },
-  estadoBadge:          { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  // ── Sección quinielas header + filtros ──
+  sectionHeaderRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  sectionTitle:         { color: '#A0A0A0', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+  sectionCount:         { color: '#505050', fontSize: 12 },
+
+  filtrosContainer:     { paddingBottom: 12, gap: 8 },
+  filtroPill:           { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1.5, backgroundColor: 'transparent' },
+  filtroPillText:       { fontSize: 12, fontWeight: '700' },
+  filtroCount:          { borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5 },
+  filtroCountText:      { fontSize: 11, fontWeight: 'bold' },
+
+  emptyBox:             { padding: 30, alignItems: 'center' },
+  emptyText:            { color: '#505050', fontSize: 14 },
+
+  card:                 { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#2A2D35' },
+  cardHeader:           { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 },
+  cardTitle:            { flex: 1, color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  estadoBadge:          { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   estadoBadgeText:      { fontSize: 10, fontWeight: 'bold' },
-  cardInfo:             { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#1C1F26', padding: 10, borderRadius: 8, marginBottom: 8 },
-  infoText:             { color: '#A0A0A0', fontSize: 12 },
-  cardActions:          { flexDirection: 'row', gap: 8, marginTop: 4 },
-  actionBtn:            { flex: 1, backgroundColor: '#1C1F26', paddingVertical: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
-  actionText:           { color: '#FFF', fontSize: 12, fontWeight: '600' },
-  dangerBtn:            { borderColor: '#E91E63', backgroundColor: 'rgba(233,30,99,0.1)' },
-  dangerText:           { color: '#E91E63', fontSize: 12, fontWeight: 'bold' },
-  disabledBtn:          { opacity: 0.35 },
+  cardArrow:            { color: '#505050', fontSize: 18 },
+  cardInfo:             { flexDirection: 'row', gap: 16, marginBottom: 6 },
+  infoText:             { color: '#A0A0A0', fontSize: 13 },
+  cardActions:          { flexDirection: 'row', gap: 8, marginTop: 10 },
+  actionBtn:            { flex: 1, backgroundColor: '#1C1F26', padding: 8, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D35' },
+  actionText:           { color: '#3498DB', fontSize: 12, fontWeight: '600' },
+  dangerBtn:            { borderColor: '#E74C3C' },
+  dangerText:           { color: '#E74C3C', fontSize: 12, fontWeight: '600' },
+  disabledBtn:          { opacity: 0.4 },
 
   modalOverlay:         { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalBox:             { backgroundColor: '#15181F', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '75%' },
-  modalHeader:          { marginBottom: 15 },
+  modalBox:             { backgroundColor: '#15181F', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '80%' },
+  modalHeader:          { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
   modalTitle:           { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  modalSubtitle:        { color: '#A0A0A0', fontSize: 13, marginTop: 2 },
-  modalClose:           { position: 'absolute', right: 0, top: 0, padding: 5 },
-  modalCloseText:       { color: '#FFF', fontSize: 20 },
-  userRow:              { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35', gap: 8 },
-  userRank:             { color: '#F39C12', fontWeight: 'bold', width: 28, fontSize: 14 },
+  modalSubtitle:        { flex: 1, color: '#A0A0A0', fontSize: 13 },
+  modalClose:           { width: 32, height: 32, borderRadius: 16, backgroundColor: '#2A2D35', alignItems: 'center', justifyContent: 'center' },
+  modalCloseText:       { color: '#FFF', fontSize: 16 },
+
+  userRow:              { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2D35', gap: 10 },
+  userRank:             { color: '#505050', fontSize: 13, width: 28 },
   userEmail:            { color: '#FFF', fontSize: 14, fontWeight: '600' },
-  userMeta:             { color: '#A0A0A0', fontSize: 12, marginTop: 2 },
+  userMeta:             { color: '#A0A0A0', fontSize: 11, marginTop: 2 },
   partEstadoBadge:      { borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   partEstadoBadgeText:  { fontSize: 9, fontWeight: 'bold' },
-  userMonto:            { color: '#2ECC71', fontWeight: 'bold', fontSize: 13, minWidth: 40, textAlign: 'right' },
+  userMonto:            { color: '#2ECC71', fontWeight: 'bold', fontSize: 14, minWidth: 50, textAlign: 'right' },
 });

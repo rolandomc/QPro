@@ -52,6 +52,7 @@ export default function QuinielaDetailsScreen() {
   const [saving,          setSaving]          = useState(false);
   const [yaParticipo,     setYaParticipo]     = useState(false);
   const [pagoPendiente,   setPagoPendiente]   = useState(false);
+  const [estadoPago,      setEstadoPago]      = useState<string | null>(null);
   const [modoEdicion,     setModoEdicion]     = useState(false);
   const [participacionId, setParticipacionId] = useState<string | null>(null);
   const [confirmState,    setConfirmState]    = useState<ConfirmState>(
@@ -108,11 +109,13 @@ export default function QuinielaDetailsScreen() {
           setYaParticipo(true);
           setParticipacionId(part.id);
           participacionIdRef.current = part.id;
+          setEstadoPago(part.estado);
           await cargarPicksActuales(part.id);
           setPagoPendiente(part.estado === 'pendiente' || part.estado === 'spei_pendiente');
         } else {
           setYaParticipo(false);
           setPagoPendiente(false);
+          setEstadoPago(null);
         }
       }
     } catch (e: any) {
@@ -238,6 +241,14 @@ export default function QuinielaDetailsScreen() {
       setSaving(false);
     }
   };
+
+  // Retoma el flujo SPEI para un usuario que ya tiene spei_pendiente
+  const handleRetomarSpei = useCallback(() => {
+    participacionIdRef.current = participacionId;
+    setComprobanteUrl(null);
+    setSpeiValidResult(null);
+    setConfirmState('speiDatos');
+  }, [participacionId]);
 
   const handleSubirComprobante = async () => {
     const partId = participacionIdRef.current;
@@ -607,9 +618,18 @@ export default function QuinielaDetailsScreen() {
               ✅ Ya tienes picks guardados  •  🎯 {golesPredichosTotales} goles predichos
             </Text>
           </View>
+
+          {/* Botón editar picks */}
           {puedeEditar && (
             <TouchableOpacity style={styles.editBtn} onPress={() => setModoEdicion(true)}>
               <Text style={styles.editBtnTxt}>✏️ Editar mis picks</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Botón subir comprobante SPEI — solo si el pago está pendiente por SPEI */}
+          {estadoPago === 'spei_pendiente' && quiniela?.estado === 'abierta' && (
+            <TouchableOpacity style={styles.speiRetryBtn} onPress={handleRetomarSpei}>
+              <Text style={styles.speiRetryBtnTxt}>🏦 Subir comprobante SPEI</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -620,11 +640,14 @@ export default function QuinielaDetailsScreen() {
           <Text style={styles.pendingBannerText}>
             ⏳ Tu pago está pendiente. Tus picks están guardados.
           </Text>
-          <TouchableOpacity style={styles.pendingBannerBtn} onPress={handleReintentarPago} disabled={retryingPago}>
-            {retryingPago
-              ? <ActivityIndicator color="#000" size="small" />
-              : <Text style={styles.pendingBannerBtnTxt}>Reintentar pago con MP</Text>}
-          </TouchableOpacity>
+          {/* Solo mostrar Reintentar MP si el método pendiente es MP */}
+          {estadoPago === 'pendiente' && (
+            <TouchableOpacity style={styles.pendingBannerBtn} onPress={handleReintentarPago} disabled={retryingPago}>
+              {retryingPago
+                ? <ActivityIndicator color="#000" size="small" />
+                : <Text style={styles.pendingBannerBtnTxt}>Reintentar pago con MP</Text>}
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -718,6 +741,16 @@ const styles = StyleSheet.create({
   participandoText: { color: '#2ECC71', fontSize: 13, textAlign: 'center' },
   editBtn:    { backgroundColor: '#1E2128', borderRadius: 10, padding: 12, alignItems: 'center' },
   editBtnTxt: { color: '#E0E0E0', fontSize: 14, fontWeight: '600' },
+  // Botón de reintento SPEI — estilo azul/bancario discreto
+  speiRetryBtn: {
+    backgroundColor: '#0D1A2B',
+    borderRadius: 10,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#1A3A5C',
+  },
+  speiRetryBtnTxt: { color: '#4DABB8', fontSize: 14, fontWeight: '600' },
   pendingBanner: {
     backgroundColor: '#2B1D0A', marginHorizontal: 16, marginTop: 10,
     borderRadius: 10, padding: 12, gap: 10,

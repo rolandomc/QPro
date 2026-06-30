@@ -1,10 +1,11 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
   Alert, ActivityIndicator, RefreshControl, Modal, FlatList, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
+import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { AdminService } from '../../src/services/admin.service';
 import { QuinielasService } from '../../src/services/quinielas.service';
 import { supabase } from '../../src/config/supabase';
@@ -42,6 +43,8 @@ const FILTROS_SPEI: { key: FiltroSPEI; label: string; color: string }[] = [
 
 export default function AdminDashboardScreen() {
   const router = useRouter();
+  const swipeableRefs = useRef<Record<string, any>>({});
+
   const [quinielas,            setQuinielas]            = useState<any[]>([]);
   const [loading,              setLoading]              = useState(true);
   const [refreshing,           setRefreshing]           = useState(false);
@@ -265,6 +268,53 @@ export default function AdminDashboardScreen() {
       ],
     );
   };
+
+  // ── Eliminar quiniela ────────────────────────────────────────────────────
+  const handleEliminarQuiniela = (quinielaId: string, titulo: string) => {
+    // Cerrar el swipeable antes de mostrar el alert
+    swipeableRefs.current[quinielaId]?.close();
+    Alert.alert(
+      '🗑 Eliminar quiniela',
+      `¿Eliminar "${titulo}" permanentemente?\n\nEsta acción no se puede deshacer.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            setActionLoading(quinielaId + '_eliminar');
+            try {
+              const { error } = await supabase
+                .from('quinielas')
+                .delete()
+                .eq('id', quinielaId);
+              if (error) throw error;
+              setQuinielas(prev => prev.filter(q => q.id !== quinielaId));
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setActionLoading(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const renderDeleteAction = (quinielaId: string, titulo: string) => (
+    <TouchableOpacity
+      style={styles.deleteAction}
+      onPress={() => handleEliminarQuiniela(quinielaId, titulo)}
+      activeOpacity={0.8}
+    >
+      {actionLoading === quinielaId + '_eliminar'
+        ? <ActivityIndicator color="#FFF" size="small" />
+        : <>
+            <Text style={styles.deleteActionIcon}>🗑</Text>
+            <Text style={styles.deleteActionText}>Eliminar</Text>
+          </>}
+    </TouchableOpacity>
+  );
 
   const handlePickerConfirm = (date: Date) => {
     setPickerVisible(false);
@@ -696,47 +746,57 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
+        {/* ── Cards de quinielas con swipe-to-delete ── */}
         {quinielasFiltradas.map((q) => (
-          <TouchableOpacity key={q.id} style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
-              <View style={[styles.estadoBadge, { borderColor: getEstadoColor(q.estado) }]}>
-                <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado?.toUpperCase() ?? 'NULA'}</Text>
+          <Swipeable
+            key={q.id}
+            ref={ref => { swipeableRefs.current[q.id] = ref; }}
+            friction={2}
+            rightThreshold={60}
+            renderRightActions={() => renderDeleteAction(q.id, q.titulo)}
+            overshootRight={false}
+          >
+            <TouchableOpacity style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
+                <View style={[styles.estadoBadge, { borderColor: getEstadoColor(q.estado) }]}>
+                  <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado?.toUpperCase() ?? 'NULA'}</Text>
+                </View>
+                <Text style={styles.cardArrow}>›</Text>
               </View>
-              <Text style={styles.cardArrow}>›</Text>
-            </View>
-            <View style={styles.cardInfo}>
-              <Text style={styles.infoText}>🎦 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
-              <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada}</Text></Text>
-            </View>
-            <View style={styles.cardInfo}>
-              <Text style={styles.infoText}>👥 Mín: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0}</Text></Text>
-              <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
-            </View>
-            <View style={styles.cardActions}>
-              <TouchableOpacity style={styles.actionBtn} onPress={(e) => { e.stopPropagation?.(); handleVerUsuarios(q.id, q.titulo); }}>
-                <Text style={styles.actionText}>👥 Usuarios</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionBtn, q.estado !== 'abierta' && styles.disabledBtn]}
-                disabled={q.estado !== 'abierta' || actionLoading === q.id + '_cerrar'}
-                onPress={(e) => { e.stopPropagation?.(); handleCerrarApuestas(q.id, q.titulo); }}
-              >
-                {actionLoading === q.id + '_cerrar'
-                  ? <ActivityIndicator size="small" color="#3498DB" />
-                  : <Text style={[styles.actionText, q.estado !== 'abierta' && { color: '#505050' }]}>🔒 Cerrar</Text>}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionBtn, styles.dangerBtn, q.estado === 'finalizada' && styles.disabledBtn]}
-                disabled={q.estado === 'finalizada' || actionLoading === q.id + '_cancelar'}
-                onPress={(e) => { e.stopPropagation?.(); handleCancelar(q.id, q.titulo); }}
-              >
-                {actionLoading === q.id + '_cancelar'
-                  ? <ActivityIndicator size="small" color="#E91E63" />
-                  : <Text style={[styles.dangerText, q.estado === 'finalizada' && { color: '#505050' }]}>❌ Cancelar</Text>}
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
+              <View style={styles.cardInfo}>
+                <Text style={styles.infoText}>🎦 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
+                <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada}</Text></Text>
+              </View>
+              <View style={styles.cardInfo}>
+                <Text style={styles.infoText}>👥 Mín: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0}</Text></Text>
+                <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
+              </View>
+              <View style={styles.cardActions}>
+                <TouchableOpacity style={styles.actionBtn} onPress={(e) => { e.stopPropagation?.(); handleVerUsuarios(q.id, q.titulo); }}>
+                  <Text style={styles.actionText}>👥 Usuarios</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, q.estado !== 'abierta' && styles.disabledBtn]}
+                  disabled={q.estado !== 'abierta' || actionLoading === q.id + '_cerrar'}
+                  onPress={(e) => { e.stopPropagation?.(); handleCerrarApuestas(q.id, q.titulo); }}
+                >
+                  {actionLoading === q.id + '_cerrar'
+                    ? <ActivityIndicator size="small" color="#3498DB" />
+                    : <Text style={[styles.actionText, q.estado !== 'abierta' && { color: '#505050' }]}>🔒 Cerrar</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.dangerBtn, q.estado === 'finalizada' && styles.disabledBtn]}
+                  disabled={q.estado === 'finalizada' || actionLoading === q.id + '_cancelar'}
+                  onPress={(e) => { e.stopPropagation?.(); handleCancelar(q.id, q.titulo); }}
+                >
+                  {actionLoading === q.id + '_cancelar'
+                    ? <ActivityIndicator size="small" color="#E91E63" />
+                    : <Text style={[styles.dangerText, q.estado === 'finalizada' && { color: '#505050' }]}>❌ Cancelar</Text>}
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </Swipeable>
         ))}
       </ScrollView>
 
@@ -828,12 +888,9 @@ const styles = StyleSheet.create({
   speiAprobarBtn:       { flex: 1, backgroundColor: '#2ECC71', paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
   speiAprobarText:      { color: '#000', fontSize: 12, fontWeight: 'bold' },
 
-  // OCR toggle button
   ocrToggleBtn:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#12151C', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 4, borderWidth: 1, borderColor: '#9B59B633' },
   ocrToggleText:        { color: '#9B59B6', fontSize: 11, fontWeight: 'bold' },
   ocrToggleChevron:     { color: '#9B59B6', fontSize: 10 },
-
-  // OCR data box
   ocrBox:               { backgroundColor: '#12151C', borderRadius: 8, paddingHorizontal: 10, paddingBottom: 10, paddingTop: 6, marginBottom: 8, borderWidth: 1, borderColor: '#9B59B633', gap: 4 },
   ocrRow:               { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   ocrKey:               { color: '#505050', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', flex: 1 },
@@ -907,6 +964,11 @@ const styles = StyleSheet.create({
 
   emptyBox:             { padding: 30, alignItems: 'center' },
   emptyText:            { color: '#505050', fontSize: 14 },
+
+  // Swipe delete action
+  deleteAction:         { backgroundColor: '#E74C3C', justifyContent: 'center', alignItems: 'center', width: 90, borderRadius: 12, marginBottom: 12 },
+  deleteActionIcon:     { fontSize: 22, marginBottom: 2 },
+  deleteActionText:     { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
 
   card:                 { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#2A2D35' },
   cardHeader:           { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 },

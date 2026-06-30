@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ActivityIndicator,
   TouchableOpacity, FlatList, Alert, Linking, Platform,
-  ScrollView, KeyboardAvoidingView,
+  ScrollView, KeyboardAvoidingView, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -48,6 +48,7 @@ export default function QuinielaDetailsScreen() {
   const [partidos,        setPartidos]        = useState<any[]>([]);
   const [selecciones,     setSelecciones]     = useState<Record<string, SeleccionConGoles>>({});
   const [loading,         setLoading]         = useState(!isPendingPago.current);
+  const [refreshing,      setRefreshing]      = useState(false);
   const [saving,          setSaving]          = useState(false);
   const [yaParticipo,     setYaParticipo]     = useState(false);
   const [pagoPendiente,   setPagoPendiente]   = useState(false);
@@ -86,50 +87,59 @@ export default function QuinielaDetailsScreen() {
     return map;
   }, []);
 
+  // ─── loadData (reutilizable para focus y pull-to-refresh) ─────────────────
+  const loadData = useCallback(async () => {
+    if (!id) return;
+    try {
+      const [partidosData, { data: quinielaData }] = await Promise.all([
+        QuinielasService.getPartidos(id),
+        supabase.from('quinielas').select('*').eq('id', id).single(),
+      ]);
+      setQuiniela(quinielaData);
+      setPartidos(partidosData || []);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: part } = await supabase
+          .from('participaciones')
+          .select('id, estado')
+          .eq('quiniela_id', id)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (part) {
+          setYaParticipo(true);
+          setParticipacionId(part.id);
+          participacionIdRef.current = part.id;
+          await cargarPicksActuales(part.id);
+          setPagoPendiente(part.estado === 'pendiente' || part.estado === 'spei_pendiente');
+        } else {
+          setYaParticipo(false);
+          setPagoPendiente(false);
+        }
+      }
+    } catch (e: any) {
+      setErrorMsg(e.message);
+      setConfirmState('error');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [id, cargarPicksActuales]);
+
   // ─── Focus effect ─────────────────────────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
       if (isPendingPago.current) return;
-      async function loadData() {
-        if (!id) return;
-        setLoading(true);
-        try {
-          const [partidosData, { data: quinielaData }] = await Promise.all([
-            QuinielasService.getPartidos(id),
-            supabase.from('quinielas').select('*').eq('id', id).single(),
-          ]);
-          setQuiniela(quinielaData);
-          setPartidos(partidosData || []);
-
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            const { data: part } = await supabase
-              .from('participaciones')
-              .select('id, estado')
-              .eq('quiniela_id', id)
-              .eq('user_id', user.id)
-              .maybeSingle();
-            if (part) {
-              setYaParticipo(true);
-              setParticipacionId(part.id);
-              participacionIdRef.current = part.id;
-              await cargarPicksActuales(part.id);
-              setPagoPendiente(part.estado === 'pendiente' || part.estado === 'spei_pendiente');
-            } else {
-              setYaParticipo(false);
-              setPagoPendiente(false);
-            }
-          }
-        } catch (e: any) {
-          setErrorMsg(e.message);
-          setConfirmState('error');
-        } finally {
-          setLoading(false);
-        }
-      }
+      setLoading(true);
       loadData();
-    }, [id, cargarPicksActuales])
+    }, [loadData])
   );
+
+  // ─── Pull-to-refresh handler ──────────────────────────────────────────────
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadData();
+  }, [loadData]);
 
   // ─── Picks ────────────────────────────────────────────────────────────────
   const handleSelect = (partidoId: string, seleccion: SeleccionConGoles) => {
@@ -681,6 +691,15 @@ export default function QuinielaDetailsScreen() {
         data={partidos}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
+        refreshControl={
+          yaParticipo ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#2ECC71"
+            />
+          ) : undefined
+        }
         renderItem={({ item, index }) => (
           <MatchSelectionCard
             partido={item}

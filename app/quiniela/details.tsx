@@ -16,13 +16,13 @@ import { supabase } from '../../src/config/supabase';
 type MetodoPago = 'mp' | 'spei';
 type ConfirmState =
   | 'idle'
-  | 'choosingPayment'     // selector método
-  | 'confirmingMP'        // resumen MP
+  | 'choosingPayment'
+  | 'confirmingMP'
   | 'confirmingEdit'
-  | 'speiDatos'           // muestra CLABE + formulario subida comprobante
-  | 'speiSubiendo'        // cargando mientras sube imagen
-  | 'speiValidando'       // spinner mientras apiCEP valida
-  | 'speiEnviado'         // comprobante enviado, esperando revisión manual
+  | 'speiDatos'
+  | 'speiSubiendo'
+  | 'speiValidando'
+  | 'speiEnviado'
   | 'success'
   | 'successEdit'
   | 'error';
@@ -67,7 +67,6 @@ export default function QuinielaDetailsScreen() {
   const picksOriginalesRef = useRef<Record<string, SeleccionConGoles>>({});
   const participacionIdRef = useRef<string | null>(null);
 
-  // ─── Carga picks actuales ────────────────────────────────────────────────
   const cargarPicksActuales = useCallback(async (partId: string) => {
     const { data: sels } = await supabase
       .from('selecciones')
@@ -86,7 +85,6 @@ export default function QuinielaDetailsScreen() {
     return map;
   }, []);
 
-  // ─── Focus effect ─────────────────────────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
       if (isPendingPago.current) return;
@@ -131,7 +129,6 @@ export default function QuinielaDetailsScreen() {
     }, [id, cargarPicksActuales])
   );
 
-  // ─── Picks ────────────────────────────────────────────────────────────────
   const handleSelect = (partidoId: string, seleccion: SeleccionConGoles) => {
     if (yaParticipo && !modoEdicion) return;
     setSelecciones(prev => ({ ...prev, [partidoId]: seleccion }));
@@ -188,7 +185,6 @@ export default function QuinielaDetailsScreen() {
     setConfirmState('choosingPayment');
   };
 
-  // ─── Mercado Pago ─────────────────────────────────────────────────────────
   const handlePagarConMP = async () => {
     if (openingRef.current) return;
     openingRef.current = true;
@@ -214,7 +210,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── SPEI: guardar picks y mostrar datos bancarios ────────────────────────
   const handlePagarConSpei = async () => {
     setSaving(true);
     try {
@@ -236,7 +231,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── SPEI: subir comprobante ──────────────────────────────────────────────
   const handleSubirComprobante = async () => {
     const partId = participacionIdRef.current;
     if (!partId) return;
@@ -244,7 +238,6 @@ export default function QuinielaDetailsScreen() {
     try {
       const url = await SpeiService.subirComprobante(partId);
       if (!url) {
-        // Usuario canceló el picker
         setConfirmState('speiDatos');
         return;
       }
@@ -257,7 +250,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── SPEI: validar automáticamente con Edge Function validar-spei ─────────
   const handleValidarAutomatico = async (partId: string, url: string) => {
     const monto = quiniela?.precio_entrada ?? 0;
     try {
@@ -270,7 +262,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── Reintentar pago MP ───────────────────────────────────────────────────
   const handleReintentarPago = async () => {
     if (!participacionId || openingRef.current) return;
     openingRef.current = true;
@@ -302,7 +293,6 @@ export default function QuinielaDetailsScreen() {
   const clabe = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? 'CLABE no configurada';
   const monto = quiniela?.precio_entrada ?? 0;
 
-  // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -314,7 +304,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Éxito pago ──────────────────────────────────────────────────────────
   if (confirmState === 'success') {
     return (
       <SafeAreaView style={styles.container}>
@@ -332,7 +321,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── SPEI enviado — esperando revisión ────────────────────────────────────
   if (confirmState === 'speiEnviado') {
     return (
       <SafeAreaView style={styles.container}>
@@ -359,7 +347,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Éxito edición ───────────────────────────────────────────────────────
   if (confirmState === 'successEdit') {
     return (
       <SafeAreaView style={styles.container}>
@@ -375,7 +362,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Error ────────────────────────────────────────────────────────────────
   if (confirmState === 'error') {
     return (
       <SafeAreaView style={styles.container}>
@@ -391,7 +377,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Confirmar edición ───────────────────────────────────────────────────
   if (confirmState === 'confirmingEdit') {
     return (
       <SafeAreaView style={styles.container}>
@@ -423,17 +408,14 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── SELECTOR DE MÉTODO DE PAGO ──────────────────────────────────────────
   if (confirmState === 'choosingPayment') {
     return (
       <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
           <ScrollView contentContainerStyle={styles.centered}>
-
             <Text style={styles.payTitle}>¿Cómo quieres pagar?</Text>
             <Text style={styles.paySub}>Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${monto} MXN</Text></Text>
 
-            {/* Resumen desempate */}
             <View style={styles.desempateSummary}>
               <Text style={styles.desempateLabel}>🎯 Goles totales predichos</Text>
               <Text style={styles.desempateValue}>{golesPredichosTotales}</Text>
@@ -442,7 +424,6 @@ export default function QuinielaDetailsScreen() {
               </Text>
             </View>
 
-            {/* Opción MP */}
             <TouchableOpacity
               style={[styles.payOptionCard, metodoPago === 'mp' && styles.payOptionCardActive]}
               onPress={() => setMetodoPago('mp')}
@@ -468,7 +449,6 @@ export default function QuinielaDetailsScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Opción SPEI */}
             <TouchableOpacity
               style={[styles.payOptionCard, metodoPago === 'spei' && styles.payOptionCardActive]}
               onPress={() => setMetodoPago('spei')}
@@ -495,7 +475,6 @@ export default function QuinielaDetailsScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Botón continuar */}
             <TouchableOpacity
               style={[styles.confirmBtn, saving && styles.btnDisabled]}
               onPress={metodoPago === 'mp' ? handlePagarConMP : handlePagarConSpei}
@@ -517,7 +496,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── SPEI: datos bancarios + subir comprobante ────────────────────────────
   if (confirmState === 'speiDatos' || confirmState === 'speiSubiendo' || confirmState === 'speiValidando') {
     const subiendo  = confirmState === 'speiSubiendo';
     const validando = confirmState === 'speiValidando';
@@ -527,7 +505,6 @@ export default function QuinielaDetailsScreen() {
       <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
           <ScrollView contentContainerStyle={styles.centered}>
-
             <Text style={{ fontSize: 52, marginBottom: 16 }}>🏦</Text>
             <Text style={styles.payTitle}>Paga y confirma</Text>
             <Text style={styles.paySub}>
@@ -535,7 +512,6 @@ export default function QuinielaDetailsScreen() {
               <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${monto} MXN</Text>
             </Text>
 
-            {/* Datos bancarios */}
             <View style={styles.clabeBanner}>
               <Text style={styles.clabeLabel}>CLABE Interbancaria</Text>
               <Text style={styles.clabeValue} selectable>{clabe}</Text>
@@ -544,26 +520,22 @@ export default function QuinielaDetailsScreen() {
               </Text>
             </View>
 
-            {/* Separador */}
             <View style={styles.spaySeparator}>
               <View style={styles.spaySeparatorLine} />
               <Text style={styles.spaySeparatorTxt}>Una vez que pagues</Text>
               <View style={styles.spaySeparatorLine} />
             </View>
 
-            {/* Instrucción */}
             <Text style={styles.speiInstruccion}>
               Sube tu <Text style={{ color: '#E0E0E0', fontWeight: '600' }}>comprobante de transferencia</Text> (imagen o XML) para confirmar tu participación automáticamente.
             </Text>
 
-            {/* Estado del comprobante */}
             {comprobanteUrl ? (
               <View style={styles.comprobanteOkBox}>
                 <Text style={styles.comprobanteOkTxt}>✅ Comprobante subido correctamente</Text>
               </View>
             ) : null}
 
-            {/* Botón subir comprobante */}
             {validando ? (
               <View style={styles.validandoBox}>
                 <ActivityIndicator color="#2ECC71" size="large" style={{ marginBottom: 12 }} />
@@ -607,11 +579,8 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Pantalla principal ───────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
-
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backIcon}>‹</Text>
@@ -627,7 +596,6 @@ export default function QuinielaDetailsScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      {/* Barra de progreso */}
       {(!yaParticipo || modoEdicion) && (
         <View style={styles.progressWrap}>
           <ProgressBar current={totalSeleccionados} total={partidos.length} />
@@ -637,7 +605,6 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Banner verde + botón editar */}
       {yaParticipo && !modoEdicion && (
         <View style={styles.participandoWrap}>
           <View style={styles.participandoBanner}>
@@ -653,7 +620,6 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Banner pago pendiente */}
       {pagoPendiente && !modoEdicion && (
         <View style={styles.pendingBanner}>
           <Text style={styles.pendingBannerText}>
@@ -667,7 +633,6 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Hint desempate */}
       {(!yaParticipo || modoEdicion) && (
         <View style={styles.desempateInfoBanner}>
           <Text style={styles.desempateInfoText}>
@@ -676,7 +641,6 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Lista de partidos */}
       <FlatList
         data={partidos}
         keyExtractor={(item) => item.id}

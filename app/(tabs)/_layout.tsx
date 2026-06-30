@@ -93,19 +93,20 @@ function TabItem({
 
 // ─── Tab bar flotante liquid-glass ───────────────────────────────────────────
 function FloatingTabBar({ state, descriptors, navigation }: any) {
-  const insets = useSafeAreaInsets();
-  const visibleRoutes = state.routes.filter(
-    (_: any, i: number) => descriptors[state.routes[i].key].options.href !== null,
-  );
-
+  const insets  = useSafeAreaInsets();
   const barBottom = Platform.OS === 'web' ? 20 : insets.bottom + 12;
+
+  // FIX: filtramos usando la key de cada route para leer sus options correctamente
+  const visibleRoutes = state.routes.filter(
+    (route: any) => descriptors[route.key].options.href !== null,
+  );
 
   const tabsContent = (
     <View style={styles.tabsRow}>
       {visibleRoutes.map((route: any) => {
         const { options } = descriptors[route.key];
-        const isFocused = state.index === state.routes.indexOf(route);
-        const label     = options.title ?? route.name;
+        const isFocused   = state.index === state.routes.indexOf(route);
+        const label       = options.title ?? route.name;
 
         const onPress = () => {
           const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
@@ -131,7 +132,7 @@ function FloatingTabBar({ state, descriptors, navigation }: any) {
     </View>
   );
 
-  // Web: backdrop-filter CSS, sin BlurView para evitar errores de SSR
+  // Web: backdrop-filter CSS sin BlurView
   if (Platform.OS === 'web') {
     const webGlassStyle: any = {
       backdropFilter:       'blur(20px) saturate(180%)',
@@ -155,10 +156,8 @@ function FloatingTabBar({ state, descriptors, navigation }: any) {
         style={StyleSheet.absoluteFill}
         experimentalBlurMethod="dimezisBlurView"
       />
-      {/* Tinte oscuro sutil encima del blur */}
-      <View style={styles.blurOverlay} pointerEvents="none" />
-      {/* Borde glass luminoso */}
-      <View style={styles.glassBorder} pointerEvents="none" />
+      <View style={styles.blurOverlay}  pointerEvents="none" />
+      <View style={styles.glassBorder}  pointerEvents="none" />
       {tabsContent}
     </View>
   );
@@ -197,13 +196,11 @@ const styles = StyleSheet.create({
     elevation:     20,
   },
 
-  // Tinte oscuro encima del blur nativo para darle profundidad
   blurOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(10,12,16,0.35)',
   },
 
-  // Borde glass luminoso
   glassBorder: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 30,

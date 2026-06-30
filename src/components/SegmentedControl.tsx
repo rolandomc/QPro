@@ -11,80 +11,62 @@ interface Props {
   accentColor?: string;
 }
 
+const PAD         = 4;   // padding interno del contenedor
+const IND_PCT     = 0.9; // pastilla ocupa 90% del tab (deja margen visual)
+
 export default function SegmentedControl({
   options, selectedOption, onSelect,
   accentColor = '#9B59B6',
 }: Props) {
-  const [widths, setWidths] = useState<number[]>([]);
   const [containerW, setContainerW] = useState(0);
-  const translateX = useRef(new Animated.Value(0)).current;
-  const indicatorW = useRef(new Animated.Value(0)).current;
-
-  const selectedIndex = options.indexOf(selectedOption);
+  const translateX  = useRef(new Animated.Value(0)).current;
+  const selectedIdx = options.indexOf(selectedOption);
 
   useEffect(() => {
-    if (widths.length !== options.length || containerW === 0) return;
-    const w = containerW / options.length;
-    Animated.parallel([
-      Animated.spring(translateX, {
-        toValue:   selectedIndex * w + 4,
-        friction:  7,
-        tension:   80,
-        useNativeDriver: false,
-      }),
-      Animated.spring(indicatorW, {
-        toValue:   w - 8,
-        friction:  7,
-        tension:   80,
-        useNativeDriver: false,
-      }),
-    ]).start();
-  }, [selectedIndex, widths, containerW]);
+    if (containerW === 0) return;
+    const usable     = containerW - PAD * 2;
+    const tabW       = usable / options.length;
+    const indicatorW = tabW * IND_PCT;
+    // centro: padding + inicio del tab + (espacio sobrante / 2)
+    const toValue = PAD + selectedIdx * tabW + (tabW - indicatorW) / 2;
+    Animated.spring(translateX, {
+      toValue,
+      friction:        7,
+      tension:         80,
+      useNativeDriver: false,
+    }).start();
+  }, [selectedIdx, containerW]);
 
-  const onContainerLayout = (e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    setContainerW(w);
-    // init widths array con largo de options
-    setWidths(options.map(() => w / options.length));
-  };
+  const onLayout = (e: LayoutChangeEvent) =>
+    setContainerW(e.nativeEvent.layout.width);
 
-  const shadowStyle = {
-    shadowColor:   accentColor,
-    shadowOpacity: 0.55,
-    shadowRadius:  10,
-    elevation:     6,
-  };
+  const usable     = containerW > 0 ? containerW - PAD * 2 : 0;
+  const tabW       = usable / options.length;
+  const indicatorW = tabW * IND_PCT;
 
   return (
-    <View
-      style={styles.container}
-      onLayout={onContainerLayout}
-    >
-      {/* Indicador deslizante */}
+    <View style={styles.container} onLayout={onLayout}>
+      {/* Pastilla deslizante */}
       {containerW > 0 && (
         <Animated.View
+          pointerEvents="none"
           style={[
             styles.indicator,
-            shadowStyle,
             {
-              width:     indicatorW,
-              transform: [{ translateX }],
+              width:           indicatorW,
+              transform:       [{ translateX }],
               backgroundColor: accentColor,
+              shadowColor:     accentColor,
             },
           ]}
-          pointerEvents="none"
         />
       )}
 
-      {options.map((option, i) => {
+      {options.map((option) => {
         const isActive = selectedOption === option;
         return (
-          <Pressable
-            key={option}
-            onPress={() => onSelect(option)}
-            style={styles.button}
-          >
-            <Text style={[styles.text, isActive && { color: '#FFF', fontWeight: 'bold' }]}>
+          <Pressable key={option} onPress={() => onSelect(option)} style={styles.btn}>
+            <Text style={[styles.txt, isActive && styles.txtActive]}>
               {option}
             </Text>
           </Pressable>
@@ -99,7 +81,7 @@ const styles = StyleSheet.create({
     flexDirection:    'row',
     backgroundColor:  '#0D1117',
     borderRadius:     14,
-    padding:           4,
+    padding:           PAD,
     marginHorizontal:  15,
     marginBottom:      20,
     borderWidth:        1,
@@ -108,22 +90,31 @@ const styles = StyleSheet.create({
     overflow:          'hidden',
   },
   indicator: {
-    position:     'absolute',
-    top:           4,
-    bottom:        4,
-    borderRadius:  10,
+    position:      'absolute',
+    top:            PAD,
+    bottom:         PAD,
+    borderRadius:   10,
+    opacity:        0.85,
+    shadowOpacity:  0.55,
+    shadowRadius:   10,
+    shadowOffset:  { width: 0, height: 0 },
+    elevation:      5,
   },
-  button: {
-    flex:           1,
-    paddingVertical: 11,
-    alignItems:     'center',
-    justifyContent: 'center',
-    zIndex:          1,
+  btn: {
+    flex:            1,
+    paddingVertical:  11,
+    alignItems:      'center',
+    justifyContent:  'center',
+    zIndex:           1,
   },
-  text: {
+  txt: {
     color:         'rgba(255,255,255,0.4)',
     fontWeight:    '600',
     fontSize:       14,
     letterSpacing:  0.3,
+  },
+  txtActive: {
+    color:      '#FFF',
+    fontWeight: 'bold',
   },
 });

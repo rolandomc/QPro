@@ -15,7 +15,9 @@ const TAB_CONFIG = [
   { name: 'profile', title: 'Perfil',     icon: null          },
 ] as const;
 
-const ACCENT = '#9B59B6';
+const ACCENT        = '#9B59B6';
+const PAD_H         = 6;   // paddingHorizontal del tabsRow
+const INDICATOR_PCT = 0.7; // la pastilla ocupa 70% del ancho de cada tab
 
 // ─── Badge ───────────────────────────────────────────────────────────────────────
 function NotifBadge({ color }: { color: string }) {
@@ -54,7 +56,7 @@ function NotifBadge({ color }: { color: string }) {
   );
 }
 
-// ─── FloatingTabBar con indicador deslizante ──────────────────────────────────────
+// ─── FloatingTabBar ────────────────────────────────────────────────────────────
 function FloatingTabBar({ state, navigation }: any) {
   const insets     = useSafeAreaInsets();
   const barBottom  = Platform.OS === 'web' ? 20 : insets.bottom + 12;
@@ -62,68 +64,60 @@ function FloatingTabBar({ state, navigation }: any) {
   const [barWidth, setBarWidth] = useState(0);
 
   const currentIndex = TAB_CONFIG.findIndex(
-    t => t.name === state.routes[state.index]?.name
+    t => t.name === state.routes[state.index]?.name,
   );
 
   useEffect(() => {
     if (barWidth === 0) return;
-    const tabW = barWidth / TAB_CONFIG.length;
+    const usableW    = barWidth - PAD_H * 2;
+    const tabW       = usableW / TAB_CONFIG.length;
+    const indicatorW = tabW * INDICATOR_PCT;
+    // centro exacto: padding + inicio del tab + margen para centrar la pastilla
+    const toValue = PAD_H + currentIndex * tabW + (tabW - indicatorW) / 2;
     Animated.spring(translateX, {
-      toValue:   currentIndex * tabW + 6,
-      friction:  7,
-      tension:   80,
+      toValue,
+      friction:        7,
+      tension:         80,
       useNativeDriver: false,
     }).start();
   }, [currentIndex, barWidth]);
 
-  const tabW = barWidth > 0 ? barWidth / TAB_CONFIG.length - 12 : 0;
+  const usableW    = barWidth > 0 ? barWidth - PAD_H * 2 : 0;
+  const tabW       = usableW / TAB_CONFIG.length;
+  const indicatorW = tabW * INDICATOR_PCT;
 
   const inner = (
     <View
       style={styles.tabsRow}
       onLayout={e => setBarWidth(e.nativeEvent.layout.width)}
     >
-      {/* Indicador deslizante */}
       {barWidth > 0 && (
         <Animated.View
+          pointerEvents="none"
           style={[
             styles.slideIndicator,
-            {
-              width:     tabW,
-              transform: [{ translateX }],
-              backgroundColor: 'rgba(155,89,182,0.28)',
-              shadowColor: ACCENT,
-            },
+            { width: indicatorW, transform: [{ translateX }] },
           ]}
-          pointerEvents="none"
         />
       )}
 
       {TAB_CONFIG.map((tab) => {
         const route    = state.routes.find((r: any) => r.name === tab.name);
         if (!route) return null;
-        const isFocused  = state.routes[state.index]?.name === tab.name;
-        const iconColor  = isFocused ? '#FFF' : 'rgba(255,255,255,0.4)';
-        const labelColor = isFocused ? '#FFF' : 'rgba(255,255,255,0.4)';
+        const isFocused = state.routes[state.index]?.name === tab.name;
+        const clr       = isFocused ? '#FFF' : 'rgba(255,255,255,0.4)';
 
         const onPress = () => {
-          const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-          if (!isFocused && !event.defaultPrevented) navigation.navigate(tab.name);
+          const ev = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+          if (!isFocused && !ev.defaultPrevented) navigation.navigate(tab.name);
         };
 
-        const icon = tab.name === 'profile'
-          ? <NotifBadge color={iconColor} />
-          : <Ionicons name={tab.icon as any} size={22} color={iconColor} />;
-
         return (
-          <TouchableOpacity
-            key={tab.name}
-            style={styles.tabItem}
-            onPress={onPress}
-            activeOpacity={0.8}
-          >
-            {icon}
-            <Text style={[styles.tabLabel, { color: labelColor }]}>{tab.title}</Text>
+          <TouchableOpacity key={tab.name} style={styles.tabItem} onPress={onPress} activeOpacity={0.8}>
+            {tab.name === 'profile'
+              ? <NotifBadge color={clr} />
+              : <Ionicons name={tab.icon as any} size={22} color={clr} />}
+            <Text style={[styles.tabLabel, { color: clr }]}>{tab.title}</Text>
           </TouchableOpacity>
         );
       })}
@@ -131,27 +125,18 @@ function FloatingTabBar({ state, navigation }: any) {
   );
 
   if (Platform.OS === 'web') {
-    const webGlass: any = {
-      backdropFilter:       'blur(20px) saturate(180%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-      backgroundColor:      'rgba(18,21,28,0.72)',
-    };
     return (
-      <View style={[styles.floatingWrapper, { bottom: barBottom }, webGlass]}>
+      <View style={[styles.floatingWrapper, { bottom: barBottom },
+        { backdropFilter: 'blur(20px) saturate(180%)', backgroundColor: 'rgba(18,21,28,0.72)' } as any]}>
         <View style={styles.glassBorder} pointerEvents="none" />
         {inner}
       </View>
     );
   }
-
   return (
     <View style={[styles.floatingWrapper, { bottom: barBottom }]}>
-      <BlurView
-        intensity={70}
-        tint="systemUltraThinMaterialDark"
-        style={StyleSheet.absoluteFill}
-        experimentalBlurMethod="dimezisBlurView"
-      />
+      <BlurView intensity={70} tint="systemUltraThinMaterialDark"
+        style={StyleSheet.absoluteFill} experimentalBlurMethod="dimezisBlurView" />
       <View style={styles.blurOverlay} pointerEvents="none" />
       <View style={styles.glassBorder} pointerEvents="none" />
       {inner}
@@ -159,7 +144,6 @@ function FloatingTabBar({ state, navigation }: any) {
   );
 }
 
-// ─── Layout ───────────────────────────────────────────────────────────────────
 export default function TabLayout() {
   return (
     <Tabs
@@ -176,66 +160,38 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   floatingWrapper: {
-    position:      'absolute',
-    left:           24,
-    right:          24,
-    borderRadius:   28,
-    overflow:       'hidden',
-    shadowColor:   '#000',
-    shadowOffset:  { width: 0, height: 12 },
-    shadowOpacity:  0.45,
-    shadowRadius:   24,
-    elevation:      20,
+    position: 'absolute', left: 24, right: 24, borderRadius: 28, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.45, shadowRadius: 24, elevation: 20,
   },
   blurOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10,12,16,0.35)' },
   glassBorder: { ...StyleSheet.absoluteFillObject, borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)' },
-
   tabsRow: {
-    flexDirection:     'row',
-    paddingVertical:    10,
-    paddingHorizontal:  6,
-    position:          'relative',
-    overflow:          'visible',
+    flexDirection: 'row',
+    paddingVertical: 10,
+    paddingHorizontal: PAD_H,
+    position: 'relative',
+    overflow: 'hidden',
   },
-
   slideIndicator: {
-    position:      'absolute',
-    top:            8,
-    bottom:         8,
-    borderRadius:   18,
-    borderWidth:     1,
-    borderColor:    'rgba(155,89,182,0.55)',
-    shadowOpacity:  0.7,
-    shadowRadius:   10,
-    shadowOffset:  { width: 0, height: 0 },
-    elevation:      6,
+    position: 'absolute',
+    top: 8, bottom: 8,
+    borderRadius: 18,
+    backgroundColor: 'rgba(155,89,182,0.28)',
+    borderWidth: 1,
+    borderColor: 'rgba(155,89,182,0.55)',
+    shadowColor: ACCENT,
+    shadowOpacity: 0.7,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
   },
-
-  tabItem: {
-    flex:           1,
-    alignItems:     'center',
-    justifyContent: 'center',
-    gap:             4,
-    paddingVertical: 2,
-    zIndex:          1,
-  },
-  tabLabel: {
-    fontSize:      10,
-    fontWeight:    '600',
-    letterSpacing:  0.2,
-  },
-
+  tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 2, zIndex: 1 },
+  tabLabel: { fontSize: 10, fontWeight: '600', letterSpacing: 0.2 },
   badge: {
-    position:          'absolute',
-    top:               -4,
-    right:             -6,
-    backgroundColor:   '#E74C3C',
-    borderRadius:       8,
-    minWidth:           16,
-    height:             16,
-    alignItems:        'center',
-    justifyContent:    'center',
-    paddingHorizontal:  3,
+    position: 'absolute', top: -4, right: -6,
+    backgroundColor: '#E74C3C', borderRadius: 8,
+    minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
   },
   badgeText: { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
 });

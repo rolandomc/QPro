@@ -59,6 +59,10 @@ export default function AdminDashboardScreen() {
   const router = useRouter();
   const swipeableRefs = useRef<Record<string, any>>({});
 
+  // Ref para saber si retiros estaba expandido al salir de la pantalla,
+  // sin que sea dependencia del useFocusEffect
+  const retirosExpandedRef = useRef(false);
+
   const [quinielas,            setQuinielas]            = useState<any[]>([]);
   const [loading,              setLoading]              = useState(true);
   const [refreshing,           setRefreshing]           = useState(false);
@@ -142,7 +146,6 @@ export default function AdminDashboardScreen() {
         const profsMap: Record<string, string> = {};
         (profs || []).forEach((p: any) => { profsMap[p.id] = p.username; });
 
-        // Traer precio_entrada de cada quiniela para tener el monto correcto
         const quinielaIds = [...new Set(parts.map((p: any) => p.quiniela_id).filter(Boolean))];
         const { data: quins } = await supabase
           .from('quinielas')
@@ -187,15 +190,17 @@ export default function AdminDashboardScreen() {
     }
   };
 
+  // useFocusEffect SIN retirosExpanded como dependencia → nunca dispara por el toggle.
+  // Solo se ejecuta al montar / volver a la pantalla desde otra ruta.
+  // Si el panel de retiros estaba abierto al salir, lo recarga silenciosamente.
   useFocusEffect(useCallback(() => {
     setLoading(true);
     loadQuinielas();
-    // BUG FIX: si el panel de retiros ya estaba abierto, recargar siempre al volver al foco
-    if (retirosExpanded) {
+    if (retirosExpandedRef.current) {
       loadRetirosData();
       loadRetirosPendientesCount();
     }
-  }, [retirosExpanded]));
+  }, [])); // eslint-disable-line react-hooks/exhaustive-deps
 
   const quinielasFiltradas = filtroEstado === 'todas'
     ? quinielas
@@ -209,9 +214,10 @@ export default function AdminDashboardScreen() {
 
   const speiPendientesCount = todosSpei.filter(p => ['spei_pendiente', 'pendiente_revision'].includes(p.estado)).length;
 
-  // BUG FIX: siempre recargar al toggle (no solo si está vacío)
+  // Toggle retiros: solo carga la sección, nunca toca el resto de la pantalla
   const handleToggleRetiros = async () => {
     const next = !retirosExpanded;
+    retirosExpandedRef.current = next;
     setRetirosExpanded(next);
     if (next) {
       await loadRetirosData();
@@ -352,7 +358,6 @@ export default function AdminDashboardScreen() {
           onPress: async () => {
             setAprobandoId(item.id);
             try {
-              // BUG FIX: usar precio_entrada de la quiniela si monto_pagado no está seteado correctamente
               const montoFinal = item.monto_pagado && item.monto_pagado > 0
                 ? item.monto_pagado
                 : (item.precio_entrada ?? item.monto_pagado ?? 0);
@@ -374,7 +379,6 @@ export default function AdminDashboardScreen() {
                 .update({ leida: true })
                 .eq('participacion_id', item.id);
 
-              // BUG FIX: notificar al usuario que su pago fue aprobado
               await supabase.from('notificaciones').insert({
                 user_id: item.user_id,
                 titulo:  '✅ Pago aprobado',
@@ -397,7 +401,7 @@ export default function AdminDashboardScreen() {
     );
   };
 
-  // ── Eliminar quiniela ────────────────────────────────────────────────────
+  // ── Eliminar quiniela ─────────────────────────────────────────────────────
   const handleEliminarQuiniela = (quinielaId: string, titulo: string) => {
     swipeableRefs.current[quinielaId]?.close();
     Alert.alert(
@@ -564,7 +568,6 @@ export default function AdminDashboardScreen() {
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              // BUG FIX: resetear retirosData para que se recargue limpio al refrescar
               setRetirosData([]);
               loadQuinielas();
             }}
@@ -612,7 +615,6 @@ export default function AdminDashboardScreen() {
 
         {speiExpanded && (
           <View style={styles.speiList}>
-            {/* Filtros SPEI */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 8 }}>
               {FILTROS_SPEI.map(f => {
                 const activo = filtroSPEI === f.key;
@@ -668,7 +670,6 @@ export default function AdminDashboardScreen() {
                       <Text style={styles.speiError} numberOfLines={2}>{item.ultimo_error_spei}</Text>
                     ) : null}
 
-                    {/* Datos OCR colapsables */}
                     {ocrData && (
                       <>
                         <TouchableOpacity
@@ -794,7 +795,6 @@ export default function AdminDashboardScreen() {
                           ? <ActivityIndicator color="#E74C3C" size="small" />
                           : <Text style={styles.retiroRechazarTxt}>✕ Rechazar</Text>}
                       </TouchableOpacity>
-                      {/* BUG FIX: abrir modal con comprobante en vez de Alert directo */}
                       <TouchableOpacity
                         style={[styles.retiroPagarBtn, ocupado && { opacity: 0.4 }]}
                         onPress={() => handleAbrirModalPago(item)}

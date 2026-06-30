@@ -15,9 +15,8 @@ const TAB_CONFIG = [
   { name: 'profile', title: 'Perfil',     icon: null          },
 ] as const;
 
-const ACCENT        = '#9B59B6';
-const PAD_H         = 6;   // paddingHorizontal del tabsRow
-const INDICATOR_PCT = 0.7; // la pastilla ocupa 70% del ancho de cada tab
+const ACCENT     = '#9B59B6';
+const IND_MARGIN = 8; // margen a cada lado de la pastilla dentro de cada tab
 
 // ─── Badge ───────────────────────────────────────────────────────────────────────
 function NotifBadge({ color }: { color: string }) {
@@ -58,51 +57,44 @@ function NotifBadge({ color }: { color: string }) {
 
 // ─── FloatingTabBar ────────────────────────────────────────────────────────────
 function FloatingTabBar({ state, navigation }: any) {
-  const insets     = useSafeAreaInsets();
-  const barBottom  = Platform.OS === 'web' ? 20 : insets.bottom + 12;
+  const insets    = useSafeAreaInsets();
+  const barBottom = Platform.OS === 'web' ? 20 : insets.bottom + 12;
   const translateX = useRef(new Animated.Value(0)).current;
-  const [barWidth, setBarWidth] = useState(0);
+  const indWidth   = useRef(new Animated.Value(0)).current;
+
+  // Medimos el layout real de cada tab button
+  const [tabLayouts, setTabLayouts] = useState<{ x: number; width: number }[]>([]);
 
   const currentIndex = TAB_CONFIG.findIndex(
     t => t.name === state.routes[state.index]?.name,
   );
 
   useEffect(() => {
-    if (barWidth === 0) return;
-    const usableW    = barWidth - PAD_H * 2;
-    const tabW       = usableW / TAB_CONFIG.length;
-    const indicatorW = tabW * INDICATOR_PCT;
-    // centro exacto: padding + inicio del tab + margen para centrar la pastilla
-    const toValue = PAD_H + currentIndex * tabW + (tabW - indicatorW) / 2;
-    Animated.spring(translateX, {
-      toValue,
-      friction:        7,
-      tension:         80,
-      useNativeDriver: false,
-    }).start();
-  }, [currentIndex, barWidth]);
-
-  const usableW    = barWidth > 0 ? barWidth - PAD_H * 2 : 0;
-  const tabW       = usableW / TAB_CONFIG.length;
-  const indicatorW = tabW * INDICATOR_PCT;
+    const layout = tabLayouts[currentIndex];
+    if (!layout) return;
+    const targetX = layout.x + IND_MARGIN;
+    const targetW = layout.width - IND_MARGIN * 2;
+    Animated.parallel([
+      Animated.spring(translateX, { toValue: targetX, friction: 7, tension: 80, useNativeDriver: false }),
+      Animated.spring(indWidth,   { toValue: targetW, friction: 7, tension: 80, useNativeDriver: false }),
+    ]).start();
+  }, [currentIndex, tabLayouts]);
 
   const inner = (
-    <View
-      style={styles.tabsRow}
-      onLayout={e => setBarWidth(e.nativeEvent.layout.width)}
-    >
-      {barWidth > 0 && (
+    <View style={styles.tabsRow}>
+      {/* Indicador deslizante */}
+      {tabLayouts.length === TAB_CONFIG.length && (
         <Animated.View
           pointerEvents="none"
           style={[
             styles.slideIndicator,
-            { width: indicatorW, transform: [{ translateX }] },
+            { width: indWidth, transform: [{ translateX }] },
           ]}
         />
       )}
 
-      {TAB_CONFIG.map((tab) => {
-        const route    = state.routes.find((r: any) => r.name === tab.name);
+      {TAB_CONFIG.map((tab, i) => {
+        const route     = state.routes.find((r: any) => r.name === tab.name);
         if (!route) return null;
         const isFocused = state.routes[state.index]?.name === tab.name;
         const clr       = isFocused ? '#FFF' : 'rgba(255,255,255,0.4)';
@@ -113,7 +105,20 @@ function FloatingTabBar({ state, navigation }: any) {
         };
 
         return (
-          <TouchableOpacity key={tab.name} style={styles.tabItem} onPress={onPress} activeOpacity={0.8}>
+          <TouchableOpacity
+            key={tab.name}
+            style={styles.tabItem}
+            onPress={onPress}
+            activeOpacity={0.8}
+            onLayout={e => {
+              const { x, width } = e.nativeEvent.layout;
+              setTabLayouts(prev => {
+                const next = [...prev];
+                next[i] = { x, width };
+                return next;
+              });
+            }}
+          >
             {tab.name === 'profile'
               ? <NotifBadge color={clr} />
               : <Ionicons name={tab.icon as any} size={22} color={clr} />}
@@ -169,7 +174,7 @@ const styles = StyleSheet.create({
   tabsRow: {
     flexDirection: 'row',
     paddingVertical: 10,
-    paddingHorizontal: PAD_H,
+    paddingHorizontal: 6,
     position: 'relative',
     overflow: 'hidden',
   },

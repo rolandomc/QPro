@@ -50,10 +50,12 @@ export default function ProfileScreen() {
     roi: 0, invertido: 0, ganado: 0, mejorPos: null as number | null,
   });
 
-  // Retiros
+  // Retiros — el ref evita que retirosOpen entre en deps de loadUserData
   const [retirosOpen,    setRetirosOpen]    = useState(false);
+  const retirosOpenRef                      = useRef(false);
   const [retiros,        setRetiros]        = useState<any[]>([]);
   const [loadingRetiros, setLoadingRetiros] = useState(false);
+  const userIdRef                           = useRef<string>('');
   const [visorUrl,       setVisorUrl]       = useState<string | null>(null);
   const [visorModal,     setVisorModal]     = useState(false);
 
@@ -72,15 +74,19 @@ export default function ProfileScreen() {
 
   const toggleRetiros = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    if (!retirosOpen && userId) cargarRetiros(userId);
-    setRetirosOpen(v => !v);
+    const opening = !retirosOpenRef.current;
+    retirosOpenRef.current = opening;
+    setRetirosOpen(opening);
+    if (opening && userIdRef.current) cargarRetiros(userIdRef.current);
   };
 
+  // loadUserData NO depende de retirosOpen ni cargarRetiros
   const loadUserData = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setUserId(user.id);
+      userIdRef.current = user.id;
 
       const adminStatus = await AdminService.isAdmin();
       setIsAdmin(adminStatus);
@@ -153,23 +159,24 @@ export default function ProfileScreen() {
       }
 
       setStats({ jugadas, ganadas, pctAcierto, roi, invertido, ganado, mejorPos });
-
-      // Si la sección de retiros estaba abierta, recargar
-      if (retirosOpen) cargarRetiros(user.id);
     } catch (e: any) {
       console.error(e.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [retirosOpen, cargarRetiros]);
+  }, []); // <-- sin dependencias que cambien al abrir el acordeón
 
   useFocusEffect(useCallback(() => { setLoading(true); loadUserData(); }, [loadUserData]));
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadUserData();
-  }, [loadUserData]);
+    // Si el acordeón está abierto, refrescar retiros también
+    if (retirosOpenRef.current && userIdRef.current) {
+      cargarRetiros(userIdRef.current);
+    }
+  }, [loadUserData, cargarRetiros]);
 
   const handleSignOut = async () => {
     Alert.alert('Cerrar Sesión', '¿Estás seguro que quieres salir?', [
@@ -570,7 +577,6 @@ const st = StyleSheet.create({
   sectionHeader:         { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
   sectionLine:           { flex: 1, height: 1, backgroundColor: '#1E2330' },
   sectionTitle:          { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3 },
-  // Retiros
   retirosToggle:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#0D1117', borderRadius: 14, padding: 16, marginBottom: 4, borderWidth: 1, borderColor: '#1E2330' },
   retirosToggleLeft:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
   retirosToggleIcon:     { fontSize: 20 },
@@ -596,7 +602,6 @@ const st = StyleSheet.create({
   retiroNotaVal:         { color: '#C0A0A0', fontSize: 12 },
   retiroCompBtn:         { marginTop: 8, backgroundColor: '#1C1F28', borderRadius: 10, padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D38' },
   retiroCompBtnTxt:      { color: '#9B59B6', fontWeight: '700', fontSize: 13 },
-  // Admin card
   adminCard:             { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden', shadowColor: '#FFD700', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
   adminCardNeonLine:     { height: 2, backgroundColor: '#FFD700', shadowColor: '#FFD700', shadowOpacity: 1, shadowRadius: 8 },
   adminCardBody:         { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
@@ -605,7 +610,6 @@ const st = StyleSheet.create({
   adminCardArrow:        { color: '#FFD700', fontSize: 24 },
   signOutBtn:            { marginTop: 8, padding: 15, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)', alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)', shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
   signOutTxt:            { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
-  // Modal editar perfil
   modalOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   modalCard:             { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 2 },
   modalTitle:            { color: '#FFF', fontSize: 19, fontWeight: 'bold', marginBottom: 18 },
@@ -628,7 +632,6 @@ const st = StyleSheet.create({
   cancelBtnTxt:          { color: '#A0A0A0', fontWeight: 'bold' },
   saveBtn:               { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#9B59B6' },
   saveBtnTxt:            { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  // Visor comprobante
   visorOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   visorCard:             { width: '100%', backgroundColor: '#12151C', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: '#1E2128', alignItems: 'center' },
   visorTitle:            { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 14 },

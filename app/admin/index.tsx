@@ -63,6 +63,7 @@ export default function AdminDashboardScreen() {
   const [filtroSPEI,           setFiltroSPEI]           = useState<FiltroSPEI>('todos');
   const [speiExpanded,         setSpeiExpanded]         = useState(false);
   const [aprobandoId,          setAprobandoId]          = useState<string | null>(null);
+  const [expandedOcrId,        setExpandedOcrId]        = useState<string | null>(null);
 
   // ── Retiros inline ────────────────────────────────────────────────────────
   const [retirosExpanded,      setRetirosExpanded]      = useState(false);
@@ -90,7 +91,6 @@ export default function AdminDashboardScreen() {
       setProximaFecha(fecha ?? '');
       setRetirosPendientes(count);
 
-      // Cargar TODOS los pagos SPEI (pendientes + aprobados + revisión manual)
       const { data: speiData } = await supabase
         .from('participaciones')
         .select('id, user_id, monto_pagado, clave_rastreo, comprobante_url, comprobante_enviado_at, ultimo_error_spei, created_at, quiniela_id, estado, comprobante_validado, spei_datos_ocr')
@@ -130,7 +130,6 @@ export default function AdminDashboardScreen() {
       ? quinielas.filter(q => !q.estado || q.estado === 'nula')
       : quinielas.filter(q => q.estado === filtroEstado);
 
-  // Filtro SPEI aplicado
   const speiFiltrados = filtroSPEI === 'todos'
     ? todosSpei
     : todosSpei.filter(p => p.estado === filtroSPEI);
@@ -449,12 +448,13 @@ export default function AdminDashboardScreen() {
               <Text style={styles.speiEmpty}>✅ Sin registros para este filtro.</Text>
             ) : (
               speiFiltrados.map((item) => {
-                // Parsear datos OCR si existen
                 let ocrData: Record<string, any> | null = null;
                 if (item.spei_datos_ocr) {
                   try { ocrData = typeof item.spei_datos_ocr === 'string' ? JSON.parse(item.spei_datos_ocr) : item.spei_datos_ocr; } catch (_) {}
                 }
-                const yaAprobado = item.estado === 'pagado';
+                const yaAprobado  = item.estado === 'pagado';
+                const ocrAbierto  = expandedOcrId === item.id;
+
                 return (
                   <View key={item.id} style={[styles.speiCard, yaAprobado && { borderColor: '#2ECC7144' }]}>
                     <View style={styles.speiCardHeader}>
@@ -477,17 +477,29 @@ export default function AdminDashboardScreen() {
                       <Text style={styles.speiError} numberOfLines={2}>{item.ultimo_error_spei}</Text>
                     ) : null}
 
-                    {/* Datos OCR extraídos por la API */}
+                    {/* Datos OCR colapsables — solo si existen */}
                     {ocrData && (
-                      <View style={styles.ocrBox}>
-                        <Text style={styles.ocrTitle}>📊 Datos extraídos por OCR</Text>
-                        {Object.entries(ocrData).map(([k, v]) => (
-                          <View key={k} style={styles.ocrRow}>
-                            <Text style={styles.ocrKey}>{k}</Text>
-                            <Text style={styles.ocrVal} numberOfLines={1}>{String(v)}</Text>
+                      <>
+                        <TouchableOpacity
+                          style={styles.ocrToggleBtn}
+                          onPress={() => setExpandedOcrId(ocrAbierto ? null : item.id)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.ocrToggleText}>📊 Datos extraídos por OCR</Text>
+                          <Text style={styles.ocrToggleChevron}>{ocrAbierto ? '▲' : '▼'}</Text>
+                        </TouchableOpacity>
+
+                        {ocrAbierto && (
+                          <View style={styles.ocrBox}>
+                            {Object.entries(ocrData).map(([k, v]) => (
+                              <View key={k} style={styles.ocrRow}>
+                                <Text style={styles.ocrKey}>{k}</Text>
+                                <Text style={styles.ocrVal} numberOfLines={1}>{String(v)}</Text>
+                              </View>
+                            ))}
                           </View>
-                        ))}
-                      </View>
+                        )}
+                      </>
                     )}
 
                     <Text style={styles.speiDate}>
@@ -816,9 +828,13 @@ const styles = StyleSheet.create({
   speiAprobarBtn:       { flex: 1, backgroundColor: '#2ECC71', paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
   speiAprobarText:      { color: '#000', fontSize: 12, fontWeight: 'bold' },
 
+  // OCR toggle button
+  ocrToggleBtn:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#12151C', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 4, borderWidth: 1, borderColor: '#9B59B633' },
+  ocrToggleText:        { color: '#9B59B6', fontSize: 11, fontWeight: 'bold' },
+  ocrToggleChevron:     { color: '#9B59B6', fontSize: 10 },
+
   // OCR data box
-  ocrBox:               { backgroundColor: '#12151C', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: '#2A2D35', gap: 4 },
-  ocrTitle:             { color: '#9B59B6', fontSize: 11, fontWeight: 'bold', marginBottom: 4 },
+  ocrBox:               { backgroundColor: '#12151C', borderRadius: 8, paddingHorizontal: 10, paddingBottom: 10, paddingTop: 6, marginBottom: 8, borderWidth: 1, borderColor: '#9B59B633', gap: 4 },
   ocrRow:               { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   ocrKey:               { color: '#505050', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', flex: 1 },
   ocrVal:               { color: '#E0E0E0', fontSize: 10, fontWeight: '600', flex: 2, textAlign: 'right' },

@@ -24,6 +24,10 @@ function pickFileWeb(): Promise<File | null> {
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export const SpeiService = {
   async registrarIntencionSPEI(participacionId: string): Promise<void> {
     const { error } = await supabase
@@ -93,17 +97,17 @@ export const SpeiService = {
     comprobanteUrl:  string,
     monto:           number,
   ) {
-    // Llamar a la Edge Function (puede dar error de red aunque haya procesado OK en el servidor)
     const result = await ApiCepService.validarComprobante(
       participacionId,
       comprobanteUrl,
       monto,
     );
 
-    // Si hubo error de red/timeout en la respuesta, leer el estado REAL desde la BD
-    // La Edge Function pudo haber aprobado el comprobante aunque el cliente no recibiera respuesta
+    // Si la Edge Function dio error de red, puede que igual haya procesado y aprobado en el servidor.
+    // Esperamos 4s para que termine de escribir en BD y luego consultamos el estado real.
     let estadoReal: string | null = null;
     if (!result.valid) {
+      await sleep(4000);
       const { data: part } = await supabase
         .from('participaciones')
         .select('estado, comprobante_validado')
@@ -112,13 +116,12 @@ export const SpeiService = {
       estadoReal = part?.estado ?? null;
     }
 
-    // Determinar notificación basada en el estado real de la BD cuando el cliente falla
-    const aprobado = result.valid || estadoReal === 'pagado';
-    const enRevision =
-      !aprobado &&
-      (estadoReal === 'spei_pendiente' ||
-        result.errorMsg?.toLowerCase().includes('manual') ||
-        (result.missingFields?.length ?? 0) > 0);
+    const aprobado   = result.valid || estadoReal === 'pagado';
+    const enRevision = !aprobado && (
+      estadoReal === 'spei_pendiente' ||
+      result.errorMsg?.toLowerCase().includes('manual') ||
+      (result.missingFields?.length ?? 0) > 0
+    );
 
     if (aprobado) {
       await SpeiService.notificarUsuario(
@@ -140,7 +143,7 @@ export const SpeiService = {
       );
     }
 
-    // Solo notificar al admin si realmente no fue aprobado en la BD
+    // Solo notificar al admin si realmente no fue aprobado en BD
     if (!aprobado) {
       await SpeiService.notificarAdmin(
         participacionId,

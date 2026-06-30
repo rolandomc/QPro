@@ -142,13 +142,11 @@ export const SpeiService = {
     if (!part?.user_id) return;
 
     await supabase.from('notificaciones').insert({
-      user_id:          part.user_id,
-      tipo:             'spei',
+      user_id: part.user_id,
+      tipo:    'spei',
       titulo,
       mensaje,
-      participacion_id: participacionId,
-      leida:            false,
-      created_at:       new Date().toISOString(),
+      leida:   false,
     });
   },
 

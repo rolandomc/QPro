@@ -5,6 +5,7 @@ import {
   View, Text, StyleSheet, Platform,
   TouchableOpacity, Animated,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../src/theme/colors';
 import { supabase } from '../../src/config/supabase';
@@ -90,7 +91,7 @@ function TabItem({
   );
 }
 
-// ─── Tab bar flotante liquid-glass (sin expo-blur) ────────────────────────
+// ─── Tab bar flotante liquid-glass ───────────────────────────────────────────
 function FloatingTabBar({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
   const visibleRoutes = state.routes.filter(
@@ -99,51 +100,66 @@ function FloatingTabBar({ state, descriptors, navigation }: any) {
 
   const barBottom = Platform.OS === 'web' ? 20 : insets.bottom + 12;
 
-  // Estilos glass: en web usamos backdropFilter vía style inline
-  const glassStyle: any = Platform.OS === 'web'
-    ? {
-        backdropFilter:        'blur(20px) saturate(180%)',
-        WebkitBackdropFilter:  'blur(20px) saturate(180%)',
-        backgroundColor:       'rgba(18,21,28,0.62)',
-      }
-    : {
-        backgroundColor: 'rgba(18,21,28,0.82)',
-      };
+  const tabsContent = (
+    <View style={styles.tabsRow}>
+      {visibleRoutes.map((route: any) => {
+        const { options } = descriptors[route.key];
+        const isFocused = state.index === state.routes.indexOf(route);
+        const label     = options.title ?? route.name;
 
+        const onPress = () => {
+          const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+          if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
+        };
+
+        const iconColor = isFocused ? '#FFF' : 'rgba(255,255,255,0.45)';
+        let icon: React.ReactNode = null;
+        if (route.name === 'index')   icon = <Ionicons name="football"    size={22} color={iconColor} />;
+        if (route.name === 'results') icon = <Ionicons name="stats-chart" size={22} color={iconColor} />;
+        if (route.name === 'profile') icon = <NotifBadge color={iconColor} />;
+
+        return (
+          <TabItem
+            key={route.key}
+            icon={icon}
+            label={label}
+            active={isFocused}
+            onPress={onPress}
+          />
+        );
+      })}
+    </View>
+  );
+
+  // Web: backdrop-filter CSS, sin BlurView para evitar errores de SSR
+  if (Platform.OS === 'web') {
+    const webGlassStyle: any = {
+      backdropFilter:       'blur(20px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+      backgroundColor:      'rgba(18,21,28,0.62)',
+    };
+    return (
+      <View style={[styles.floatingWrapper, { bottom: barBottom }, webGlassStyle]}>
+        <View style={styles.glassBorder} pointerEvents="none" />
+        {tabsContent}
+      </View>
+    );
+  }
+
+  // iOS / Android: BlurView nativo real
   return (
-    <View style={[styles.floatingWrapper, { bottom: barBottom }, glassStyle]}>
+    <View style={[styles.floatingWrapper, { bottom: barBottom }]}>
+      <BlurView
+        intensity={70}
+        tint="systemUltraThinMaterialDark"
+        style={StyleSheet.absoluteFill}
+        experimentalBlurMethod="dimezisBlurView"
+      />
+      {/* Tinte oscuro sutil encima del blur */}
+      <View style={styles.blurOverlay} pointerEvents="none" />
       {/* Borde glass luminoso */}
       <View style={styles.glassBorder} pointerEvents="none" />
-
-      {/* Items */}
-      <View style={styles.tabsRow}>
-        {visibleRoutes.map((route: any) => {
-          const { options } = descriptors[route.key];
-          const isFocused = state.index === state.routes.indexOf(route);
-          const label     = options.title ?? route.name;
-
-          const onPress = () => {
-            const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-            if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
-          };
-
-          const iconColor = isFocused ? '#FFF' : 'rgba(255,255,255,0.45)';
-          let icon: React.ReactNode = null;
-          if (route.name === 'index')   icon = <Ionicons name="football"    size={22} color={iconColor} />;
-          if (route.name === 'results') icon = <Ionicons name="stats-chart" size={22} color={iconColor} />;
-          if (route.name === 'profile') icon = <NotifBadge color={iconColor} />;
-
-          return (
-            <TabItem
-              key={route.key}
-              icon={icon}
-              label={label}
-              active={isFocused}
-              onPress={onPress}
-            />
-          );
-        })}
-      </View>
+      {tabsContent}
     </View>
   );
 }
@@ -181,16 +197,23 @@ const styles = StyleSheet.create({
     elevation:     20,
   },
 
+  // Tinte oscuro encima del blur nativo para darle profundidad
+  blurOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10,12,16,0.35)',
+  },
+
+  // Borde glass luminoso
   glassBorder: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 30,
     borderWidth:  1,
-    borderColor:  'rgba(255,255,255,0.12)',
+    borderColor:  'rgba(255,255,255,0.13)',
   },
 
   tabsRow: {
-    flexDirection:    'row',
-    paddingVertical:  10,
+    flexDirection:     'row',
+    paddingVertical:   10,
     paddingHorizontal: 8,
   },
 
@@ -212,13 +235,13 @@ const styles = StyleSheet.create({
 
   tabIconWrapActive: {
     backgroundColor: 'rgba(155,89,182,0.28)',
-    borderWidth:   1,
-    borderColor:   'rgba(155,89,182,0.55)',
-    shadowColor:   '#9B59B6',
-    shadowOffset:  { width: 0, height: 0 },
-    shadowOpacity: 0.7,
-    shadowRadius:  10,
-    elevation:     6,
+    borderWidth:     1,
+    borderColor:     'rgba(155,89,182,0.55)',
+    shadowColor:     '#9B59B6',
+    shadowOffset:    { width: 0, height: 0 },
+    shadowOpacity:   0.7,
+    shadowRadius:    10,
+    elevation:       6,
   },
 
   activeGlow: {

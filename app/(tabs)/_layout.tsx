@@ -1,11 +1,17 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import {
+  View, Text, StyleSheet, Platform,
+  TouchableOpacity, Animated,
+} from 'react-native';
+import { BlurView } from 'expo-blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../src/theme/colors';
 import { supabase } from '../../src/config/supabase';
 
-function NotifIcon({ color }: { color: string }) {
+// ─── Badge de notificaciones ──────────────────────────────────────────────────
+function NotifBadge({ color }: { color: string }) {
   const [noLeidas, setNoLeidas] = useState(0);
 
   useEffect(() => {
@@ -47,42 +53,224 @@ function NotifIcon({ color }: { color: string }) {
   );
 }
 
+// ─── Tab item con animación de escala ─────────────────────────────────────────
+function TabItem({
+  icon, label, active, onPress,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const scale = useState(new Animated.Value(1))[0];
+
+  const handlePress = () => {
+    Animated.sequence([
+      Animated.timing(scale, { toValue: 0.82, duration: 80, useNativeDriver: true }),
+      Animated.spring(scale,  { toValue: 1,    friction: 4, useNativeDriver: true }),
+    ]).start();
+    onPress();
+  };
+
+  return (
+    <TouchableOpacity style={styles.tabItem} onPress={handlePress} activeOpacity={1}>
+      <Animated.View
+        style={[
+          styles.tabIconWrap,
+          active && styles.tabIconWrapActive,
+          { transform: [{ scale }] },
+        ]}
+      >
+        {/* Píldora activa con glow */}
+        {active && <View style={styles.activeGlow} />}
+        {icon}
+      </Animated.View>
+      <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+// ─── Tab bar flotante liquid-glass ───────────────────────────────────────────
+function FloatingTabBar({ state, descriptors, navigation }: any) {
+  const insets = useSafeAreaInsets();
+  const visibleRoutes = state.routes.filter(
+    (_: any, i: number) => descriptors[state.routes[i].key].options.href !== null,
+  );
+
+  const barBottom = Platform.OS === 'web' ? 20 : insets.bottom + 12;
+
+  return (
+    <View style={[styles.floatingWrapper, { bottom: barBottom }]}>
+      {/* Capa glass: blur + borde luminoso */}
+      {Platform.OS !== 'web' ? (
+        <BlurView
+          intensity={60}
+          tint="dark"
+          style={StyleSheet.absoluteFill}
+          experimentalBlurMethod="dimezisBlurView"
+        />
+      ) : null}
+
+      {/* Borde glass sutil */}
+      <View style={styles.glassBorder} />
+
+      {/* Items */}
+      <View style={styles.tabsRow}>
+        {visibleRoutes.map((route: any) => {
+          const { options } = descriptors[route.key];
+          const isFocused = state.index === state.routes.indexOf(route);
+          const label = options.title ?? route.name;
+
+          const onPress = () => {
+            const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+            if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
+          };
+
+          const iconColor = isFocused ? '#FFF' : 'rgba(255,255,255,0.45)';
+          let icon: React.ReactNode = null;
+
+          if (route.name === 'index')    icon = <Ionicons name="football"    size={22} color={iconColor} />;
+          if (route.name === 'results')  icon = <Ionicons name="stats-chart" size={22} color={iconColor} />;
+          if (route.name === 'profile')  icon = <NotifBadge color={iconColor} />;
+
+          return (
+            <TabItem
+              key={route.key}
+              icon={icon}
+              label={label}
+              active={isFocused}
+              onPress={onPress}
+            />
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+// ─── Layout principal ─────────────────────────────────────────────────────────
 export default function TabLayout() {
   return (
-    <Tabs screenOptions={{
-      headerShown: false,
-      tabBarStyle: {
-        backgroundColor: colors.card,
-        borderTopColor: colors.border,
-        borderTopWidth: 1,
-        height: Platform.OS === 'web' ? 72 : 60,
-        paddingBottom: Platform.OS === 'web' ? 10 : 8,
-        paddingTop: 6,
-        position: Platform.OS === 'web' ? 'fixed' as any : 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-      },
-      tabBarItemStyle: {
-        paddingVertical: 0,
-      },
-      tabBarLabelStyle: {
-        fontSize: 11,
-        fontWeight: '600',
-        marginTop: 2,
-      },
-      tabBarActiveTintColor: colors.primary,
-      tabBarInactiveTintColor: colors.textMuted,
-    }}>
-      <Tabs.Screen name="index"   options={{ title: 'Quinielas',  tabBarIcon: ({ color }) => <Ionicons name="football"    size={22} color={color} /> }} />
-      <Tabs.Screen name="results" options={{ title: 'Resultados', tabBarIcon: ({ color }) => <Ionicons name="stats-chart" size={22} color={color} /> }} />
-      <Tabs.Screen name="profile" options={{ title: 'Perfil',     tabBarIcon: ({ color }) => <NotifIcon color={color} /> }} />
-      <Tabs.Screen name="notificaciones" options={{ href: null }} />
+    <Tabs
+      tabBar={(props) => <FloatingTabBar {...props} />}
+      screenOptions={{
+        headerShown: false,
+        // El contenido debe terminar con padding para no quedar bajo la tab bar
+        contentStyle: { backgroundColor: '#0A0C10' },
+      }}
+    >
+      <Tabs.Screen name="index"         options={{ title: 'Quinielas'  }} />
+      <Tabs.Screen name="results"        options={{ title: 'Resultados' }} />
+      <Tabs.Screen name="profile"        options={{ title: 'Perfil'     }} />
+      <Tabs.Screen name="notificaciones" options={{ href: null         }} />
     </Tabs>
   );
 }
 
+// ─── Estilos ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  badge:     { position: 'absolute', top: -4, right: -6, backgroundColor: '#E74C3C', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
-  badgeText: { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
+  // ── Floating wrapper ────────────────────────────────────────────────────────
+  floatingWrapper: {
+    position:        'absolute',
+    left:            24,
+    right:           24,
+    borderRadius:    30,
+    overflow:        'hidden',
+    backgroundColor: Platform.OS === 'web'
+      ? 'rgba(18,21,28,0.82)'
+      : 'rgba(18,21,28,0.55)',  // blur hace el resto en nativo
+    // Sombra suave
+    shadowColor:   '#000',
+    shadowOffset:  { width: 0, height: 12 },
+    shadowOpacity: 0.45,
+    shadowRadius:  24,
+    elevation:     20,
+  },
+
+  // Borde glass luminoso
+  glassBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius:  30,
+    borderWidth:   1,
+    borderColor:   'rgba(255,255,255,0.12)',
+    pointerEvents: 'none' as any,
+  },
+
+  // ── Fila de tabs ────────────────────────────────────────────────────────────
+  tabsRow: {
+    flexDirection:  'row',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    gap: 0,
+  },
+
+  tabItem: {
+    flex:           1,
+    alignItems:     'center',
+    justifyContent: 'center',
+    gap:            4,
+  },
+
+  // ── Ícono wrap (píldora activa) ─────────────────────────────────────────────
+  tabIconWrap: {
+    width:          52,
+    height:         36,
+    borderRadius:   18,
+    alignItems:     'center',
+    justifyContent: 'center',
+    overflow:       'visible',
+  },
+
+  tabIconWrapActive: {
+    backgroundColor: 'rgba(155,89,182,0.28)',
+    // borde glass púrpura
+    borderWidth:   1,
+    borderColor:   'rgba(155,89,182,0.55)',
+    shadowColor:   '#9B59B6',
+    shadowOffset:  { width: 0, height: 0 },
+    shadowOpacity: 0.7,
+    shadowRadius:  10,
+    elevation:     6,
+  },
+
+  // Halo de glow detrás del ícono activo
+  activeGlow: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius:    18,
+    backgroundColor: 'rgba(155,89,182,0.18)',
+    transform:       [{ scale: 1.4 }],
+  },
+
+  // ── Labels ──────────────────────────────────────────────────────────────────
+  tabLabel: {
+    fontSize:   10,
+    fontWeight: '600',
+    color:      'rgba(255,255,255,0.4)',
+    letterSpacing: 0.2,
+  },
+  tabLabelActive: {
+    color:      '#FFF',
+    fontWeight: '700',
+  },
+
+  // ── Badge notificaciones ────────────────────────────────────────────────────
+  badge: {
+    position:        'absolute',
+    top:             -4,
+    right:           -6,
+    backgroundColor: '#E74C3C',
+    borderRadius:    8,
+    minWidth:        16,
+    height:          16,
+    alignItems:      'center',
+    justifyContent:  'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: {
+    color:      '#FFF',
+    fontSize:   9,
+    fontWeight: 'bold',
+  },
 });

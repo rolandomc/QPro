@@ -93,19 +93,40 @@ export const SpeiService = {
     comprobanteUrl:  string,
     monto:           number,
   ) {
+    // Llamar a la Edge Function (puede dar error de red aunque haya procesado OK en el servidor)
     const result = await ApiCepService.validarComprobante(
       participacionId,
       comprobanteUrl,
       monto,
     );
 
-    if (result.valid) {
+    // Si hubo error de red/timeout en la respuesta, leer el estado REAL desde la BD
+    // La Edge Function pudo haber aprobado el comprobante aunque el cliente no recibiera respuesta
+    let estadoReal: string | null = null;
+    if (!result.valid) {
+      const { data: part } = await supabase
+        .from('participaciones')
+        .select('estado, comprobante_validado')
+        .eq('id', participacionId)
+        .single();
+      estadoReal = part?.estado ?? null;
+    }
+
+    // Determinar notificación basada en el estado real de la BD cuando el cliente falla
+    const aprobado = result.valid || estadoReal === 'pagado';
+    const enRevision =
+      !aprobado &&
+      (estadoReal === 'spei_pendiente' ||
+        result.errorMsg?.toLowerCase().includes('manual') ||
+        (result.missingFields?.length ?? 0) > 0);
+
+    if (aprobado) {
       await SpeiService.notificarUsuario(
         participacionId,
         '✅ Pago confirmado',
         'Tu transferencia SPEI fue validada exitosamente. ¡Ya estás dentro de la quiniela!',
       );
-    } else if (result.errorMsg?.toLowerCase().includes('manual') || result.missingFields?.length) {
+    } else if (enRevision) {
       await SpeiService.notificarUsuario(
         participacionId,
         '⏳ Comprobante en revisión',
@@ -119,7 +140,8 @@ export const SpeiService = {
       );
     }
 
-    if (!result.valid) {
+    // Solo notificar al admin si realmente no fue aprobado en la BD
+    if (!aprobado) {
       await SpeiService.notificarAdmin(
         participacionId,
         result.errorMsg ?? 'Validación fallida',

@@ -73,6 +73,8 @@ export default function QuinielasScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={[styles.listContent, quinielasFiltradas.length === 0 && { flex: 1 }]}
         showsVerticalScrollIndicator={false}
+        bounces={true}
+        alwaysBounceVertical={true}
         ListEmptyComponent={
           deporteActivo !== 'futbol'
             ? (

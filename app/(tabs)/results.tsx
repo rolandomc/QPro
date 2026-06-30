@@ -125,6 +125,8 @@ export default function ResultsScreen() {
           style={{ flex: 1 }}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
+          bounces={true}
+          alwaysBounceVertical={true}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

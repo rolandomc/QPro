@@ -16,13 +16,13 @@ import { supabase } from '../../src/config/supabase';
 type MetodoPago = 'mp' | 'spei';
 type ConfirmState =
   | 'idle'
-  | 'choosingPayment'     // selector método
-  | 'confirmingMP'        // resumen MP
+  | 'choosingPayment'
+  | 'confirmingMP'
   | 'confirmingEdit'
-  | 'speiDatos'           // muestra CLABE + formulario subida comprobante
-  | 'speiSubiendo'        // cargando mientras sube imagen
-  | 'speiValidando'       // spinner mientras apiCEP valida
-  | 'speiEnviado'         // comprobante enviado, esperando revisión manual
+  | 'speiDatos'
+  | 'speiSubiendo'
+  | 'speiValidando'
+  | 'speiEnviado'
   | 'success'
   | 'successEdit'
   | 'error';
@@ -68,7 +68,6 @@ export default function QuinielaDetailsScreen() {
   const picksOriginalesRef = useRef<Record<string, SeleccionConGoles>>({});
   const participacionIdRef = useRef<string | null>(null);
 
-  // ─── Carga picks actuales ────────────────────────────────────────────────
   const cargarPicksActuales = useCallback(async (partId: string) => {
     const { data: sels } = await supabase
       .from('selecciones')
@@ -87,7 +86,6 @@ export default function QuinielaDetailsScreen() {
     return map;
   }, []);
 
-  // ─── loadData (reutilizable para focus y pull-to-refresh) ─────────────────
   const loadData = useCallback(async () => {
     if (!id) return;
     try {
@@ -126,7 +124,6 @@ export default function QuinielaDetailsScreen() {
     }
   }, [id, cargarPicksActuales]);
 
-  // ─── Focus effect ─────────────────────────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
       if (isPendingPago.current) return;
@@ -135,13 +132,11 @@ export default function QuinielaDetailsScreen() {
     }, [loadData])
   );
 
-  // ─── Pull-to-refresh handler ──────────────────────────────────────────────
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     loadData();
   }, [loadData]);
 
-  // ─── Picks ────────────────────────────────────────────────────────────────
   const handleSelect = (partidoId: string, seleccion: SeleccionConGoles) => {
     if (yaParticipo && !modoEdicion) return;
     setSelecciones(prev => ({ ...prev, [partidoId]: seleccion }));
@@ -198,7 +193,6 @@ export default function QuinielaDetailsScreen() {
     setConfirmState('choosingPayment');
   };
 
-  // ─── Mercado Pago ─────────────────────────────────────────────────────────
   const handlePagarConMP = async () => {
     if (openingRef.current) return;
     openingRef.current = true;
@@ -224,7 +218,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── SPEI: guardar picks y mostrar datos bancarios ────────────────────────
   const handlePagarConSpei = async () => {
     setSaving(true);
     try {
@@ -246,7 +239,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── SPEI: subir comprobante ──────────────────────────────────────────────
   const handleSubirComprobante = async () => {
     const partId = participacionIdRef.current;
     if (!partId) return;
@@ -266,7 +258,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── SPEI: validar automáticamente con Edge Function validar-spei ─────────
   const handleValidarAutomatico = async (partId: string, url: string) => {
     const monto = quiniela?.precio_entrada ?? 0;
     try {
@@ -279,7 +270,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── Reintentar pago MP ───────────────────────────────────────────────────
   const handleReintentarPago = async () => {
     if (!participacionId || openingRef.current) return;
     openingRef.current = true;
@@ -311,7 +301,6 @@ export default function QuinielaDetailsScreen() {
   const clabe = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? 'CLABE no configurada';
   const monto = quiniela?.precio_entrada ?? 0;
 
-  // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -323,7 +312,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Éxito pago ──────────────────────────────────────────────────────────
   if (confirmState === 'success') {
     return (
       <SafeAreaView style={styles.container}>
@@ -341,7 +329,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── SPEI enviado — esperando revisión ────────────────────────────────────
   if (confirmState === 'speiEnviado') {
     return (
       <SafeAreaView style={styles.container}>
@@ -368,7 +355,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Éxito edición ───────────────────────────────────────────────────────
   if (confirmState === 'successEdit') {
     return (
       <SafeAreaView style={styles.container}>
@@ -384,7 +370,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Error ────────────────────────────────────────────────────────────────
   if (confirmState === 'error') {
     return (
       <SafeAreaView style={styles.container}>
@@ -400,7 +385,6 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Confirmar edición ───────────────────────────────────────────────────
   if (confirmState === 'confirmingEdit') {
     return (
       <SafeAreaView style={styles.container}>
@@ -432,17 +416,13 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── SELECTOR DE MÉTODO DE PAGO ──────────────────────────────────────────
   if (confirmState === 'choosingPayment') {
     return (
       <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
           <ScrollView contentContainerStyle={styles.centered}>
-
             <Text style={styles.payTitle}>¿Cómo quieres pagar?</Text>
             <Text style={styles.paySub}>Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${monto} MXN</Text></Text>
-
-            {/* Resumen desempate */}
             <View style={styles.desempateSummary}>
               <Text style={styles.desempateLabel}>🎯 Goles totales predichos</Text>
               <Text style={styles.desempateValue}>{golesPredichosTotales}</Text>
@@ -450,8 +430,6 @@ export default function QuinielaDetailsScreen() {
                 En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
               </Text>
             </View>
-
-            {/* Opción MP */}
             <TouchableOpacity
               style={[styles.payOptionCard, metodoPago === 'mp' && styles.payOptionCardActive]}
               onPress={() => setMetodoPago('mp')}
@@ -476,8 +454,6 @@ export default function QuinielaDetailsScreen() {
                 </View>
               )}
             </TouchableOpacity>
-
-            {/* Opción SPEI */}
             <TouchableOpacity
               style={[styles.payOptionCard, metodoPago === 'spei' && styles.payOptionCardActive]}
               onPress={() => setMetodoPago('spei')}
@@ -503,8 +479,6 @@ export default function QuinielaDetailsScreen() {
                 </View>
               )}
             </TouchableOpacity>
-
-            {/* Botón continuar */}
             <TouchableOpacity
               style={[styles.confirmBtn, saving && styles.btnDisabled]}
               onPress={metodoPago === 'mp' ? handlePagarConMP : handlePagarConSpei}
@@ -516,7 +490,6 @@ export default function QuinielaDetailsScreen() {
                     {metodoPago === 'mp' ? 'Continuar con Mercado Pago →' : 'Continuar con SPEI →'}
                   </Text>}
             </TouchableOpacity>
-
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
               <Text style={styles.cancelBtnTxt}>← Volver a mis picks</Text>
             </TouchableOpacity>
@@ -526,25 +499,20 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── SPEI: datos bancarios + subir comprobante ────────────────────────────
   if (confirmState === 'speiDatos' || confirmState === 'speiSubiendo' || confirmState === 'speiValidando') {
     const subiendo  = confirmState === 'speiSubiendo';
     const validando = confirmState === 'speiValidando';
     const ocupado   = subiendo || validando;
-
     return (
       <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
           <ScrollView contentContainerStyle={styles.centered}>
-
             <Text style={{ fontSize: 52, marginBottom: 16 }}>🏦</Text>
             <Text style={styles.payTitle}>Paga y confirma</Text>
             <Text style={styles.paySub}>
               Realiza una transferencia SPEI por{' '}
               <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${monto} MXN</Text>
             </Text>
-
-            {/* Datos bancarios */}
             <View style={styles.clabeBanner}>
               <Text style={styles.clabeLabel}>CLABE Interbancaria</Text>
               <Text style={styles.clabeValue} selectable>{clabe}</Text>
@@ -552,27 +520,19 @@ export default function QuinielaDetailsScreen() {
                 Concepto: QPro – {id?.toString().slice(0, 8).toUpperCase()}
               </Text>
             </View>
-
-            {/* Separador */}
             <View style={styles.spaySeparator}>
               <View style={styles.spaySeparatorLine} />
               <Text style={styles.spaySeparatorTxt}>Una vez que pagues</Text>
               <View style={styles.spaySeparatorLine} />
             </View>
-
-            {/* Instrucción */}
             <Text style={styles.speiInstruccion}>
               Sube tu <Text style={{ color: '#E0E0E0', fontWeight: '600' }}>comprobante de transferencia</Text> (imagen o XML) para confirmar tu participación automáticamente.
             </Text>
-
-            {/* Estado del comprobante */}
             {comprobanteUrl ? (
               <View style={styles.comprobanteOkBox}>
                 <Text style={styles.comprobanteOkTxt}>✅ Comprobante subido correctamente</Text>
               </View>
             ) : null}
-
-            {/* Botón subir comprobante */}
             {validando ? (
               <View style={styles.validandoBox}>
                 <ActivityIndicator color="#2ECC71" size="large" style={{ marginBottom: 12 }} />
@@ -598,11 +558,9 @@ export default function QuinielaDetailsScreen() {
                 )}
               </TouchableOpacity>
             )}
-
             <Text style={styles.speiFormatos}>
               Formatos aceptados: imagen (JPG, PNG) o XML de tu banco
             </Text>
-
             <TouchableOpacity
               style={styles.cancelBtn}
               onPress={() => setConfirmState('choosingPayment')}
@@ -616,11 +574,8 @@ export default function QuinielaDetailsScreen() {
     );
   }
 
-  // ─── Pantalla principal ───────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
-
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backIcon}>‹</Text>
@@ -636,7 +591,6 @@ export default function QuinielaDetailsScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      {/* Barra de progreso */}
       {(!yaParticipo || modoEdicion) && (
         <View style={styles.progressWrap}>
           <ProgressBar current={totalSeleccionados} total={partidos.length} />
@@ -646,7 +600,6 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Banner verde + botón editar */}
       {yaParticipo && !modoEdicion && (
         <View style={styles.participandoWrap}>
           <View style={styles.participandoBanner}>
@@ -662,7 +615,6 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Banner pago pendiente */}
       {pagoPendiente && !modoEdicion && (
         <View style={styles.pendingBanner}>
           <Text style={styles.pendingBannerText}>
@@ -676,7 +628,6 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Hint desempate */}
       {(!yaParticipo || modoEdicion) && (
         <View style={styles.desempateInfoBanner}>
           <Text style={styles.desempateInfoText}>
@@ -685,20 +636,19 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {/* Lista de partidos */}
       <FlatList
         data={partidos}
         keyExtractor={(item) => item.id}
         style={{ flex: 1 }}
         contentContainerStyle={styles.list}
+        bounces={true}
+        alwaysBounceVertical={true}
         refreshControl={
-          yaParticipo ? (
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor="#2ECC71"
-            />
-          ) : undefined
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#2ECC71"
+          />
         }
         renderItem={({ item, index }) => (
           <MatchSelectionCard
@@ -712,7 +662,6 @@ export default function QuinielaDetailsScreen() {
         ListFooterComponent={
           <View style={styles.footer}>
             {faltanMsg ? <Text style={styles.faltanMsg}>{faltanMsg}</Text> : null}
-
             {!yaParticipo && (
               <TouchableOpacity
                 style={[styles.confirmBtn, !isComplete && styles.btnDisabled]}
@@ -722,7 +671,6 @@ export default function QuinielaDetailsScreen() {
                 <Text style={styles.confirmBtnTxt}>Confirmar picks y elegir pago →</Text>
               </TouchableOpacity>
             )}
-
             {modoEdicion && (
               <View style={styles.editActions}>
                 <TouchableOpacity
@@ -750,7 +698,6 @@ const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: '#0A0C12' },
   centered:    { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   loadingText: { color: '#A0A0A0', marginTop: 12 },
-
   header: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 12,
@@ -761,23 +708,16 @@ const styles = StyleSheet.create({
   headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle:  { color: '#E0E0E0', fontSize: 16, fontWeight: 'bold' },
   headerSub:    { color: '#606060', fontSize: 11, marginTop: 2 },
-
   progressWrap: { paddingHorizontal: 16, paddingTop: 12 },
   progressText: { color: '#606060', fontSize: 12, marginTop: 6, marginBottom: 4 },
-
   participandoWrap: { marginHorizontal: 16, marginTop: 12, gap: 8 },
   participandoBanner: {
-    backgroundColor: '#0D2B1A',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#1A4D2E',
-    padding: 12,
+    backgroundColor: '#0D2B1A', borderRadius: 10,
+    borderWidth: 1, borderColor: '#1A4D2E', padding: 12,
   },
   participandoText: { color: '#2ECC71', fontSize: 13, textAlign: 'center' },
-
   editBtn:    { backgroundColor: '#1E2128', borderRadius: 10, padding: 12, alignItems: 'center' },
   editBtnTxt: { color: '#E0E0E0', fontSize: 14, fontWeight: '600' },
-
   pendingBanner: {
     backgroundColor: '#2B1D0A', marginHorizontal: 16, marginTop: 10,
     borderRadius: 10, padding: 12, gap: 10,
@@ -786,30 +726,24 @@ const styles = StyleSheet.create({
   pendingBannerText:    { color: '#E0A050', fontSize: 13, textAlign: 'center' },
   pendingBannerBtn:     { backgroundColor: '#2ECC71', borderRadius: 8, padding: 10, alignItems: 'center' },
   pendingBannerBtnTxt:  { color: '#000', fontWeight: '700', fontSize: 13 },
-
   desempateInfoBanner: {
     marginHorizontal: 16, marginTop: 10, marginBottom: 4,
     backgroundColor: '#12151F', borderRadius: 10,
     padding: 12, borderWidth: 1, borderColor: '#1E2535',
   },
   desempateInfoText: { color: '#8090B0', fontSize: 12, lineHeight: 18 },
-
   list:   { paddingBottom: 32 },
   footer: { padding: 16, gap: 10 },
-
   faltanMsg:   { color: '#FF6B6B', fontSize: 13, textAlign: 'center', marginBottom: 8 },
   editActions: { gap: 10 },
-
   confirmBtn: {
     backgroundColor: '#2ECC71', borderRadius: 14,
     paddingVertical: 16, alignItems: 'center', width: '100%',
   },
   confirmBtnTxt: { color: '#0A0C12', fontWeight: '800', fontSize: 15 },
   btnDisabled:   { opacity: 0.4 },
-
   cancelBtn:    { paddingVertical: 14, alignItems: 'center', width: '100%' },
   cancelBtnTxt: { color: '#606060', fontSize: 14 },
-
   successTitle: { color: '#E0E0E0', fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 12 },
   successSub:   { color: '#808080', fontSize: 14, textAlign: 'center', marginBottom: 24, lineHeight: 22 },
   successBtn: {
@@ -818,20 +752,15 @@ const styles = StyleSheet.create({
     alignItems: 'center', width: '100%',
   },
   successBtnTxt: { color: '#0A0C12', fontWeight: '800', fontSize: 15 },
-
   desempateSummary: {
-    backgroundColor: '#12151F',
-    borderRadius: 12, padding: 16, width: '100%',
-    marginBottom: 20, borderWidth: 1, borderColor: '#1E2535',
-    alignItems: 'center',
+    backgroundColor: '#12151F', borderRadius: 12, padding: 16, width: '100%',
+    marginBottom: 20, borderWidth: 1, borderColor: '#1E2535', alignItems: 'center',
   },
   desempateLabel: { color: '#8090B0', fontSize: 12, marginBottom: 4 },
   desempateValue: { color: '#2ECC71', fontSize: 36, fontWeight: '900', marginBottom: 8 },
   desempateHint:  { color: '#606880', fontSize: 11, textAlign: 'center', lineHeight: 16 },
-
   payTitle: { color: '#E0E0E0', fontSize: 22, fontWeight: '800', marginBottom: 6, textAlign: 'center' },
   paySub:   { color: '#808080', fontSize: 14, marginBottom: 20, textAlign: 'center' },
-
   payOptionCard: {
     width: '100%', backgroundColor: '#12151F',
     borderRadius: 14, padding: 16, marginBottom: 12,
@@ -845,7 +774,6 @@ const styles = StyleSheet.create({
   payOptionDesc:       { color: '#606060', fontSize: 12, marginTop: 2 },
   payOptionDetail:     { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#1E2535', gap: 4 },
   payOptionDetailTxt:  { color: '#60A878', fontSize: 12 },
-
   radioOuter: {
     width: 20, height: 20, borderRadius: 10,
     borderWidth: 2, borderColor: '#303540',
@@ -853,42 +781,34 @@ const styles = StyleSheet.create({
   },
   radioOuterActive: { borderColor: '#2ECC71' },
   radioInner:       { width: 10, height: 10, borderRadius: 5, backgroundColor: '#2ECC71' },
-
   clabeBanner: {
     width: '100%', backgroundColor: '#0D1A1B',
     borderRadius: 14, padding: 18, marginBottom: 20,
-    borderWidth: 1.5, borderColor: '#1A4045',
-    alignItems: 'center',
+    borderWidth: 1.5, borderColor: '#1A4045', alignItems: 'center',
   },
   clabeLabel: { color: '#4DABB8', fontSize: 11, fontWeight: '600', letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' },
   clabeValue: { color: '#E0E0E0', fontSize: 20, fontWeight: '900', letterSpacing: 2, marginBottom: 8 },
   clabeHint:  { color: '#406870', fontSize: 11 },
-
   spaySeparator:    { flexDirection: 'row', alignItems: 'center', width: '100%', marginVertical: 16, gap: 10 },
   spaySeparatorLine: { flex: 1, height: 1, backgroundColor: '#1E2535' },
   spaySeparatorTxt:  { color: '#404860', fontSize: 12 },
-
   speiInstruccion: {
     color: '#8090B0', fontSize: 13, textAlign: 'center',
     lineHeight: 20, marginBottom: 20, paddingHorizontal: 8,
   },
-
   speiUploadBtn: {
     width: '100%', backgroundColor: '#2ECC71',
     borderRadius: 14, paddingVertical: 16,
     alignItems: 'center', marginBottom: 8,
   },
   speiUploadBtnTxt: { color: '#0A0C12', fontWeight: '800', fontSize: 15 },
-
   speiFormatos: { color: '#404060', fontSize: 11, textAlign: 'center', marginBottom: 20 },
-
   comprobanteOkBox: {
     backgroundColor: '#0D2B1A', borderRadius: 10,
     padding: 12, width: '100%', marginBottom: 14,
     borderWidth: 1, borderColor: '#1A4D2E', alignItems: 'center',
   },
   comprobanteOkTxt: { color: '#2ECC71', fontSize: 13, fontWeight: '600' },
-
   validandoBox: {
     width: '100%', alignItems: 'center',
     backgroundColor: '#0D1220', borderRadius: 14,
@@ -897,7 +817,6 @@ const styles = StyleSheet.create({
   },
   validandoTxt: { color: '#E0E0E0', fontSize: 15, fontWeight: '700', marginBottom: 6 },
   validandoSub: { color: '#606080', fontSize: 12 },
-
   speiEnviadoCard: {
     width: '100%', backgroundColor: '#12151F',
     borderRadius: 14, padding: 20, marginBottom: 24,

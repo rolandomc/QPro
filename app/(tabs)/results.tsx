@@ -86,6 +86,11 @@ export default function ResultsScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, []));
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadData();
+  }, [loadData]);
+
   const enJuego  = participaciones.filter((p: any) =>
     ['abierta', 'cerrada'].includes(p.quinielas?.estado)
   );
@@ -110,7 +115,7 @@ export default function ResultsScreen() {
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
-      <Header />
+      <Header onRefresh={handleRefresh} />
       <SegmentedControl options={['En Juego', 'Historial']} selectedOption={tab} onSelect={setTab} />
 
       {loading ? (
@@ -130,7 +135,7 @@ export default function ResultsScreen() {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); loadData(); }}
+              onRefresh={handleRefresh}
               tintColor="#9B59B6"
             />
           }

@@ -35,6 +35,11 @@ export default function QuinielasScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadQuinielas();
+  }, [loadQuinielas]);
+
   const quinielasFiltradas = deporteActivo === 'futbol'
     ? quinielas
     : quinielas.filter((q) => q.deporte === deporteActivo);
@@ -44,7 +49,7 @@ export default function QuinielasScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <Header deporteActivo={deporteActivo} onDeporteChange={setDeporteActivo} />
+        <Header deporteActivo={deporteActivo} onDeporteChange={setDeporteActivo} onRefresh={handleRefresh} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2ECC71" />
           <Text style={styles.loadingText}>Cargando quinielas...</Text>
@@ -56,7 +61,7 @@ export default function QuinielasScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" />
-      <Header deporteActivo={deporteActivo} onDeporteChange={setDeporteActivo} />
+      <Header deporteActivo={deporteActivo} onDeporteChange={setDeporteActivo} onRefresh={handleRefresh} />
 
       {error && (
         <View style={styles.errorBanner}>
@@ -91,7 +96,7 @@ export default function QuinielasScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => { setRefreshing(true); loadQuinielas(); }}
+            onRefresh={handleRefresh}
             tintColor="#2ECC71"
             colors={['#2ECC71']}
           />

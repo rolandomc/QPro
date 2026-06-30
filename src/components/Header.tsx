@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, Pressable,
   Modal, TouchableOpacity, TouchableWithoutFeedback,
-  ScrollView, ActivityIndicator,
+  ScrollView, ActivityIndicator, Animated,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { WalletService } from '../services/wallet.service';
@@ -40,9 +40,10 @@ const NOTIF_COLOR: Record<string, string> = {
 interface Props {
   deporteActivo?: Deporte;
   onDeporteChange?: (d: Deporte) => void;
+  onRefresh?: () => Promise<void> | void;
 }
 
-export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Props) {
+export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRefresh }: Props) {
   const router = useRouter();
   const [menuVisible,   setMenuVisible]   = useState(false);
   const [notifVisible,  setNotifVisible]  = useState(false);
@@ -51,7 +52,9 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
   const [loadingNotifs, setLoadingNotifs] = useState(false);
   const [userId,        setUserId]        = useState<string>('');
   const [hiddenIds,     setHiddenIds]     = useState<Set<string>>(new Set());
+  const [spinning,      setSpinning]      = useState(false);
   const cachedSaldo = useRef<number | null>(null);
+  const spinAnim   = useRef(new Animated.Value(0)).current;
 
   useFocusEffect(useCallback(() => {
     if (cachedSaldo.current !== null) setSaldo(cachedSaldo.current);
@@ -103,7 +106,6 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
     }
   }, [userId]);
 
-  // Ocultar una notificación leída localmente (sin borrar de DB)
   const handleHide = useCallback((id: string) => {
     setHiddenIds(prev => {
       const next = new Set(prev);
@@ -120,6 +122,33 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
     });
   }, [notifs]);
 
+  const handleLogoPress = useCallback(async () => {
+    if (!onRefresh || spinning) {
+      setMenuVisible(true);
+      return;
+    }
+    setSpinning(true);
+    spinAnim.setValue(0);
+    Animated.loop(
+      Animated.timing(spinAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      })
+    ).start();
+    try {
+      await onRefresh();
+    } finally {
+      setSpinning(false);
+      spinAnim.stopAnimation();
+    }
+  }, [onRefresh, spinning, spinAnim]);
+
+  const spin = spinAnim.interpolate({
+    inputRange:  [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
   const visibleNotifs = notifs.filter(n => !hiddenIds.has(n.id));
   const noLeidas = visibleNotifs.filter(n => !n.leida).length;
   const hayLeidas = visibleNotifs.some(n => n.leida);
@@ -131,18 +160,25 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
 
   return (
     <View style={styles.header}>
-      {/* Logo + selector deporte */}
-      <Pressable style={styles.logoRow} onPress={() => setMenuVisible(true)}>
-        <Text style={styles.headerTitle}>
-          <Text style={styles.neonTextGreen}>Q</Text>
-          <Text style={styles.logoWhite}>Pro</Text>
-        </Text>
-        <View style={styles.deportePill}>
-          <Text style={styles.deportePillText}>
-            {deporteLabel?.emoji} {deporteLabel?.label}
+      {/* Logo — toca para refresh (si onRefresh existe) o abre selector de deporte */}
+      <Pressable style={styles.logoRow} onPress={handleLogoPress}>
+        <Animated.View style={onRefresh ? { transform: [{ rotate: spin }] } : undefined}>
+          <Text style={styles.headerTitle}>
+            <Text style={styles.neonTextGreen}>Q</Text>
+            <Text style={styles.logoWhite}>Pro</Text>
           </Text>
-          <Text style={styles.chevron}>▾</Text>
-        </View>
+        </Animated.View>
+        {!onRefresh && (
+          <View style={styles.deportePill}>
+            <Text style={styles.deportePillText}>
+              {deporteLabel?.emoji} {deporteLabel?.label}
+            </Text>
+            <Text style={styles.chevron}>▾</Text>
+          </View>
+        )}
+        {onRefresh && spinning && (
+          <Text style={styles.refreshingLabel}>Actualizando...</Text>
+        )}
       </Pressable>
 
       {/* Saldo + campanita */}
@@ -160,7 +196,7 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
         </Pressable>
       </View>
 
-      {/* ── Panel notificaciones ── */}
+      {/* Panel notificaciones */}
       <Modal
         visible={notifVisible}
         transparent
@@ -171,8 +207,6 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
           <View style={styles.notifOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.notifPanel}>
-
-                {/* Header del panel */}
                 <View style={styles.notifPanelHeader}>
                   <View style={styles.notifPanelTitleRow}>
                     <Text style={styles.notifPanelTitle}>Notificaciones</Text>
@@ -188,18 +222,12 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
                     </TouchableOpacity>
                   )}
                 </View>
-
-                {/* Lista */}
                 {loadingNotifs ? (
                   <View style={styles.notifLoading}>
                     <ActivityIndicator color={colors.primary} />
                   </View>
                 ) : (
-                  <ScrollView
-                    style={styles.notifList}
-                    showsVerticalScrollIndicator={false}
-                    bounces={false}
-                  >
+                  <ScrollView style={styles.notifList} showsVerticalScrollIndicator={false} bounces={false}>
                     {visibleNotifs.length === 0 ? (
                       <View style={styles.emptyWrap}>
                         <Text style={styles.emptyIcon}>🔕</Text>
@@ -224,12 +252,9 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
                                 : [styles.notifItemUnread, { borderLeftColor: color }],
                             ]}
                           >
-                            {/* Ícono con fondo coloreado */}
                             <View style={[styles.notifIconWrap, { backgroundColor: color + '28' }]}>
                               <Text style={styles.notifIconText}>{icon}</Text>
                             </View>
-
-                            {/* Contenido */}
                             <View style={styles.notifContent}>
                               <Text style={n.leida ? styles.notifTitleRead : styles.notifTitleUnread}>
                                 {n.titulo}
@@ -239,8 +264,6 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
                               </Text>
                               <Text style={styles.notifFecha}>{fecha}</Text>
                             </View>
-
-                            {/* Botón ocultar — solo en leídas */}
                             {n.leida && (
                               <TouchableOpacity
                                 onPress={() => handleHide(n.id)}
@@ -262,57 +285,59 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange }: Pr
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* ── Modal selector de deporte ── */}
-      <Modal
-        visible={menuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
-          <View style={styles.overlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.dropdown}>
-                <Text style={styles.dropdownTitle}>Seleccionar deporte</Text>
-                {DEPORTES.map((d) => (
-                  <TouchableOpacity
-                    key={d.key}
-                    style={[
-                      styles.dropdownItem,
-                      deporteActivo === d.key && styles.dropdownItemActive,
-                      d.proximamente && styles.dropdownItemDisabled,
-                    ]}
-                    onPress={() => {
-                      if (!d.proximamente) {
-                        onDeporteChange?.(d.key);
-                        setMenuVisible(false);
-                      }
-                    }}
-                    activeOpacity={d.proximamente ? 1 : 0.7}
-                  >
-                    <Text style={styles.dropdownEmoji}>{d.emoji}</Text>
-                    <Text style={[
-                      styles.dropdownLabel,
-                      deporteActivo === d.key && styles.dropdownLabelActive,
-                      d.proximamente && styles.dropdownLabelDisabled,
-                    ]}>
-                      {d.label}
-                    </Text>
-                    {d.proximamente && (
-                      <View style={styles.proximamenteBadge}>
-                        <Text style={styles.proximamenteText}>Próximamente</Text>
-                      </View>
-                    )}
-                    {deporteActivo === d.key && !d.proximamente && (
-                      <Text style={styles.checkmark}>✓</Text>
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+      {/* Modal selector de deporte — solo si NO hay onRefresh */}
+      {!onRefresh && (
+        <Modal
+          visible={menuVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuVisible(false)}
+        >
+          <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
+            <View style={styles.overlay}>
+              <TouchableWithoutFeedback>
+                <View style={styles.dropdown}>
+                  <Text style={styles.dropdownTitle}>Seleccionar deporte</Text>
+                  {DEPORTES.map((d) => (
+                    <TouchableOpacity
+                      key={d.key}
+                      style={[
+                        styles.dropdownItem,
+                        deporteActivo === d.key && styles.dropdownItemActive,
+                        d.proximamente && styles.dropdownItemDisabled,
+                      ]}
+                      onPress={() => {
+                        if (!d.proximamente) {
+                          onDeporteChange?.(d.key);
+                          setMenuVisible(false);
+                        }
+                      }}
+                      activeOpacity={d.proximamente ? 1 : 0.7}
+                    >
+                      <Text style={styles.dropdownEmoji}>{d.emoji}</Text>
+                      <Text style={[
+                        styles.dropdownLabel,
+                        deporteActivo === d.key && styles.dropdownLabelActive,
+                        d.proximamente && styles.dropdownLabelDisabled,
+                      ]}>
+                        {d.label}
+                      </Text>
+                      {d.proximamente && (
+                        <View style={styles.proximamenteBadge}>
+                          <Text style={styles.proximamenteText}>Próximamente</Text>
+                        </View>
+                      )}
+                      {deporteActivo === d.key && !d.proximamente && (
+                        <Text style={styles.checkmark}>✓</Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -326,6 +351,7 @@ const styles = StyleSheet.create({
   deportePill:      { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: colors.border, gap: 4 },
   deportePillText:  { color: colors.text, fontSize: 13, fontWeight: '600' },
   chevron:          { color: colors.textMuted, fontSize: 11 },
+  refreshingLabel:  { color: colors.textMuted, fontSize: 12, fontStyle: 'italic' },
 
   rightGroup:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
   balanceButton:    { backgroundColor: colors.surface, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: colors.primary },
@@ -335,7 +361,6 @@ const styles = StyleSheet.create({
   badgeWrap:        { position: 'absolute', top: -2, right: -2, backgroundColor: colors.error, borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 1.5, borderColor: colors.background },
   badgeTxt:         { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
 
-  // Panel
   notifOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)' },
   notifPanel:       { position: 'absolute', top: 70, right: 16, width: 320, maxHeight: 480, backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.7, shadowRadius: 24, elevation: 24 },
   notifPanelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
@@ -348,7 +373,6 @@ const styles = StyleSheet.create({
   notifLoading:     { padding: 32, alignItems: 'center' },
   notifList:        { maxHeight: 400 },
 
-  // Items
   notifItem:        { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
   notifItemUnread:  { backgroundColor: colors.cardElevated, borderLeftWidth: 3 },
   notifItemRead:    { backgroundColor: colors.card },
@@ -356,14 +380,10 @@ const styles = StyleSheet.create({
   notifIconText:    { fontSize: 18 },
   notifContent:     { flex: 1 },
 
-  // Textos NO leída — máximo contraste
   notifTitleUnread: { color: '#FFFFFF', fontWeight: '700', fontSize: 13, marginBottom: 3 },
   notifMsgUnread:   { color: '#D8DCF0', fontSize: 12, lineHeight: 18 },
-
-  // Textos leída — visibles pero atenuados
   notifTitleRead:   { color: colors.textMuted, fontWeight: '600', fontSize: 13, marginBottom: 3 },
   notifMsgRead:     { color: colors.textFaint, fontSize: 12, lineHeight: 18 },
-
   notifFecha:       { color: colors.textFaint, fontSize: 10, marginTop: 4 },
   hideBtn:          { padding: 2, alignSelf: 'flex-start', marginTop: 2 },
   hideBtnTxt:       { color: colors.textFaint, fontSize: 14, fontWeight: '600' },
@@ -373,17 +393,16 @@ const styles = StyleSheet.create({
   emptyTxt:         { color: colors.textMuted, fontWeight: '700', fontSize: 14, marginBottom: 4 },
   emptySubTxt:      { color: colors.textFaint, fontSize: 12, textAlign: 'center' },
 
-  // Selector deporte
   overlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-start', paddingTop: 90, paddingHorizontal: 20 },
   dropdown:         { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, paddingVertical: 8, overflow: 'hidden' },
   dropdownTitle:    { color: colors.textFaint, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
   dropdownItem:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
-  dropdownItemActive:   { backgroundColor: colors.primaryDim },
-  dropdownItemDisabled: { opacity: 0.45 },
+  dropdownItemActive:    { backgroundColor: colors.primaryDim },
+  dropdownItemDisabled:  { opacity: 0.45 },
   dropdownEmoji:    { fontSize: 20 },
   dropdownLabel:    { color: colors.text, fontSize: 15, fontWeight: '600', flex: 1 },
-  dropdownLabelActive:  { color: colors.primary },
-  dropdownLabelDisabled:{ color: colors.textFaint },
+  dropdownLabelActive:   { color: colors.primary },
+  dropdownLabelDisabled: { color: colors.textFaint },
   proximamenteBadge:{ backgroundColor: 'rgba(243,156,18,0.15)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: colors.warning },
   proximamenteText: { color: colors.warning, fontSize: 10, fontWeight: '700' },
   checkmark:        { color: colors.primary, fontSize: 16, fontWeight: 'bold' },

@@ -123,9 +123,9 @@ export default function ProfileScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadUserData(); }, [loadUserData]));
 
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    loadUserData();
+    await loadUserData();
   }, [loadUserData]);
 
   const handleSignOut = async () => {
@@ -226,7 +226,7 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={st.container} edges={['top']}>
-      <Header />
+      <Header onRefresh={handleRefresh} />
       <ScrollView
         contentContainerStyle={st.scroll}
         showsVerticalScrollIndicator={false}

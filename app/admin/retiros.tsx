@@ -2,10 +2,13 @@ import React, { useState, useCallback } from 'react';
 import {
   StyleSheet, Text, View, FlatList, TouchableOpacity,
   ActivityIndicator, Alert, RefreshControl, TextInput,
-  Modal, TouchableWithoutFeedback, KeyboardAvoidingView, Platform, ScrollView,
+  Modal, TouchableWithoutFeedback, KeyboardAvoidingView,
+  Platform, ScrollView, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { decode } from 'base64-arraybuffer';
 import { supabase } from '../../src/config/supabase';
 
 type Filtro = 'pendiente' | 'pagado' | 'rechazado' | 'todos';
@@ -18,9 +21,9 @@ const FILTROS: { key: Filtro; label: string; emoji: string; color: string }[] = 
 ];
 
 const ESTADO_CFG: Record<string, { color: string; bg: string; emoji: string }> = {
-  pendiente: { color: '#F39C12', bg: 'rgba(243,156,18,0.12)', emoji: '⏳' },
-  pagado:    { color: '#2ECC71', bg: 'rgba(46,204,113,0.12)', emoji: '✅' },
-  rechazado: { color: '#E74C3C', bg: 'rgba(231,76,60,0.12)',  emoji: '❌' },
+  pendiente: { color: '#F39C12', bg: 'rgba(243,156,18,0.12)',  emoji: '⏳' },
+  pagado:    { color: '#2ECC71', bg: 'rgba(46,204,113,0.12)',  emoji: '✅' },
+  rechazado: { color: '#E74C3C', bg: 'rgba(231,76,60,0.12)',   emoji: '❌' },
 };
 
 function formatFecha(iso: string) {
@@ -29,35 +32,56 @@ function formatFecha(iso: string) {
   });
 }
 
+function pickFileWeb(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
+
 export default function AdminRetirosScreen() {
   const router = useRouter();
-  const [retiros, setRetiros] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [filtro, setFiltro] = useState<Filtro>('pendiente');
-  const [accionando, setAccionando] = useState<string | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [notaRechazo, setNotaRechazo] = useState('');
-  const [retiroActivo, setRetiroActivo] = useState<any | null>(null);
+  const [retiros,      setRetiros]      = useState<any[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [filtro,       setFiltro]       = useState<Filtro>('pendiente');
+  const [accionando,   setAccionando]   = useState<string | null>(null);
 
-  // Navegación segura: evita que router.back() falle si no hay historial
+  // Modal rechazo
+  const [modalRechazo,   setModalRechazo]   = useState(false);
+  const [notaRechazo,    setNotaRechazo]    = useState('');
+  const [retiroActivo,   setRetiroActivo]   = useState<any | null>(null);
+
+  // Modal confirmación de pago con comprobante
+  const [modalPago,         setModalPago]         = useState(false);
+  const [retiroPago,        setRetiroPago]         = useState<any | null>(null);
+  const [comprobanteUri,    setComprobanteUri]     = useState<string | null>(null);
+  const [comprobanteB64,    setComprobanteB64]     = useState<string | null>(null);
+  const [comprobanteMime,   setComprobanteMime]    = useState<string>('image/jpeg');
+  const [subiendoComp,      setSubiendoComp]       = useState(false);
+
+  // Visor de comprobante
+  const [visorUrl,   setVisorUrl]   = useState<string | null>(null);
+  const [visorModal, setVisorModal] = useState(false);
+
   const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/admin');
-    }
+    if (router.canGoBack()) router.back();
+    else router.replace('/admin');
   };
 
   const loadRetiros = useCallback(async () => {
     try {
       let query = supabase
         .from('retiro_solicitudes')
-        .select(`id, user_id, monto, metodo, clabe, alias_mp, estado, nota_admin, created_at, updated_at, profiles:user_id ( username )`)
+        .select(`id, user_id, monto, metodo, clabe, alias_mp, estado, nota_admin,
+                 created_at, updated_at, comprobante_url,
+                 profiles:user_id ( username )`)
         .order('created_at', { ascending: false });
-
       if (filtro !== 'todos') query = query.eq('estado', filtro);
-
       const { data, error } = await query;
       if (error) throw error;
       setRetiros(data ?? []);
@@ -74,72 +98,126 @@ export default function AdminRetirosScreen() {
     loadRetiros();
   }, [filtro, loadRetiros]));
 
-  const llamarEdgeFunction = async (solicitud_id: string, accion: 'pagar' | 'rechazar', nota?: string) => {
+  const llamarEdgeFunction = async (
+    solicitud_id: string,
+    accion: 'pagar' | 'rechazar',
+    nota?: string,
+    comprobante_url?: string,
+  ) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('No autenticado');
-
-    const res = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/procesar-retiro`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
+    const res = await fetch(
+      `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/procesar-retiro`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ solicitud_id, accion, nota, comprobante_url }),
       },
-      body: JSON.stringify({ solicitud_id, accion, nota }),
-    });
-
+    );
     const json = await res.json();
     if (!res.ok) throw new Error(json.error ?? 'Error al procesar');
     return json;
   };
 
-  const refrescarDespuesAccion = async () => {
+  // ── Seleccionar imagen comprobante ────────────────────────────────
+  const seleccionarComprobante = async () => {
+    if (Platform.OS === 'web') {
+      const file = await pickFileWeb();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        setComprobanteUri(dataUrl);
+        setComprobanteB64(dataUrl.split(',')[1]);
+        setComprobanteMime(file.type || 'image/jpeg');
+      };
+      reader.readAsDataURL(file);
+    } else {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permiso', 'Necesitas dar permiso para acceder a la galería.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.85,
+        base64: true,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        setComprobanteUri(asset.uri);
+        setComprobanteB64(asset.base64 ?? null);
+        const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+        setComprobanteMime(ext === 'png' ? 'image/png' : 'image/jpeg');
+      }
+    }
+  };
+
+  // ── Subir comprobante a Storage ───────────────────────────────────
+  const subirComprobanteStorage = async (retiroId: string): Promise<string | null> => {
+    if (!comprobanteB64) return null;
+    const ext  = comprobanteMime === 'image/png' ? 'png' : 'jpg';
+    const path = `retiros/${retiroId}_${Date.now()}.${ext}`;
+    const { error } = await supabase.storage
+      .from('comprobantes')
+      .upload(path, decode(comprobanteB64), { contentType: comprobanteMime, upsert: true });
+    if (error) throw new Error(`Error al subir: ${error.message}`);
+    const { data } = await supabase.storage
+      .from('comprobantes')
+      .createSignedUrl(path, 60 * 60 * 24 * 30); // 30 días
+    return data?.signedUrl ?? null;
+  };
+
+  // ── Abrir modal de pago ───────────────────────────────────────────
+  const handleAbrirPago = (retiro: any) => {
+    setRetiroPago(retiro);
+    setComprobanteUri(null);
+    setComprobanteB64(null);
+    setModalPago(true);
+  };
+
+  // ── Confirmar pago con comprobante ────────────────────────────────
+  const handleConfirmarPago = async () => {
+    if (!retiroPago) return;
+    setSubiendoComp(true);
     try {
+      let urlComp: string | null = null;
+      if (comprobanteB64) {
+        urlComp = await subirComprobanteStorage(retiroPago.id);
+        // Guardar URL en la fila
+        await supabase
+          .from('retiro_solicitudes')
+          .update({ comprobante_url: urlComp })
+          .eq('id', retiroPago.id);
+      }
+      await llamarEdgeFunction(retiroPago.id, 'pagar', undefined, urlComp ?? undefined);
+      setModalPago(false);
       await loadRetiros();
-    } catch (_) {}
+      Alert.alert('✅ Listo', 'Retiro marcado como pagado y usuario notificado.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setSubiendoComp(false);
+    }
   };
 
-  const handlePagar = (retiro: any) => {
-    const destino = retiro.metodo === 'spei' ? `CLABE: ${retiro.clabe}` : `Alias MP: ${retiro.alias_mp}`;
-
-    Alert.alert(
-      '💸 Confirmar pago',
-      `¿Marcar como pagado el retiro de\n\n@${retiro.profiles?.username}\n$${retiro.monto} MXN\n${destino}?\n\n⚠️ Solo confirma si ya hiciste la transferencia.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sí, ya pagué',
-          style: 'default',
-          onPress: async () => {
-            setAccionando(retiro.id + '_pagar');
-            try {
-              await llamarEdgeFunction(retiro.id, 'pagar');
-              await refrescarDespuesAccion();
-              Alert.alert('✅ Listo', 'Retiro marcado como pagado.');
-            } catch (e: any) {
-              Alert.alert('Error', e.message);
-            } finally {
-              setAccionando(null);
-            }
-          },
-        },
-      ]
-    );
-  };
-
+  // ── Rechazo ───────────────────────────────────────────────────────
   const handleRechazarAbrir = (retiro: any) => {
     setRetiroActivo(retiro);
     setNotaRechazo('');
-    setModalVisible(true);
+    setModalRechazo(true);
   };
 
   const handleRechazarConfirmar = async () => {
     if (!retiroActivo) return;
-    setModalVisible(false);
+    setModalRechazo(false);
     setAccionando(retiroActivo.id + '_rechazar');
-
     try {
       await llamarEdgeFunction(retiroActivo.id, 'rechazar', notaRechazo.trim() || undefined);
-      await refrescarDespuesAccion();
+      await loadRetiros();
       Alert.alert('Rechazado', 'Solicitud rechazada y saldo devuelto al usuario.');
     } catch (e: any) {
       Alert.alert('Error', e.message);
@@ -149,17 +227,15 @@ export default function AdminRetirosScreen() {
     }
   };
 
-  // ── Stats siempre calculadas según el filtro activo ──────────────
-  const filtroActivo = FILTROS.find(f => f.key === filtro)!;
-
-  const statsCount = filtro === 'todos' ? retiros.length : retiros.filter(r => r.estado === filtro).length;
-  const statsTotal = retiros
+  const filtroActivo   = FILTROS.find(f => f.key === filtro)!;
+  const statsCount     = retiros.filter(r => filtro === 'todos' || r.estado === filtro).length;
+  const statsTotal     = retiros
     .filter(r => filtro === 'todos' || r.estado === filtro)
     .reduce((s, r) => s + Number(r.monto), 0);
+  const pendientesCount = retiros.filter(r => r.estado === 'pendiente').length;
 
   const statsLabelCount = filtro === 'pendiente' ? 'Solicitudes' : filtro === 'pagado' ? 'Pagados' : filtro === 'rechazado' ? 'Rechazados' : 'Total';
-  const statsLabelTotal = filtro === 'pendiente' ? 'Total MXN' : filtro === 'pagado' ? 'Monto pagado' : filtro === 'rechazado' ? 'Monto rechazado' : 'Monto total';
-  const pendientesCount = retiros.filter(r => r.estado === 'pendiente').length;
+  const statsLabelTotal = filtro === 'pendiente' ? 'Total MXN'   : filtro === 'pagado' ? 'Monto pagado' : filtro === 'rechazado' ? 'Monto rechazado' : 'Monto total';
 
   return (
     <SafeAreaView style={s.container}>
@@ -178,12 +254,9 @@ export default function AdminRetirosScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ── Banner de stats: siempre visible, cambia según filtro ── */}
       <View style={[s.statsBanner, { borderBottomColor: `${filtroActivo.color}30` }]}>
         <View style={s.statBox}>
-          <Text style={[s.statNum, { color: filtroActivo.color }]}>
-            {loading ? '–' : statsCount}
-          </Text>
+          <Text style={[s.statNum, { color: filtroActivo.color }]}>{loading ? '–' : statsCount}</Text>
           <Text style={s.statLbl}>{statsLabelCount}</Text>
         </View>
         <View style={s.statDivider} />
@@ -226,8 +299,7 @@ export default function AdminRetirosScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => { setRefreshing(true); loadRetiros(); }}
-              tintColor="#9B59B6"
-              colors={['#9B59B6']}
+              tintColor="#9B59B6" colors={['#9B59B6']}
             />
           }
           ListEmptyComponent={
@@ -240,11 +312,10 @@ export default function AdminRetirosScreen() {
             </View>
           }
           renderItem={({ item }) => {
-            const cfg = ESTADO_CFG[item.estado] ?? { color: '#FFF', bg: '#1C1F26', emoji: '💰' };
-            const esPend = item.estado === 'pendiente';
-            const pagando = accionando === item.id + '_pagar';
-            const rechazando = accionando === item.id + '_rechazar';
-            const ocupado = pagando || rechazando;
+            const cfg          = ESTADO_CFG[item.estado] ?? { color: '#FFF', bg: '#1C1F26', emoji: '💰' };
+            const esPend       = item.estado === 'pendiente';
+            const rechazando   = accionando === item.id + '_rechazar';
+            const ocupado      = rechazando;
 
             return (
               <View style={s.card}>
@@ -288,6 +359,20 @@ export default function AdminRetirosScreen() {
                     </View>
                   ) : null}
 
+                  {/* Comprobante thumbnail (retiros pagados) */}
+                  {item.comprobante_url ? (
+                    <TouchableOpacity
+                      style={s.comprobanteThumbnailWrap}
+                      onPress={() => { setVisorUrl(item.comprobante_url); setVisorModal(true); }}
+                      activeOpacity={0.8}
+                    >
+                      <Image source={{ uri: item.comprobante_url }} style={s.comprobanteThumbnail} resizeMode="cover" />
+                      <View style={s.comprobanteThumbnailOverlay}>
+                        <Text style={s.comprobanteThumbnailTxt}>🔍 Ver comprobante</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : null}
+
                   {esPend && (
                     <View style={s.acciones}>
                       <TouchableOpacity
@@ -296,15 +381,17 @@ export default function AdminRetirosScreen() {
                         disabled={ocupado}
                         activeOpacity={0.7}
                       >
-                        {rechazando ? <ActivityIndicator color="#E74C3C" size="small" /> : <Text style={s.btnRechazarTxt}>✕ Rechazar</Text>}
+                        {rechazando
+                          ? <ActivityIndicator color="#E74C3C" size="small" />
+                          : <Text style={s.btnRechazarTxt}>✕ Rechazar</Text>}
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[s.btnPagar, ocupado && s.btnDisabled]}
-                        onPress={() => handlePagar(item)}
+                        onPress={() => handleAbrirPago(item)}
                         disabled={ocupado}
                         activeOpacity={0.7}
                       >
-                        {pagando ? <ActivityIndicator color="#000" size="small" /> : <Text style={s.btnPagarTxt}>✓ Ya pagué</Text>}
+                        <Text style={s.btnPagarTxt}>✓ Ya pagué</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -315,8 +402,82 @@ export default function AdminRetirosScreen() {
         />
       )}
 
-      <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
-        <TouchableWithoutFeedback onPress={() => setModalVisible(false)}>
+      {/* ── Modal confirmar pago con comprobante ── */}
+      <Modal visible={modalPago} transparent animationType="slide" onRequestClose={() => !subiendoComp && setModalPago(false)}>
+        <TouchableWithoutFeedback onPress={() => !subiendoComp && setModalPago(false)}>
+          <View style={s.overlay}>
+            <TouchableWithoutFeedback>
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                <View style={s.modalCard}>
+                  <View style={s.modalHandle} />
+                  <Text style={s.modalTitle}>💸 Confirmar pago</Text>
+
+                  <View style={s.modalInfoRow}>
+                    <View style={s.modalAvatarCircle}>
+                      <Text style={s.modalAvatarTxt}>{(retiroPago?.profiles?.username ?? 'U')[0].toUpperCase()}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.modalUser}>@{retiroPago?.profiles?.username}</Text>
+                      <Text style={s.modalMonto}>${Number(retiroPago?.monto ?? 0).toFixed(2)} MXN</Text>
+                      <Text style={s.modalDestino}>
+                        {retiroPago?.metodo === 'spei' ? `🏦 ${retiroPago?.clabe}` : `💳 ${retiroPago?.alias_mp}`}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Subir comprobante */}
+                  <Text style={s.inputLabel}>COMPROBANTE DE TRANSFERENCIA (opcional)</Text>
+                  <TouchableOpacity
+                    style={s.uploadBtn}
+                    onPress={seleccionarComprobante}
+                    disabled={subiendoComp}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.uploadBtnTxt}>
+                      {comprobanteUri ? '🔄 Cambiar imagen' : '📎 Adjuntar comprobante'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {comprobanteUri ? (
+                    <Image
+                      source={{ uri: comprobanteUri }}
+                      style={s.previewImg}
+                      resizeMode="contain"
+                    />
+                  ) : null}
+
+                  <Text style={s.modalNota}>
+                    ⚠️ Solo confirma si ya realizaste la transferencia. Se notificará al usuario automáticamente.
+                  </Text>
+
+                  <View style={s.modalBtns}>
+                    <TouchableOpacity
+                      style={[s.modalCancelBtn, subiendoComp && s.btnDisabled]}
+                      onPress={() => setModalPago(false)}
+                      disabled={subiendoComp}
+                    >
+                      <Text style={s.modalCancelTxt}>Cancelar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.modalConfirmPagoBtn, subiendoComp && s.btnDisabled]}
+                      onPress={handleConfirmarPago}
+                      disabled={subiendoComp}
+                    >
+                      {subiendoComp
+                        ? <ActivityIndicator color="#000" size="small" />
+                        : <Text style={s.modalConfirmPagoTxt}>✓ Confirmar pago</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* ── Modal rechazo ── */}
+      <Modal visible={modalRechazo} transparent animationType="slide" onRequestClose={() => setModalRechazo(false)}>
+        <TouchableWithoutFeedback onPress={() => setModalRechazo(false)}>
           <View style={s.overlay}>
             <TouchableWithoutFeedback>
               <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -344,7 +505,7 @@ export default function AdminRetirosScreen() {
                   />
                   <Text style={s.modalNota}>⚠️ El saldo será devuelto automáticamente al usuario.</Text>
                   <View style={s.modalBtns}>
-                    <TouchableOpacity style={s.modalCancelBtn} onPress={() => setModalVisible(false)}>
+                    <TouchableOpacity style={s.modalCancelBtn} onPress={() => setModalRechazo(false)}>
                       <Text style={s.modalCancelTxt}>Cancelar</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={s.modalConfirmBtn} onPress={handleRechazarConfirmar}>
@@ -357,80 +518,115 @@ export default function AdminRetirosScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* ── Visor comprobante ── */}
+      <Modal visible={visorModal} transparent animationType="fade" onRequestClose={() => setVisorModal(false)}>
+        <TouchableWithoutFeedback onPress={() => setVisorModal(false)}>
+          <View style={s.visorOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={s.visorCard}>
+                <Text style={s.visorTitle}>🧾 Comprobante de retiro</Text>
+                {visorUrl ? (
+                  <Image source={{ uri: visorUrl }} style={s.visorImg} resizeMode="contain" />
+                ) : null}
+                <TouchableOpacity style={s.visorCloseBtn} onPress={() => setVisorModal(false)}>
+                  <Text style={s.visorCloseTxt}>Cerrar</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#080A0F' },
-  centered:         { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1E2128' },
-  backBtn:          { width: 56 },
-  backTxt:          { color: '#9B59B6', fontSize: 15, fontWeight: '600' },
-  headerCenter:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerTitle:      { color: '#FFF', fontSize: 17, fontWeight: 'bold' },
-  badge:            { backgroundColor: '#F39C12', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  badgeTxt:         { color: '#000', fontSize: 11, fontWeight: 'bold' },
-  refreshBtn:       { width: 56, alignItems: 'flex-end' },
-  refreshTxt:       { color: '#606060', fontSize: 22 },
-  statsBanner:      { flexDirection: 'row', backgroundColor: '#0F1116', borderBottomWidth: 1, paddingVertical: 14 },
-  statBox:          { flex: 1, alignItems: 'center' },
-  statNum:          { fontSize: 24, fontWeight: 'bold' },
-  statLbl:          { color: '#505060', fontSize: 11, marginTop: 2, fontWeight: '500' },
-  statDivider:      { width: 1, backgroundColor: '#1E2128', marginVertical: 4 },
-  filtrosWrap:      { borderBottomWidth: 1, borderBottomColor: '#1E2128', paddingVertical: 10 },
-  filtrosRow:       { paddingHorizontal: 14, gap: 8 },
-  filtroPill:       { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 22, backgroundColor: '#12151C', borderWidth: 1, borderColor: '#1E2128' },
-  filtroEmoji:      { fontSize: 13 },
-  filtroTxt:        { color: '#606060', fontSize: 13, fontWeight: '600' },
-  list:             { padding: 14, paddingBottom: 50 },
-  empty:            { alignItems: 'center', paddingTop: 80, gap: 10 },
-  emptyEmoji:       { fontSize: 52 },
-  emptyTitle:       { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  emptySubtitle:    { color: '#505060', fontSize: 13, textAlign: 'center' },
-  card:             { backgroundColor: '#12151C', borderRadius: 18, marginBottom: 14, borderWidth: 1, borderColor: '#1E2128', overflow: 'hidden', flexDirection: 'row' },
-  cardAccent:       { width: 4 },
-  cardBody:         { flex: 1, padding: 16 },
-  row:              { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatarCircle:     { width: 38, height: 38, borderRadius: 19, backgroundColor: '#1C1F28', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2A2D38' },
-  avatarTxt:        { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
-  cardUser:         { color: '#FFF', fontWeight: '700', fontSize: 14 },
-  cardFecha:        { color: '#404050', fontSize: 11, marginTop: 1 },
-  estadoBadge:      { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1 },
-  estadoTxt:        { fontSize: 10, fontWeight: 'bold' },
-  monto:            { color: '#FFF', fontSize: 28, fontWeight: 'bold' },
-  montoMxn:         { color: '#505060', fontSize: 14, paddingBottom: 3 },
-  metodoBadge:      { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
-  metodoBadgeSPEI:  { backgroundColor: 'rgba(52,152,219,0.1)', borderColor: 'rgba(52,152,219,0.3)' },
-  metodoBadgeMP:    { backgroundColor: 'rgba(0,177,234,0.1)', borderColor: 'rgba(0,177,234,0.3)' },
-  metodoTxt:        { fontSize: 12, fontWeight: '700' },
-  destinoBox:       { backgroundColor: '#0A0C12', borderRadius: 10, padding: 10, marginTop: 12, borderWidth: 1, borderColor: '#1E2128' },
-  destinoLabel:     { color: '#404050', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
-  destinoVal:       { color: '#E0E0E0', fontWeight: '600', fontSize: 13 },
-  notaBox:          { backgroundColor: 'rgba(231,76,60,0.07)', borderRadius: 10, padding: 10, marginTop: 10, borderWidth: 1, borderColor: 'rgba(231,76,60,0.2)' },
-  notaLabel:        { color: '#E74C3C', fontSize: 10, fontWeight: '700', marginBottom: 3 },
-  notaVal:          { color: '#C0A0A0', fontSize: 12 },
-  acciones:         { flexDirection: 'row', gap: 10, marginTop: 14 },
-  btnDisabled:      { opacity: 0.4 },
-  btnPagar:         { flex: 2, backgroundColor: '#2ECC71', paddingVertical: 13, borderRadius: 13, alignItems: 'center' },
-  btnPagarTxt:      { color: '#000', fontWeight: 'bold', fontSize: 14 },
-  btnRechazar:      { flex: 1, paddingVertical: 13, borderRadius: 13, alignItems: 'center', borderWidth: 1.5, borderColor: '#E74C3C', backgroundColor: 'rgba(231,76,60,0.07)' },
-  btnRechazarTxt:   { color: '#E74C3C', fontWeight: 'bold', fontSize: 14 },
-  overlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  modalCard:        { backgroundColor: '#12151C', borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 24, paddingTop: 12, borderTopWidth: 1, borderColor: '#1E2128' },
-  modalHandle:      { width: 36, height: 4, backgroundColor: '#2A2D38', borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
-  modalTitle:       { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
-  modalInfoRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#0A0C12', borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#1E2128' },
-  modalAvatarCircle:{ width: 42, height: 42, borderRadius: 21, backgroundColor: '#1C1F28', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2A2D38' },
-  modalAvatarTxt:   { color: '#9B59B6', fontWeight: 'bold', fontSize: 18 },
-  modalUser:        { color: '#FFF', fontWeight: '700', fontSize: 14 },
-  modalMonto:       { color: '#E74C3C', fontWeight: 'bold', fontSize: 16, marginTop: 2 },
-  inputLabel:       { color: '#505060', fontSize: 12, fontWeight: '600', marginBottom: 8 },
-  input:            { backgroundColor: '#0A0C12', borderRadius: 12, borderWidth: 1, borderColor: '#1E2128', color: '#FFF', padding: 12, fontSize: 14, textAlignVertical: 'top', minHeight: 80 },
-  modalNota:        { color: '#505060', fontSize: 12, marginTop: 10, marginBottom: 4 },
-  modalBtns:        { flexDirection: 'row', gap: 12, marginTop: 16 },
-  modalCancelBtn:   { flex: 1, padding: 14, borderRadius: 13, alignItems: 'center', backgroundColor: '#1C1F28', borderWidth: 1, borderColor: '#2A2D38' },
-  modalCancelTxt:   { color: '#707080', fontWeight: 'bold' },
-  modalConfirmBtn:  { flex: 1, padding: 14, borderRadius: 13, alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.15)', borderWidth: 1.5, borderColor: '#E74C3C' },
-  modalConfirmTxt:  { color: '#E74C3C', fontWeight: 'bold' },
+  container:                { flex: 1, backgroundColor: '#080A0F' },
+  centered:                 { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header:                   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1E2128' },
+  backBtn:                  { width: 56 },
+  backTxt:                  { color: '#9B59B6', fontSize: 15, fontWeight: '600' },
+  headerCenter:             { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerTitle:              { color: '#FFF', fontSize: 17, fontWeight: 'bold' },
+  badge:                    { backgroundColor: '#F39C12', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  badgeTxt:                 { color: '#000', fontSize: 11, fontWeight: 'bold' },
+  refreshBtn:               { width: 56, alignItems: 'flex-end' },
+  refreshTxt:               { color: '#606060', fontSize: 22 },
+  statsBanner:              { flexDirection: 'row', backgroundColor: '#0F1116', borderBottomWidth: 1, paddingVertical: 14 },
+  statBox:                  { flex: 1, alignItems: 'center' },
+  statNum:                  { fontSize: 24, fontWeight: 'bold' },
+  statLbl:                  { color: '#505060', fontSize: 11, marginTop: 2, fontWeight: '500' },
+  statDivider:              { width: 1, backgroundColor: '#1E2128', marginVertical: 4 },
+  filtrosWrap:              { borderBottomWidth: 1, borderBottomColor: '#1E2128', paddingVertical: 10 },
+  filtrosRow:               { paddingHorizontal: 14, gap: 8 },
+  filtroPill:               { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 22, backgroundColor: '#12151C', borderWidth: 1, borderColor: '#1E2128' },
+  filtroEmoji:              { fontSize: 13 },
+  filtroTxt:                { color: '#606060', fontSize: 13, fontWeight: '600' },
+  list:                     { padding: 14, paddingBottom: 50 },
+  empty:                    { alignItems: 'center', paddingTop: 80, gap: 10 },
+  emptyEmoji:               { fontSize: 52 },
+  emptyTitle:               { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  emptySubtitle:            { color: '#505060', fontSize: 13, textAlign: 'center' },
+  card:                     { backgroundColor: '#12151C', borderRadius: 18, marginBottom: 14, borderWidth: 1, borderColor: '#1E2128', overflow: 'hidden', flexDirection: 'row' },
+  cardAccent:               { width: 4 },
+  cardBody:                 { flex: 1, padding: 16 },
+  row:                      { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatarCircle:             { width: 38, height: 38, borderRadius: 19, backgroundColor: '#1C1F28', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2A2D38' },
+  avatarTxt:                { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
+  cardUser:                 { color: '#FFF', fontWeight: '700', fontSize: 14 },
+  cardFecha:                { color: '#404050', fontSize: 11, marginTop: 1 },
+  estadoBadge:              { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1 },
+  estadoTxt:                { fontSize: 10, fontWeight: 'bold' },
+  monto:                    { color: '#FFF', fontSize: 28, fontWeight: 'bold' },
+  montoMxn:                 { color: '#505060', fontSize: 14, paddingBottom: 3 },
+  metodoBadge:              { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
+  metodoBadgeSPEI:          { backgroundColor: 'rgba(52,152,219,0.1)', borderColor: 'rgba(52,152,219,0.3)' },
+  metodoBadgeMP:            { backgroundColor: 'rgba(0,177,234,0.1)',   borderColor: 'rgba(0,177,234,0.3)' },
+  metodoTxt:                { fontSize: 12, fontWeight: '700' },
+  destinoBox:               { backgroundColor: '#0A0C12', borderRadius: 10, padding: 10, marginTop: 12, borderWidth: 1, borderColor: '#1E2128' },
+  destinoLabel:             { color: '#404050', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
+  destinoVal:               { color: '#E0E0E0', fontWeight: '600', fontSize: 13 },
+  notaBox:                  { backgroundColor: 'rgba(231,76,60,0.07)', borderRadius: 10, padding: 10, marginTop: 10, borderWidth: 1, borderColor: 'rgba(231,76,60,0.2)' },
+  notaLabel:                { color: '#E74C3C', fontSize: 10, fontWeight: '700', marginBottom: 3 },
+  notaVal:                  { color: '#C0A0A0', fontSize: 12 },
+  comprobanteThumbnailWrap: { marginTop: 12, borderRadius: 10, overflow: 'hidden', height: 80, borderWidth: 1, borderColor: '#2ECC7144' },
+  comprobanteThumbnail:     { width: '100%', height: '100%' },
+  comprobanteThumbnailOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center' },
+  comprobanteThumbnailTxt:  { color: '#FFF', fontSize: 13, fontWeight: '700' },
+  acciones:                 { flexDirection: 'row', gap: 10, marginTop: 14 },
+  btnDisabled:              { opacity: 0.4 },
+  btnPagar:                 { flex: 2, backgroundColor: '#2ECC71', paddingVertical: 13, borderRadius: 13, alignItems: 'center' },
+  btnPagarTxt:              { color: '#000', fontWeight: 'bold', fontSize: 14 },
+  btnRechazar:              { flex: 1, paddingVertical: 13, borderRadius: 13, alignItems: 'center', borderWidth: 1.5, borderColor: '#E74C3C', backgroundColor: 'rgba(231,76,60,0.07)' },
+  btnRechazarTxt:           { color: '#E74C3C', fontWeight: 'bold', fontSize: 14 },
+  overlay:                  { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
+  modalCard:                { backgroundColor: '#12151C', borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 24, paddingTop: 12, borderTopWidth: 1, borderColor: '#1E2128' },
+  modalHandle:              { width: 36, height: 4, backgroundColor: '#2A2D38', borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
+  modalTitle:               { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
+  modalInfoRow:             { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#0A0C12', borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#1E2128' },
+  modalAvatarCircle:        { width: 42, height: 42, borderRadius: 21, backgroundColor: '#1C1F28', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2A2D38' },
+  modalAvatarTxt:           { color: '#9B59B6', fontWeight: 'bold', fontSize: 18 },
+  modalUser:                { color: '#FFF', fontWeight: '700', fontSize: 14 },
+  modalMonto:               { color: '#2ECC71', fontWeight: 'bold', fontSize: 16, marginTop: 2 },
+  modalDestino:             { color: '#606070', fontSize: 12, marginTop: 3 },
+  inputLabel:               { color: '#505060', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  input:                    { backgroundColor: '#0A0C12', borderRadius: 12, borderWidth: 1, borderColor: '#1E2128', color: '#FFF', padding: 12, fontSize: 14, textAlignVertical: 'top', minHeight: 80 },
+  uploadBtn:                { backgroundColor: '#1C1F28', borderRadius: 12, borderWidth: 1, borderColor: '#2A2D38', borderStyle: 'dashed', padding: 14, alignItems: 'center', marginBottom: 10 },
+  uploadBtnTxt:             { color: '#9B59B6', fontWeight: '700', fontSize: 14 },
+  previewImg:               { width: '100%', height: 160, borderRadius: 12, marginBottom: 10, backgroundColor: '#0A0C12' },
+  modalNota:                { color: '#505060', fontSize: 12, marginTop: 4, marginBottom: 4 },
+  modalBtns:                { flexDirection: 'row', gap: 12, marginTop: 16 },
+  modalCancelBtn:           { flex: 1, padding: 14, borderRadius: 13, alignItems: 'center', backgroundColor: '#1C1F28', borderWidth: 1, borderColor: '#2A2D38' },
+  modalCancelTxt:           { color: '#707080', fontWeight: 'bold' },
+  modalConfirmPagoBtn:      { flex: 2, padding: 14, borderRadius: 13, alignItems: 'center', backgroundColor: '#2ECC71' },
+  modalConfirmPagoTxt:      { color: '#000', fontWeight: 'bold', fontSize: 14 },
+  modalConfirmBtn:          { flex: 1, padding: 14, borderRadius: 13, alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.15)', borderWidth: 1.5, borderColor: '#E74C3C' },
+  modalConfirmTxt:          { color: '#E74C3C', fontWeight: 'bold' },
+  visorOverlay:             { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  visorCard:                { width: '100%', backgroundColor: '#12151C', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: '#1E2128', alignItems: 'center' },
+  visorTitle:               { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 14 },
+  visorImg:                 { width: '100%', height: 380, borderRadius: 12, backgroundColor: '#0A0C12', marginBottom: 16 },
+  visorCloseBtn:            { backgroundColor: '#1C1F28', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 32, borderWidth: 1, borderColor: '#2A2D38' },
+  visorCloseTxt:            { color: '#A0A0B0', fontWeight: 'bold' },
 });

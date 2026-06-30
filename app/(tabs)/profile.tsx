@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, Alert, TouchableOpacity,
   ActivityIndicator, RefreshControl, Modal, TextInput,
-  TouchableWithoutFeedback, Image, Platform,
+  TouchableWithoutFeedback, Image, Platform, LayoutAnimation, UIManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -12,6 +12,20 @@ import Badge from '../../src/components/Badge';
 import { AuthService } from '../../src/services/auth.service';
 import { AdminService } from '../../src/services/admin.service';
 import { supabase } from '../../src/config/supabase';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const ESTADO_RETIRO_CFG: Record<string, { color: string; bg: string; border: string; emoji: string; label: string }> = {
+  pendiente: { color: '#F39C12', bg: 'rgba(243,156,18,0.10)',  border: 'rgba(243,156,18,0.3)',  emoji: '⏳', label: 'Pendiente' },
+  pagado:    { color: '#2ECC71', bg: 'rgba(46,204,113,0.10)',  border: 'rgba(46,204,113,0.3)',  emoji: '✅', label: 'Pagado'    },
+  rechazado: { color: '#E74C3C', bg: 'rgba(231,76,60,0.10)',   border: 'rgba(231,76,60,0.3)',   emoji: '❌', label: 'Rechazado' },
+};
+
+function formatFechaCorta(iso: string) {
+  return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+}
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -35,6 +49,32 @@ export default function ProfileScreen() {
     jugadas: 0, ganadas: 0, pctAcierto: 0,
     roi: 0, invertido: 0, ganado: 0, mejorPos: null as number | null,
   });
+
+  // Retiros
+  const [retirosOpen,    setRetirosOpen]    = useState(false);
+  const [retiros,        setRetiros]        = useState<any[]>([]);
+  const [loadingRetiros, setLoadingRetiros] = useState(false);
+  const [visorUrl,       setVisorUrl]       = useState<string | null>(null);
+  const [visorModal,     setVisorModal]     = useState(false);
+
+  const cargarRetiros = useCallback(async (uid: string) => {
+    setLoadingRetiros(true);
+    try {
+      const { data } = await supabase
+        .from('retiro_solicitudes')
+        .select('id, monto, metodo, estado, nota_admin, comprobante_url, created_at')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false });
+      setRetiros(data ?? []);
+    } catch (_) {}
+    finally { setLoadingRetiros(false); }
+  }, []);
+
+  const toggleRetiros = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (!retirosOpen && userId) cargarRetiros(userId);
+    setRetirosOpen(v => !v);
+  };
 
   const loadUserData = useCallback(async () => {
     try {
@@ -113,13 +153,16 @@ export default function ProfileScreen() {
       }
 
       setStats({ jugadas, ganadas, pctAcierto, roi, invertido, ganado, mejorPos });
+
+      // Si la sección de retiros estaba abierta, recargar
+      if (retirosOpen) cargarRetiros(user.id);
     } catch (e: any) {
       console.error(e.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [retirosOpen, cargarRetiros]);
 
   useFocusEffect(useCallback(() => { setLoading(true); loadUserData(); }, [loadUserData]));
 
@@ -154,14 +197,9 @@ export default function ProfileScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-      base64: false,
+      allowsEditing: true, aspect: [1, 1], quality: 0.7, base64: false,
     });
-    if (!result.canceled && result.assets[0]) {
-      setEditAvatar(result.assets[0].uri);
-    }
+    if (!result.canceled && result.assets[0]) setEditAvatar(result.assets[0].uri);
   };
 
   const handleGuardarPerfil = async () => {
@@ -233,58 +271,39 @@ export default function ProfileScreen() {
         bounces
         overScrollMode="always"
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor="#9B59B6"
-            colors={['#9B59B6']}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#9B59B6" colors={['#9B59B6']} />
         }
       >
-        {/* Hero / Avatar */}
+        {/* Hero */}
         <View style={st.heroSection}>
           <View style={st.avatarWrap}>
             <View style={st.avatarNeonRing}>
-              {avatarUrl ? (
-                <Image source={{ uri: avatarUrl }} style={st.avatarImg} />
-              ) : (
-                <View style={st.avatar}>
-                  <Text style={st.avatarTxt}>{initials}</Text>
-                </View>
-              )}
+              {avatarUrl
+                ? <Image source={{ uri: avatarUrl }} style={st.avatarImg} />
+                : <View style={st.avatar}><Text style={st.avatarTxt}>{initials}</Text></View>}
             </View>
             {isAdmin && (
-              <View style={st.adminPill}>
-                <Text style={st.adminPillTxt}>👑 ADMIN</Text>
-              </View>
+              <View style={st.adminPill}><Text style={st.adminPillTxt}>👑 ADMIN</Text></View>
             )}
           </View>
-
           <Text style={st.nombre}>{displayName || username || 'Usuario'}</Text>
           {username ? (
-            <View style={st.usernamePill}>
-              <Text style={st.usernamePillTxt}>@{username}</Text>
-            </View>
+            <View style={st.usernamePill}><Text style={st.usernamePillTxt}>@{username}</Text></View>
           ) : null}
-
           <TouchableOpacity style={st.editBtn} onPress={abrirEditModal}>
             <Text style={st.editBtnTxt}>✏️ Editar perfil</Text>
           </TouchableOpacity>
-
           {!fullName && (
             <TouchableOpacity style={st.alertaRetiro} onPress={abrirEditModal}>
               <Text style={st.alertaRetiroTxt}>⚠️ Agrega tu nombre completo para poder realizar retiros</Text>
             </TouchableOpacity>
           )}
-
           <View style={st.nivelBox}>
             <View style={st.nivelRow}>
               <Text style={st.nivelLabel}>RANGO</Text>
               <Text style={[st.nivelNombre, { textShadowColor: '#9B59B6', textShadowRadius: 8 }]}>{nivel}</Text>
             </View>
-            <View style={st.xpTrack}>
-              <View style={[st.xpFill, { width: `${xpPct}%` }]} />
-            </View>
+            <View style={st.xpTrack}><View style={[st.xpFill, { width: `${xpPct}%` }]} /></View>
             <Text style={st.xpTxt}>{niveXP} / {nextXP} XP</Text>
           </View>
         </View>
@@ -344,6 +363,75 @@ export default function ProfileScreen() {
           </View>
         </ScrollView>
 
+        {/* ── Historial de Retiros ── */}
+        <TouchableOpacity style={st.retirosToggle} onPress={toggleRetiros} activeOpacity={0.8}>
+          <View style={st.retirosToggleLeft}>
+            <Text style={st.retirosToggleIcon}>💸</Text>
+            <Text style={st.retirosToggleTitle}>Mis Retiros</Text>
+          </View>
+          <Text style={st.retirosToggleArrow}>{retirosOpen ? '▲' : '▼'}</Text>
+        </TouchableOpacity>
+
+        {retirosOpen && (
+          <View style={st.retirosContainer}>
+            {loadingRetiros ? (
+              <View style={{ alignItems: 'center', padding: 20 }}>
+                <ActivityIndicator color="#9B59B6" />
+              </View>
+            ) : retiros.length === 0 ? (
+              <View style={st.retirosEmpty}>
+                <Text style={st.retirosEmptyTxt}>Sin retiros registrados</Text>
+              </View>
+            ) : (
+              retiros.map((r) => {
+                const cfg = ESTADO_RETIRO_CFG[r.estado] ?? ESTADO_RETIRO_CFG['pendiente'];
+                return (
+                  <View key={r.id} style={[st.retiroCard, { borderColor: cfg.border }]}>
+                    <View style={st.retiroCardHeader}>
+                      <View style={[st.retiroEstadoBadge, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
+                        <Text style={[st.retiroEstadoTxt, { color: cfg.color }]}>
+                          {cfg.emoji} {cfg.label}
+                        </Text>
+                      </View>
+                      <Text style={st.retiroFecha}>{formatFechaCorta(r.created_at)}</Text>
+                    </View>
+
+                    <View style={st.retiroMontoRow}>
+                      <Text style={st.retiroMonto}>
+                        ${Number(r.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                      </Text>
+                      <Text style={st.retiroMxn}> MXN</Text>
+                      <View style={{ flex: 1 }} />
+                      <View style={[st.retiroMetodoBadge, r.metodo === 'spei' ? st.metodoBadgeSPEI : st.metodoBadgeMP]}>
+                        <Text style={[st.retiroMetodoTxt, r.metodo === 'spei' ? { color: '#3498DB' } : { color: '#00B1EA' }]}>
+                          {r.metodo === 'spei' ? '🏦 SPEI' : '💳 MP'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {r.nota_admin ? (
+                      <View style={st.retiroNotaBox}>
+                        <Text style={st.retiroNotaLabel}>📝 Motivo</Text>
+                        <Text style={st.retiroNotaVal}>{r.nota_admin}</Text>
+                      </View>
+                    ) : null}
+
+                    {r.comprobante_url ? (
+                      <TouchableOpacity
+                        style={st.retiroCompBtn}
+                        onPress={() => { setVisorUrl(r.comprobante_url); setVisorModal(true); }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={st.retiroCompBtnTxt}>🧾 Ver comprobante</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
+
         {/* Panel Admin */}
         {isAdmin && (
           <TouchableOpacity style={st.adminCard} onPress={() => router.push('/admin')}>
@@ -372,26 +460,18 @@ export default function ProfileScreen() {
             <TouchableWithoutFeedback>
               <View style={st.modalCard}>
                 <Text style={st.modalTitle}>✏️ Editar Perfil</Text>
-
                 <View style={st.avatarEditRow}>
                   <TouchableOpacity onPress={pickImage} style={st.avatarEditWrap}>
-                    {editAvatar ? (
-                      <Image source={{ uri: editAvatar }} style={st.avatarEditImg} />
-                    ) : (
-                      <View style={st.avatarEditPlaceholder}>
-                        <Text style={st.avatarEditInitials}>{initials}</Text>
-                      </View>
-                    )}
-                    <View style={st.avatarEditOverlay}>
-                      <Text style={st.avatarEditCamara}>📷</Text>
-                    </View>
+                    {editAvatar
+                      ? <Image source={{ uri: editAvatar }} style={st.avatarEditImg} />
+                      : <View style={st.avatarEditPlaceholder}><Text style={st.avatarEditInitials}>{initials}</Text></View>}
+                    <View style={st.avatarEditOverlay}><Text style={st.avatarEditCamara}>📷</Text></View>
                   </TouchableOpacity>
                   <View style={{ flex: 1 }}>
                     <Text style={st.avatarEditHint}>Toca la foto para cambiarla</Text>
                     <Text style={st.avatarEditSub}>Imagen cuadrada recomendada</Text>
                   </View>
                 </View>
-
                 <Text style={st.inputLabel}>NOMBRE COMPLETO <Text style={{ color: '#E74C3C' }}>*</Text></Text>
                 <TextInput
                   style={st.input}
@@ -402,7 +482,6 @@ export default function ProfileScreen() {
                   autoCapitalize="words"
                 />
                 <Text style={st.inputHint}>Requerido para procesar retiros 💸</Text>
-
                 <Text style={[st.inputLabel, { marginTop: 14 }]}>USUARIO</Text>
                 <View style={st.inputUsernameWrap}>
                   <Text style={st.inputPrefix}>@</Text>
@@ -415,7 +494,6 @@ export default function ProfileScreen() {
                     autoCapitalize="none"
                   />
                 </View>
-
                 <View style={st.modalBtns}>
                   <TouchableOpacity style={st.cancelBtn} onPress={() => setEditModal(false)} disabled={saving}>
                     <Text style={st.cancelBtnTxt}>Cancelar</Text>
@@ -424,6 +502,25 @@ export default function ProfileScreen() {
                     {saving ? <ActivityIndicator color="#000" /> : <Text style={st.saveBtnTxt}>Guardar</Text>}
                   </TouchableOpacity>
                 </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Visor comprobante retiro */}
+      <Modal visible={visorModal} transparent animationType="fade" onRequestClose={() => setVisorModal(false)}>
+        <TouchableWithoutFeedback onPress={() => setVisorModal(false)}>
+          <View style={st.visorOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={st.visorCard}>
+                <Text style={st.visorTitle}>🧾 Comprobante de retiro</Text>
+                {visorUrl ? (
+                  <Image source={{ uri: visorUrl }} style={st.visorImg} resizeMode="contain" />
+                ) : null}
+                <TouchableOpacity style={st.visorCloseBtn} onPress={() => setVisorModal(false)}>
+                  <Text style={st.visorCloseTxt}>Cerrar</Text>
+                </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -473,6 +570,33 @@ const st = StyleSheet.create({
   sectionHeader:         { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
   sectionLine:           { flex: 1, height: 1, backgroundColor: '#1E2330' },
   sectionTitle:          { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3 },
+  // Retiros
+  retirosToggle:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#0D1117', borderRadius: 14, padding: 16, marginBottom: 4, borderWidth: 1, borderColor: '#1E2330' },
+  retirosToggleLeft:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  retirosToggleIcon:     { fontSize: 20 },
+  retirosToggleTitle:    { color: '#FFF', fontSize: 15, fontWeight: '700' },
+  retirosToggleArrow:    { color: '#9B59B6', fontSize: 14, fontWeight: 'bold' },
+  retirosContainer:      { marginBottom: 20, gap: 10 },
+  retirosEmpty:          { alignItems: 'center', paddingVertical: 20 },
+  retirosEmptyTxt:       { color: '#505060', fontSize: 13 },
+  retiroCard:            { backgroundColor: '#0D1117', borderRadius: 14, padding: 14, borderWidth: 1 },
+  retiroCardHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  retiroEstadoBadge:     { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1 },
+  retiroEstadoTxt:       { fontSize: 11, fontWeight: 'bold' },
+  retiroFecha:           { color: '#404050', fontSize: 11 },
+  retiroMontoRow:        { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 8 },
+  retiroMonto:           { color: '#FFF', fontSize: 22, fontWeight: 'bold' },
+  retiroMxn:             { color: '#505060', fontSize: 13, paddingBottom: 2 },
+  retiroMetodoBadge:     { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1 },
+  metodoBadgeSPEI:       { backgroundColor: 'rgba(52,152,219,0.1)', borderColor: 'rgba(52,152,219,0.3)' },
+  metodoBadgeMP:         { backgroundColor: 'rgba(0,177,234,0.1)',   borderColor: 'rgba(0,177,234,0.3)' },
+  retiroMetodoTxt:       { fontSize: 11, fontWeight: '700' },
+  retiroNotaBox:         { backgroundColor: 'rgba(231,76,60,0.07)', borderRadius: 8, padding: 8, marginTop: 4, borderWidth: 1, borderColor: 'rgba(231,76,60,0.2)', marginBottom: 6 },
+  retiroNotaLabel:       { color: '#E74C3C', fontSize: 10, fontWeight: '700', marginBottom: 2 },
+  retiroNotaVal:         { color: '#C0A0A0', fontSize: 12 },
+  retiroCompBtn:         { marginTop: 8, backgroundColor: '#1C1F28', borderRadius: 10, padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#2A2D38' },
+  retiroCompBtnTxt:      { color: '#9B59B6', fontWeight: '700', fontSize: 13 },
+  // Admin card
   adminCard:             { backgroundColor: '#0D1117', borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden', shadowColor: '#FFD700', shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
   adminCardNeonLine:     { height: 2, backgroundColor: '#FFD700', shadowColor: '#FFD700', shadowOpacity: 1, shadowRadius: 8 },
   adminCardBody:         { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 14 },
@@ -481,6 +605,7 @@ const st = StyleSheet.create({
   adminCardArrow:        { color: '#FFD700', fontSize: 24 },
   signOutBtn:            { marginTop: 8, padding: 15, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(231,76,60,0.4)', alignItems: 'center', backgroundColor: 'rgba(231,76,60,0.05)', shadowColor: '#E74C3C', shadowOpacity: 0.2, shadowRadius: 8 },
   signOutTxt:            { color: '#E74C3C', fontWeight: 'bold', fontSize: 15, letterSpacing: 1 },
+  // Modal editar perfil
   modalOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   modalCard:             { backgroundColor: '#15181F', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, borderTopWidth: 1, borderColor: '#2A2D35', gap: 2 },
   modalTitle:            { color: '#FFF', fontSize: 19, fontWeight: 'bold', marginBottom: 18 },
@@ -503,4 +628,11 @@ const st = StyleSheet.create({
   cancelBtnTxt:          { color: '#A0A0A0', fontWeight: 'bold' },
   saveBtn:               { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#9B59B6' },
   saveBtnTxt:            { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  // Visor comprobante
+  visorOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  visorCard:             { width: '100%', backgroundColor: '#12151C', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: '#1E2128', alignItems: 'center' },
+  visorTitle:            { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 14 },
+  visorImg:              { width: '100%', height: 380, borderRadius: 12, backgroundColor: '#0A0C12', marginBottom: 16 },
+  visorCloseBtn:         { backgroundColor: '#1C1F28', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 32, borderWidth: 1, borderColor: '#2A2D38' },
+  visorCloseTxt:         { color: '#A0A0B0', fontWeight: 'bold' },
 });

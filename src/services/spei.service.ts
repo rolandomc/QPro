@@ -101,6 +101,30 @@ export const SpeiService = {
       monto,
     );
 
+    // Notificar al usuario según resultado
+    if (result.valid) {
+      await SpeiService.notificarUsuario(
+        participacionId,
+        'spei_aprobado',
+        '✅ Pago confirmado',
+        'Tu transferencia SPEI fue validada exitosamente. ¡Ya estás dentro de la quiniela!',
+      );
+    } else if (result.errorMsg?.toLowerCase().includes('manual') || result.missingFields?.length) {
+      await SpeiService.notificarUsuario(
+        participacionId,
+        'spei_revision',
+        '⏳ Comprobante en revisión',
+        'No pudimos validar tu comprobante automáticamente. Un administrador lo revisará en breve (15–60 min).',
+      );
+    } else {
+      await SpeiService.notificarUsuario(
+        participacionId,
+        'spei_rechazado',
+        '❌ Comprobante rechazado',
+        result.errorMsg ?? 'Tu comprobante no pudo ser validado. Contacta a soporte si crees que es un error.',
+      );
+    }
+
     // Si falló, notificar al admin (la Edge Function ya guardó el error en BD)
     if (!result.valid) {
       await SpeiService.notificarAdmin(
@@ -110,6 +134,31 @@ export const SpeiService = {
     }
 
     return result;
+  },
+
+  async notificarUsuario(
+    participacionId: string,
+    tipo: 'spei_aprobado' | 'spei_rechazado' | 'spei_revision',
+    titulo: string,
+    mensaje: string,
+  ): Promise<void> {
+    // Obtener user_id de la participación
+    const { data: part } = await supabase
+      .from('participaciones')
+      .select('user_id')
+      .eq('id', participacionId)
+      .single();
+    if (!part?.user_id) return;
+
+    await supabase.from('user_notificaciones').insert({
+      user_id:          part.user_id,
+      tipo,
+      titulo,
+      mensaje,
+      participacion_id: participacionId,
+      leida:            false,
+      created_at:       new Date().toISOString(),
+    });
   },
 
   async marcarPendienteRevision(participacionId: string, motivo?: string): Promise<void> {

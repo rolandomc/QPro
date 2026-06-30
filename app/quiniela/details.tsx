@@ -254,7 +254,6 @@ export default function QuinielaDetailsScreen() {
     try {
       const url = await SpeiService.subirComprobante(partId);
       if (!url) {
-        // Usuario canceló el picker
         setConfirmState('speiDatos');
         return;
       }
@@ -690,6 +689,7 @@ export default function QuinielaDetailsScreen() {
       <FlatList
         data={partidos}
         keyExtractor={(item) => item.id}
+        style={{ flex: 1 }}
         contentContainerStyle={styles.list}
         refreshControl={
           yaParticipo ? (

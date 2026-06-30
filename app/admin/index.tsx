@@ -23,6 +23,7 @@ function formatFecha(iso: string) {
 }
 
 type FiltroEstado = 'todas' | 'abierta' | 'cerrada' | 'finalizada' | 'nula';
+type FiltroSPEI   = 'todos' | 'pendiente_revision' | 'spei_pendiente' | 'pagado';
 
 const FILTROS: { key: FiltroEstado; label: string; color: string }[] = [
   { key: 'todas',     label: 'Todas',     color: '#9B59B6' },
@@ -30,6 +31,13 @@ const FILTROS: { key: FiltroEstado; label: string; color: string }[] = [
   { key: 'cerrada',  label: 'Cerradas',  color: '#3498DB' },
   { key: 'finalizada', label: 'Canceladas', color: '#E74C3C' },
   { key: 'nula',     label: 'Nulas',     color: '#A0A0A0' },
+];
+
+const FILTROS_SPEI: { key: FiltroSPEI; label: string; color: string }[] = [
+  { key: 'todos',              label: 'Todos',            color: '#9B59B6' },
+  { key: 'spei_pendiente',     label: '⏳ Por revisar',   color: '#F39C12' },
+  { key: 'pendiente_revision', label: '👁 Rev. manual',   color: '#3498DB' },
+  { key: 'pagado',             label: '✅ Aprobados',     color: '#2ECC71' },
 ];
 
 export default function AdminDashboardScreen() {
@@ -48,32 +56,28 @@ export default function AdminDashboardScreen() {
   const [pickerVisible,        setPickerVisible]        = useState(false);
   const [retirosPendientes,    setRetirosPendientes]    = useState(0);
 
-  // ── Filtro de quinielas ───────────────────────────────────────────
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('todas');
 
-  // ── Comprobantes SPEI pendientes ──────────────────────────────────
-  const [speiPendientes,       setSpeiPendientes]       = useState<any[]>([]);
+  // ── Comprobantes SPEI ─────────────────────────────────────────────────────
+  const [todosSpei,            setTodosSpei]            = useState<any[]>([]);
+  const [filtroSPEI,           setFiltroSPEI]           = useState<FiltroSPEI>('todos');
   const [speiExpanded,         setSpeiExpanded]         = useState(false);
   const [aprobandoId,          setAprobandoId]          = useState<string | null>(null);
 
-  // ── Retiros inline ────────────────────────────────────────────────
+  // ── Retiros inline ────────────────────────────────────────────────────────
   const [retirosExpanded,      setRetirosExpanded]      = useState(false);
   const [retirosData,          setRetirosData]          = useState<any[]>([]);
   const [loadingRetiros,       setLoadingRetiros]       = useState(false);
   const [accionandoRetiro,     setAccionandoRetiro]     = useState<string | null>(null);
 
-  // Navegación segura: evita que router.back() falle si no hay historial
   const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/(tabs)');
-    }
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)');
   };
 
   const loadQuinielas = useCallback(async () => {
     try {
-      const [data, fecha, { count }, { data: speiData }] = await Promise.all([
+      const [data, fecha, { count }] = await Promise.all([
         AdminService.getQuinielas(),
         QuinielasService.getProximaFecha(),
         supabase
@@ -81,31 +85,34 @@ export default function AdminDashboardScreen() {
           .select('id', { count: 'exact', head: true })
           .eq('estado', 'pendiente')
           .then(r => ({ count: r.count ?? 0 })),
-        supabase
-          .from('participaciones')
-          .select('id, user_id, monto_pagado, clave_rastreo, comprobante_url, comprobante_enviado_at, ultimo_error_spei, created_at, quiniela_id')
-          .eq('estado', 'spei_pendiente')
-          .eq('comprobante_validado', false)
-          .not('comprobante_url', 'is', null)
-          .order('comprobante_enviado_at', { ascending: true }),
       ]);
       setQuinielas(data || []);
       setProximaFecha(fecha ?? '');
       setRetirosPendientes(count);
 
+      // Cargar TODOS los pagos SPEI (pendientes + aprobados + revisión manual)
+      const { data: speiData } = await supabase
+        .from('participaciones')
+        .select('id, user_id, monto_pagado, clave_rastreo, comprobante_url, comprobante_enviado_at, ultimo_error_spei, created_at, quiniela_id, estado, comprobante_validado, spei_datos_ocr')
+        .in('estado', ['spei_pendiente', 'pendiente_revision', 'pagado'])
+        .not('comprobante_url', 'is', null)
+        .order('comprobante_enviado_at', { ascending: false });
+
       const parts = speiData || [];
       if (parts.length > 0) {
-        const userIds = parts.map((p: any) => p.user_id);
+        const userIds = [...new Set(parts.map((p: any) => p.user_id))];
         const { data: profs } = await supabase
           .from('profiles')
           .select('id, username')
           .in('id', userIds);
         const profsMap: Record<string, string> = {};
         (profs || []).forEach((p: any) => { profsMap[p.id] = p.username; });
-        setSpeiPendientes(parts.map((p: any) => ({ ...p, username: profsMap[p.user_id] ?? 'usuario' })));
-        if (parts.length > 0) setSpeiExpanded(true);
+        const enriched = parts.map((p: any) => ({ ...p, username: profsMap[p.user_id] ?? 'usuario' }));
+        setTodosSpei(enriched);
+        const pendientes = enriched.filter((p: any) => ['spei_pendiente', 'pendiente_revision'].includes(p.estado));
+        if (pendientes.length > 0) setSpeiExpanded(true);
       } else {
-        setSpeiPendientes([]);
+        setTodosSpei([]);
       }
     } catch (e: any) {
       Alert.alert('Error', e.message);
@@ -117,14 +124,19 @@ export default function AdminDashboardScreen() {
 
   useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
 
-  // ── Quinielas filtradas ───────────────────────────────────────────
   const quinielasFiltradas = filtroEstado === 'todas'
     ? quinielas
     : filtroEstado === 'nula'
       ? quinielas.filter(q => !q.estado || q.estado === 'nula')
       : quinielas.filter(q => q.estado === filtroEstado);
 
-  // ── Cargar retiros al expandir ────────────────────────────────────
+  // Filtro SPEI aplicado
+  const speiFiltrados = filtroSPEI === 'todos'
+    ? todosSpei
+    : todosSpei.filter(p => p.estado === filtroSPEI);
+
+  const speiPendientesCount = todosSpei.filter(p => ['spei_pendiente', 'pendiente_revision'].includes(p.estado)).length;
+
   const handleToggleRetiros = async () => {
     const next = !retirosExpanded;
     setRetirosExpanded(next);
@@ -213,7 +225,6 @@ export default function AdminDashboardScreen() {
     );
   };
 
-  // ── Aprobar comprobante SPEI ──────────────────────────────────────
   const handleAprobarSPEI = (item: any) => {
     Alert.alert(
       '✅ Aprobar Pago',
@@ -240,7 +251,10 @@ export default function AdminDashboardScreen() {
                 .from('admin_notificaciones')
                 .update({ leida: true })
                 .eq('participacion_id', item.id);
-              setSpeiPendientes(prev => prev.filter(p => p.id !== item.id));
+              setTodosSpei(prev => prev.map(p => p.id === item.id
+                ? { ...p, estado: 'pagado', comprobante_validado: true }
+                : p
+              ));
               Alert.alert('¡Aprobado!', `El pago de @${item.username} fue confirmado.`);
             } catch (e: any) {
               Alert.alert('Error', e.message);
@@ -338,6 +352,17 @@ export default function AdminDashboardScreen() {
   const getEstadoPartColor = (e: string) => ({ pagado: '#2ECC71', pendiente: '#F39C12', ganador: '#9B59B6', perdedor: '#E74C3C' }[e] ?? '#A0A0A0');
   const totalBolsa = quinielas.reduce((acc, q) => acc + (q.premio_total ?? 0), 0);
 
+  const speiEstadoColor = (estado: string) => {
+    if (estado === 'pagado') return '#2ECC71';
+    if (estado === 'pendiente_revision') return '#3498DB';
+    return '#F39C12';
+  };
+  const speiEstadoLabel = (estado: string) => {
+    if (estado === 'pagado') return '✅ Aprobado';
+    if (estado === 'pendiente_revision') return '👁 Rev. manual';
+    return '⏳ Pendiente';
+  };
+
   if (loading) return (
     <SafeAreaView style={styles.container}>
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -372,9 +397,9 @@ export default function AdminDashboardScreen() {
           </View>
         </View>
 
-        {/* ── Comprobantes SPEI pendientes ── */}
+        {/* ── Comprobantes SPEI ── */}
         <TouchableOpacity
-          style={[styles.speiHeader, speiPendientes.length > 0 && styles.speiHeaderAlert]}
+          style={[styles.speiHeader, speiPendientesCount > 0 && styles.speiHeaderAlert]}
           onPress={() => setSpeiExpanded(v => !v)}
         >
           <View style={styles.speiHeaderLeft}>
@@ -382,16 +407,16 @@ export default function AdminDashboardScreen() {
             <View>
               <Text style={styles.speiHeaderTitle}>Comprobantes SPEI</Text>
               <Text style={styles.speiHeaderSub}>
-                {speiPendientes.length > 0
-                  ? `${speiPendientes.length} pago${speiPendientes.length > 1 ? 's' : ''} por revisar`
-                  : 'Sin pagos pendientes'}
+                {speiPendientesCount > 0
+                  ? `${speiPendientesCount} por revisar · ${todosSpei.filter(p => p.estado === 'pagado').length} aprobados`
+                  : `${todosSpei.filter(p => p.estado === 'pagado').length} aprobados · sin pendientes`}
               </Text>
             </View>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {speiPendientes.length > 0 && (
+            {speiPendientesCount > 0 && (
               <View style={styles.speiBadge}>
-                <Text style={styles.speiBadgeCount}>{speiPendientes.length}</Text>
+                <Text style={styles.speiBadgeCount}>{speiPendientesCount}</Text>
               </View>
             )}
             <Text style={styles.speiChevron}>{speiExpanded ? '▲' : '▼'}</Text>
@@ -400,52 +425,104 @@ export default function AdminDashboardScreen() {
 
         {speiExpanded && (
           <View style={styles.speiList}>
-            {speiPendientes.length === 0 ? (
-              <Text style={styles.speiEmpty}>✅ Todos los comprobantes están al día.</Text>
+            {/* Filtros SPEI */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 8 }}>
+              {FILTROS_SPEI.map(f => {
+                const activo = filtroSPEI === f.key;
+                const cnt = f.key === 'todos' ? todosSpei.length : todosSpei.filter(p => p.estado === f.key).length;
+                return (
+                  <TouchableOpacity
+                    key={f.key}
+                    style={[styles.filtroPill, activo && { backgroundColor: f.color, borderColor: f.color }, !activo && { borderColor: f.color }]}
+                    onPress={() => setFiltroSPEI(f.key)}
+                  >
+                    <Text style={[styles.filtroPillText, { color: activo ? '#000' : f.color }]}>{f.label}</Text>
+                    <View style={[styles.filtroCount, activo ? { backgroundColor: 'rgba(0,0,0,0.2)' } : { backgroundColor: `${f.color}22` }]}>
+                      <Text style={[styles.filtroCountText, { color: activo ? '#000' : f.color }]}>{cnt}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {speiFiltrados.length === 0 ? (
+              <Text style={styles.speiEmpty}>✅ Sin registros para este filtro.</Text>
             ) : (
-              speiPendientes.map((item) => (
-                <View key={item.id} style={styles.speiCard}>
-                  <View style={styles.speiCardHeader}>
-                    <Text style={styles.speiUser}>@{item.username}</Text>
-                    <Text style={styles.speiMonto}>${item.monto_pagado || '?'}</Text>
-                  </View>
-                  {item.clave_rastreo ? (
-                    <Text style={styles.speiClave}>🔑 {item.clave_rastreo}</Text>
-                  ) : (
-                    <Text style={styles.speiClaveNull}>⚠️ Sin clave de rastreo</Text>
-                  )}
-                  {item.ultimo_error_spei ? (
-                    <Text style={styles.speiError} numberOfLines={2}>{item.ultimo_error_spei}</Text>
-                  ) : null}
-                  <Text style={styles.speiDate}>
-                    {item.comprobante_enviado_at ? formatDisplay(item.comprobante_enviado_at) : ''}
-                  </Text>
-                  <View style={styles.speiActions}>
-                    {item.comprobante_url ? (
-                      <TouchableOpacity
-                        style={styles.speiVerBtn}
-                        onPress={() => Linking.openURL(item.comprobante_url)}
-                      >
-                        <Text style={styles.speiVerText}>🖼 Ver comprobante</Text>
-                      </TouchableOpacity>
+              speiFiltrados.map((item) => {
+                // Parsear datos OCR si existen
+                let ocrData: Record<string, any> | null = null;
+                if (item.spei_datos_ocr) {
+                  try { ocrData = typeof item.spei_datos_ocr === 'string' ? JSON.parse(item.spei_datos_ocr) : item.spei_datos_ocr; } catch (_) {}
+                }
+                const yaAprobado = item.estado === 'pagado';
+                return (
+                  <View key={item.id} style={[styles.speiCard, yaAprobado && { borderColor: '#2ECC7144' }]}>
+                    <View style={styles.speiCardHeader}>
+                      <Text style={styles.speiUser}>@{item.username}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.speiMonto}>${item.monto_pagado || '?'}</Text>
+                        <View style={[styles.speiEstadoBadge, { borderColor: speiEstadoColor(item.estado) }]}>
+                          <Text style={[styles.speiEstadoTxt, { color: speiEstadoColor(item.estado) }]}>{speiEstadoLabel(item.estado)}</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {item.clave_rastreo ? (
+                      <Text style={styles.speiClave}>🔑 {item.clave_rastreo}</Text>
+                    ) : (
+                      <Text style={styles.speiClaveNull}>⚠️ Sin clave de rastreo</Text>
+                    )}
+
+                    {item.ultimo_error_spei ? (
+                      <Text style={styles.speiError} numberOfLines={2}>{item.ultimo_error_spei}</Text>
                     ) : null}
-                    <TouchableOpacity
-                      style={[styles.speiAprobarBtn, aprobandoId === item.id && { opacity: 0.6 }]}
-                      onPress={() => handleAprobarSPEI(item)}
-                      disabled={aprobandoId === item.id}
-                    >
-                      {aprobandoId === item.id
-                        ? <ActivityIndicator size="small" color="#000" />
-                        : <Text style={styles.speiAprobarText}>✅ Aprobar</Text>}
-                    </TouchableOpacity>
+
+                    {/* Datos OCR extraídos por la API */}
+                    {ocrData && (
+                      <View style={styles.ocrBox}>
+                        <Text style={styles.ocrTitle}>📊 Datos extraídos por OCR</Text>
+                        {Object.entries(ocrData).map(([k, v]) => (
+                          <View key={k} style={styles.ocrRow}>
+                            <Text style={styles.ocrKey}>{k}</Text>
+                            <Text style={styles.ocrVal} numberOfLines={1}>{String(v)}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    <Text style={styles.speiDate}>
+                      {item.comprobante_enviado_at ? formatDisplay(item.comprobante_enviado_at) : ''}
+                    </Text>
+
+                    <View style={styles.speiActions}>
+                      {item.comprobante_url ? (
+                        <TouchableOpacity
+                          style={styles.speiVerBtn}
+                          onPress={() => Linking.openURL(item.comprobante_url)}
+                        >
+                          <Text style={styles.speiVerText}>🖼 Ver comprobante</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {!yaAprobado && (
+                        <TouchableOpacity
+                          style={[styles.speiAprobarBtn, aprobandoId === item.id && { opacity: 0.6 }]}
+                          onPress={() => handleAprobarSPEI(item)}
+                          disabled={aprobandoId === item.id}
+                        >
+                          {aprobandoId === item.id
+                            ? <ActivityIndicator size="small" color="#000" />
+                            : <Text style={styles.speiAprobarText}>✅ Aprobar</Text>}
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   </View>
-                </View>
-              ))
+                );
+              })
             )}
           </View>
         )}
 
-        {/* ── Gestionar Retiros (acordeón) ── */}
+        {/* ── Gestionar Retiros ── */}
         <TouchableOpacity
           style={[styles.retirosBtn, retirosPendientes > 0 && styles.retirosBtnAlert]}
           onPress={handleToggleRetiros}
@@ -479,9 +556,9 @@ export default function AdminDashboardScreen() {
               <Text style={styles.retirosEmpty}>🎉 Sin retiros pendientes por procesar.</Text>
             ) : (
               retirosData.map((item) => {
-                const pagando   = accionandoRetiro === item.id + '_pagar';
+                const pagando    = accionandoRetiro === item.id + '_pagar';
                 const rechazando = accionandoRetiro === item.id + '_rechazar';
-                const ocupado   = pagando || rechazando;
+                const ocupado    = pagando || rechazando;
                 return (
                   <View key={item.id} style={styles.retiroCard}>
                     <View style={styles.retiroCardHeader}>
@@ -529,7 +606,6 @@ export default function AdminDashboardScreen() {
                 );
               })
             )}
-            {/* Botón para ir a la pantalla completa */}
             <TouchableOpacity style={styles.retirosVerTodosBtn} onPress={() => router.push('/admin/retiros')}>
               <Text style={styles.retirosVerTodosTxt}>Ver todos los retiros →</Text>
             </TouchableOpacity>
@@ -569,7 +645,7 @@ export default function AdminDashboardScreen() {
           <Text style={styles.createBtnText}>+ Diseñar Nueva Quiniela</Text>
         </TouchableOpacity>
 
-        {/* ── Sección Quinielas con filtros ── */}
+        {/* Quinielas con filtros */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Quinielas</Text>
           <Text style={styles.sectionCount}>
@@ -577,12 +653,7 @@ export default function AdminDashboardScreen() {
           </Text>
         </View>
 
-        {/* Filtros */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filtrosContainer}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtrosContainer}>
           {FILTROS.map(f => {
             const activo = filtroEstado === f.key;
             const count = f.key === 'todas'
@@ -593,16 +664,10 @@ export default function AdminDashboardScreen() {
             return (
               <TouchableOpacity
                 key={f.key}
-                style={[
-                  styles.filtroPill,
-                  activo && { backgroundColor: f.color, borderColor: f.color },
-                  !activo && { borderColor: f.color },
-                ]}
+                style={[styles.filtroPill, activo && { backgroundColor: f.color, borderColor: f.color }, !activo && { borderColor: f.color }]}
                 onPress={() => setFiltroEstado(f.key)}
               >
-                <Text style={[styles.filtroPillText, { color: activo ? '#000' : f.color }]}>
-                  {f.label}
-                </Text>
+                <Text style={[styles.filtroPillText, { color: activo ? '#000' : f.color }]}>{f.label}</Text>
                 <View style={[styles.filtroCount, activo ? { backgroundColor: 'rgba(0,0,0,0.2)' } : { backgroundColor: `${f.color}22` }]}>
                   <Text style={[styles.filtroCountText, { color: activo ? '#000' : f.color }]}>{count}</Text>
                 </View>
@@ -614,9 +679,7 @@ export default function AdminDashboardScreen() {
         {quinielasFiltradas.length === 0 && (
           <View style={styles.emptyBox}>
             <Text style={styles.emptyText}>
-              {quinielas.length === 0
-                ? 'No hay quinielas creadas aún.'
-                : `No hay quinielas con estado "${filtroEstado}".`}
+              {quinielas.length === 0 ? 'No hay quinielas creadas aún.' : `No hay quinielas con estado "${filtroEstado}".`}
             </Text>
           </View>
         )}
@@ -726,7 +789,6 @@ const styles = StyleSheet.create({
   statValue:            { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
   statLabel:            { color: '#A0A0A0', fontSize: 12 },
 
-  // ── SPEI pendientes ──
   speiHeader:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: '#2A2D35' },
   speiHeaderAlert:      { borderColor: '#2ECC71' },
   speiHeaderLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -742,6 +804,8 @@ const styles = StyleSheet.create({
   speiCardHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   speiUser:             { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
   speiMonto:            { color: '#2ECC71', fontWeight: 'bold', fontSize: 16 },
+  speiEstadoBadge:      { borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  speiEstadoTxt:        { fontSize: 10, fontWeight: 'bold' },
   speiClave:            { color: '#A0A0A0', fontSize: 11, marginBottom: 4, fontFamily: 'monospace' },
   speiClaveNull:        { color: '#F39C12', fontSize: 11, marginBottom: 4 },
   speiError:            { color: '#E74C3C', fontSize: 10, marginBottom: 4, fontStyle: 'italic' },
@@ -752,7 +816,13 @@ const styles = StyleSheet.create({
   speiAprobarBtn:       { flex: 1, backgroundColor: '#2ECC71', paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
   speiAprobarText:      { color: '#000', fontSize: 12, fontWeight: 'bold' },
 
-  // ── Retiros acordeón ──
+  // OCR data box
+  ocrBox:               { backgroundColor: '#12151C', borderRadius: 8, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: '#2A2D35', gap: 4 },
+  ocrTitle:             { color: '#9B59B6', fontSize: 11, fontWeight: 'bold', marginBottom: 4 },
+  ocrRow:               { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  ocrKey:               { color: '#505050', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', flex: 1 },
+  ocrVal:               { color: '#E0E0E0', fontSize: 10, fontWeight: '600', flex: 2, textAlign: 'right' },
+
   retirosBtn:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: '#2A2D35' },
   retirosBtnAlert:      { borderColor: '#F39C12' },
   retirosBtnLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -809,7 +879,6 @@ const styles = StyleSheet.create({
   neonBorderPurple:     { borderColor: '#9B59B6', backgroundColor: 'rgba(155,89,182,0.1)' },
   createBtnText:        { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
 
-  // ── Sección quinielas header + filtros ──
   sectionHeaderRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   sectionTitle:         { color: '#A0A0A0', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   sectionCount:         { color: '#505050', fontSize: 12 },

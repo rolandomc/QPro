@@ -6,8 +6,10 @@
  *  2. Usuario sube el comprobante (imagen)
  *  3. apiCEP hace OCR automático → extrae clave de rastreo → valida contra Banxico
  *     Si OCR falla → queda en revisión manual (admin lo aprueba)
+ *  4. Mientras estado = spei_pendiente/pendiente_revision, se hace polling
+ *     y al detectar estado=pagado → pantalla de éxito; rechazado → error.
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   Alert, ActivityIndicator, Image, Clipboard, Platform,
@@ -15,11 +17,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SpeiService } from '../../src/services/spei.service';
+import { supabase } from '../../src/config/supabase';
 
 type PantallaEstado =
   | 'instrucciones'
   | 'comprobante'
   | 'validando'
+  | 'esperando'     // OCR pasó, esperando confirmación admin o validación final
   | 'exito'
   | 'pendiente'
   | 'error';
@@ -36,8 +40,40 @@ export default function PagoSPEI() {
   const [comprobanteUrl, setComprobanteUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg]             = useState('');
   const [subiendoImg, setSubiendoImg]       = useState(false);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const montoNum = parseFloat(monto ?? '0');
+
+  // ─── Polling: detecta cuando admin aprueba/rechaza o validación automática ───
+  const iniciarPolling = useCallback(() => {
+    if (pollingRef.current) return;
+    pollingRef.current = setInterval(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('participaciones')
+          .select('estado, comprobante_validado, ultimo_error_spei')
+          .eq('id', participacion_id)
+          .single();
+        if (error || !data) return;
+        if (data.estado === 'pagado' && data.comprobante_validado) {
+          clearInterval(pollingRef.current!);
+          pollingRef.current = null;
+          setEstado('exito');
+        } else if (data.estado === 'rechazado') {
+          clearInterval(pollingRef.current!);
+          pollingRef.current = null;
+          setErrorMsg(data.ultimo_error_spei ?? 'Tu pago fue rechazado.');
+          setEstado('error');
+        }
+      } catch (_) {}
+    }, 5000);
+  }, [participacion_id]);
+
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, []);
 
   // ─── Paso 1 → 2 ─────────────────────────────────────────────────────────
   const irASubirComprobante = useCallback(async () => {
@@ -71,10 +107,14 @@ export default function PagoSPEI() {
 
     setEstado('validando');
     try {
-      // Se pasa la URL del comprobante — apiCEP hace OCR y extrae la clave automáticamente
       const result = await SpeiService.validarYConfirmar(participacion_id, comprobanteUrl, montoNum);
       if (result.valid) {
+        // Aprobado automáticamente por OCR+Banxico
         setEstado('exito');
+      } else if (result.pendienteRevision) {
+        // OCR no pudo leer → queda en revisión manual → polling espera aprobación admin
+        setEstado('esperando');
+        iniciarPolling();
       } else {
         setErrorMsg(result.errorMsg ?? 'No se pudo validar el comprobante');
         setEstado('error');
@@ -83,7 +123,7 @@ export default function PagoSPEI() {
       setErrorMsg(e.message);
       setEstado('error');
     }
-  }, [comprobanteUrl, participacion_id, montoNum]);
+  }, [comprobanteUrl, participacion_id, montoNum, iniciarPolling]);
 
   const copiarCLABE = useCallback(() => {
     const clabe = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? '';
@@ -111,12 +151,34 @@ export default function PagoSPEI() {
     );
   }
 
+  if (estado === 'esperando') {
+    return (
+      <SafeAreaView style={s.container}>
+        <View style={s.centrado}>
+          <ActivityIndicator size="large" color="#F59E0B" />
+          <Text style={s.resultIcon}>⏳</Text>
+          <Text style={[s.resultTitulo, { color: '#F59E0B' }]}>Comprobante recibido</Text>
+          <Text style={s.resultSub}>
+            Tu comprobante está en revisión.{`\n`}Esta pantalla se actualizará automáticamente cuando se confirme.
+          </Text>
+          <Text style={[s.aviso, { marginTop: 12 }]}>🔄 Revisando cada 5 segundos…</Text>
+          <TouchableOpacity
+            style={[s.btnSecundario, { marginTop: 20 }]}
+            onPress={() => router.replace('/(tabs)')}
+          >
+            <Text style={s.btnSecundarioTxt}>Ir al inicio (recibirás notificación)</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (estado === 'exito') {
     return (
       <SafeAreaView style={s.container}>
         <View style={s.centrado}>
           <Text style={s.resultIcon}>✅</Text>
-          <Text style={[s.resultTitulo, { color: '#2ECC71' }]}>¡Pago confirmado!</Text>
+          <Text style={[s.resultTitulo, { color: '#2ECC71' }]}>¡Pago aprobado!</Text>
           <Text style={s.resultSub}>
             Tu transferencia fue validada correctamente.{`\n`}Ya puedes participar en la quiniela.
           </Text>

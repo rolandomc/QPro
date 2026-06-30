@@ -249,9 +249,6 @@ export default function QuinielaDetailsScreen() {
         return;
       }
       setComprobanteUrl(url);
-      // Intentar validación automática con apiCEP si hay clave de rastreo
-      // La clave se puede leer del XML automáticamente en el futuro;
-      // por ahora pasamos a pantalla de validación
       setConfirmState('speiValidando');
       await handleValidarAutomatico(partId, url);
     } catch (e: any) {
@@ -260,16 +257,12 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // ─── SPEI: validar automáticamente con apiCEP ─────────────────────────────
-  const handleValidarAutomatico = async (partId: string, _url: string) => {
+  // ─── SPEI: validar automáticamente con Edge Function validar-spei ─────────
+  const handleValidarAutomatico = async (partId: string, url: string) => {
     const monto = quiniela?.precio_entrada ?? 0;
     try {
-      // Intentamos extraer la clave de rastreo del comprobante (XML).
-      // Por ahora usamos validación manual-triggered desde el estado speiValidando.
-      // Si el comprobante es una imagen, marcamos para revisión manual.
-      // Próxima iteración: parsear el XML y extraer clave automáticamente.
-      await SpeiService.marcarPendienteRevision(partId);
-      setSpeiValidResult({ valid: false, errorMsg: 'revision_manual' });
+      const result = await SpeiService.validarYConfirmar(partId, url, monto);
+      setSpeiValidResult(result);
       setConfirmState('speiEnviado');
     } catch (e: any) {
       setErrorMsg(e.message);

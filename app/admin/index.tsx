@@ -2,10 +2,13 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TouchableOpacity,
   Alert, ActivityIndicator, RefreshControl, Modal, FlatList, Linking,
+  Platform, Image, KeyboardAvoidingView, TouchableWithoutFeedback,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import * as ImagePicker from 'expo-image-picker';
+import { decode } from 'base64-arraybuffer';
 import { AdminService } from '../../src/services/admin.service';
 import { QuinielasService } from '../../src/services/quinielas.service';
 import { supabase } from '../../src/config/supabase';
@@ -41,6 +44,17 @@ const FILTROS_SPEI: { key: FiltroSPEI; label: string; color: string }[] = [
   { key: 'pagado',             label: '✅ Aprobados',     color: '#2ECC71' },
 ];
 
+function pickFileWeb(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
+
 export default function AdminDashboardScreen() {
   const router = useRouter();
   const swipeableRefs = useRef<Record<string, any>>({});
@@ -74,9 +88,26 @@ export default function AdminDashboardScreen() {
   const [loadingRetiros,       setLoadingRetiros]       = useState(false);
   const [accionandoRetiro,     setAccionandoRetiro]     = useState<string | null>(null);
 
+  // ── Modal pago con comprobante (inline) ───────────────────────────────────
+  const [modalPagoRetiro,      setModalPagoRetiro]      = useState(false);
+  const [retiroPagoItem,       setRetiroPagoItem]       = useState<any | null>(null);
+  const [comprobanteUri,       setComprobanteUri]       = useState<string | null>(null);
+  const [comprobanteB64,       setComprobanteB64]       = useState<string | null>(null);
+  const [comprobanteMime,      setComprobanteMime]      = useState<string>('image/jpeg');
+  const [subiendoComp,         setSubiendoComp]         = useState(false);
+
   const handleBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
+  };
+
+  const loadRetirosPendientesCount = async () => {
+    const { count } = await supabase
+      .from('retiro_solicitudes')
+      .select('id', { count: 'exact', head: true })
+      .eq('estado', 'pendiente')
+      .then(r => ({ count: r.count ?? 0 }));
+    setRetirosPendientes(count);
   };
 
   const loadQuinielas = useCallback(async () => {
@@ -110,7 +141,21 @@ export default function AdminDashboardScreen() {
           .in('id', userIds);
         const profsMap: Record<string, string> = {};
         (profs || []).forEach((p: any) => { profsMap[p.id] = p.username; });
-        const enriched = parts.map((p: any) => ({ ...p, username: profsMap[p.user_id] ?? 'usuario' }));
+
+        // Traer precio_entrada de cada quiniela para tener el monto correcto
+        const quinielaIds = [...new Set(parts.map((p: any) => p.quiniela_id).filter(Boolean))];
+        const { data: quins } = await supabase
+          .from('quinielas')
+          .select('id, precio_entrada')
+          .in('id', quinielaIds);
+        const quinPrecioMap: Record<string, number> = {};
+        (quins || []).forEach((q: any) => { quinPrecioMap[q.id] = q.precio_entrada; });
+
+        const enriched = parts.map((p: any) => ({
+          ...p,
+          username: profsMap[p.user_id] ?? 'usuario',
+          precio_entrada: quinPrecioMap[p.quiniela_id] ?? null,
+        }));
         setTodosSpei(enriched);
         const pendientes = enriched.filter((p: any) => ['spei_pendiente', 'pendiente_revision'].includes(p.estado));
         if (pendientes.length > 0) setSpeiExpanded(true);
@@ -125,7 +170,32 @@ export default function AdminDashboardScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadQuinielas(); }, []));
+  const loadRetirosData = async () => {
+    setLoadingRetiros(true);
+    try {
+      const { data, error } = await supabase
+        .from('retiro_solicitudes')
+        .select('id, user_id, monto, metodo, clabe, alias_mp, estado, nota_admin, created_at, profiles:user_id ( username )')
+        .eq('estado', 'pendiente')
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      setRetirosData(data ?? []);
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setLoadingRetiros(false);
+    }
+  };
+
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    loadQuinielas();
+    // BUG FIX: si el panel de retiros ya estaba abierto, recargar siempre al volver al foco
+    if (retirosExpanded) {
+      loadRetirosData();
+      loadRetirosPendientesCount();
+    }
+  }, [retirosExpanded]));
 
   const quinielasFiltradas = filtroEstado === 'todas'
     ? quinielas
@@ -139,65 +209,108 @@ export default function AdminDashboardScreen() {
 
   const speiPendientesCount = todosSpei.filter(p => ['spei_pendiente', 'pendiente_revision'].includes(p.estado)).length;
 
+  // BUG FIX: siempre recargar al toggle (no solo si está vacío)
   const handleToggleRetiros = async () => {
     const next = !retirosExpanded;
     setRetirosExpanded(next);
-    if (next && retirosData.length === 0) {
-      setLoadingRetiros(true);
-      try {
-        const { data, error } = await supabase
-          .from('retiro_solicitudes')
-          .select('id, user_id, monto, metodo, clabe, alias_mp, estado, nota_admin, created_at, profiles:user_id ( username )')
-          .eq('estado', 'pendiente')
-          .order('created_at', { ascending: true });
-        if (error) throw error;
-        setRetirosData(data ?? []);
-      } catch (e: any) {
-        Alert.alert('Error', e.message);
-      } finally {
-        setLoadingRetiros(false);
-      }
+    if (next) {
+      await loadRetirosData();
     }
   };
 
-  const llamarEdgeFunction = async (solicitud_id: string, accion: 'pagar' | 'rechazar') => {
+  const llamarEdgeFunction = async (solicitud_id: string, accion: 'pagar' | 'rechazar', comprobante_url?: string) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('No autenticado');
     const res = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/procesar-retiro`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-      body: JSON.stringify({ solicitud_id, accion }),
+      body: JSON.stringify({ solicitud_id, accion, comprobante_url }),
     });
     const json = await res.json();
     if (!res.ok) throw new Error(json.error ?? 'Error al procesar');
     return json;
   };
 
-  const handlePagarRetiro = (item: any) => {
-    const destino = item.metodo === 'spei' ? `CLABE: ${item.clabe}` : `Alias MP: ${item.alias_mp}`;
-    Alert.alert(
-      '💸 Confirmar pago',
-      `¿Marcar como pagado el retiro de\n\n@${item.profiles?.username}\n$${item.monto} MXN\n${destino}?\n\n⚠️ Solo confirma si ya hiciste la transferencia.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sí, ya pagué',
-          onPress: async () => {
-            setAccionandoRetiro(item.id + '_pagar');
-            try {
-              await llamarEdgeFunction(item.id, 'pagar');
-              setRetirosData(prev => prev.filter(r => r.id !== item.id));
-              setRetirosPendientes(p => Math.max(0, p - 1));
-              Alert.alert('✅ Listo', 'Retiro marcado como pagado.');
-            } catch (e: any) {
-              Alert.alert('Error', e.message);
-            } finally {
-              setAccionandoRetiro(null);
-            }
-          },
-        },
-      ]
-    );
+  // ── Seleccionar comprobante ───────────────────────────────────────────────
+  const seleccionarComprobante = async () => {
+    if (Platform.OS === 'web') {
+      const file = await pickFileWeb();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        setComprobanteUri(dataUrl);
+        setComprobanteB64(dataUrl.split(',')[1]);
+        setComprobanteMime(file.type || 'image/jpeg');
+      };
+      reader.readAsDataURL(file);
+    } else {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permiso', 'Necesitas dar permiso para acceder a la galería.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.85,
+        base64: true,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        setComprobanteUri(asset.uri);
+        setComprobanteB64(asset.base64 ?? null);
+        const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+        setComprobanteMime(ext === 'png' ? 'image/png' : 'image/jpeg');
+      }
+    }
+  };
+
+  // ── Subir comprobante a Storage ───────────────────────────────────────────
+  const subirComprobanteStorage = async (retiroId: string): Promise<string | null> => {
+    if (!comprobanteB64) return null;
+    const ext  = comprobanteMime === 'image/png' ? 'png' : 'jpg';
+    const path = `retiros/${retiroId}_${Date.now()}.${ext}`;
+    const { error } = await supabase.storage
+      .from('comprobantes')
+      .upload(path, decode(comprobanteB64), { contentType: comprobanteMime, upsert: true });
+    if (error) throw new Error(`Error al subir: ${error.message}`);
+    const { data } = await supabase.storage
+      .from('comprobantes')
+      .createSignedUrl(path, 60 * 60 * 24 * 30);
+    return data?.signedUrl ?? null;
+  };
+
+  // ── Abrir modal pago ──────────────────────────────────────────────────────
+  const handleAbrirModalPago = (item: any) => {
+    setRetiroPagoItem(item);
+    setComprobanteUri(null);
+    setComprobanteB64(null);
+    setModalPagoRetiro(true);
+  };
+
+  // ── Confirmar pago con comprobante (inline) ───────────────────────────────
+  const handleConfirmarPagoRetiro = async () => {
+    if (!retiroPagoItem) return;
+    setSubiendoComp(true);
+    try {
+      let urlComp: string | null = null;
+      if (comprobanteB64) {
+        urlComp = await subirComprobanteStorage(retiroPagoItem.id);
+        await supabase
+          .from('retiro_solicitudes')
+          .update({ comprobante_url: urlComp })
+          .eq('id', retiroPagoItem.id);
+      }
+      await llamarEdgeFunction(retiroPagoItem.id, 'pagar', urlComp ?? undefined);
+      setModalPagoRetiro(false);
+      setRetirosData(prev => prev.filter(r => r.id !== retiroPagoItem.id));
+      setRetirosPendientes(p => Math.max(0, p - 1));
+      Alert.alert('✅ Listo', 'Retiro marcado como pagado y usuario notificado.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setSubiendoComp(false);
+    }
   };
 
   const handleRechazarRetiro = (item: any) => {
@@ -227,6 +340,7 @@ export default function AdminDashboardScreen() {
     );
   };
 
+  // ── Aprobar SPEI ──────────────────────────────────────────────────────────
   const handleAprobarSPEI = (item: any) => {
     Alert.alert(
       '✅ Aprobar Pago',
@@ -238,23 +352,37 @@ export default function AdminDashboardScreen() {
           onPress: async () => {
             setAprobandoId(item.id);
             try {
+              // BUG FIX: usar precio_entrada de la quiniela si monto_pagado no está seteado correctamente
+              const montoFinal = item.monto_pagado && item.monto_pagado > 0
+                ? item.monto_pagado
+                : (item.precio_entrada ?? item.monto_pagado ?? 0);
+
               const { error } = await supabase
                 .from('participaciones')
                 .update({
                   estado:               'pagado',
                   comprobante_validado: true,
-                  monto_pagado:         item.monto_pagado || 50,
+                  monto_pagado:         montoFinal,
                   fecha_pago:           new Date().toISOString(),
                   ultimo_error_spei:    null,
                 })
                 .eq('id', item.id);
               if (error) throw error;
+
               await supabase
                 .from('admin_notificaciones')
                 .update({ leida: true })
                 .eq('participacion_id', item.id);
+
+              // BUG FIX: notificar al usuario que su pago fue aprobado
+              await supabase.from('notificaciones').insert({
+                user_id: item.user_id,
+                titulo:  '✅ Pago aprobado',
+                mensaje: `Tu comprobante SPEI de $${montoFinal} MXN fue verificado y tu participación está confirmada.`,
+              });
+
               setTodosSpei(prev => prev.map(p => p.id === item.id
-                ? { ...p, estado: 'pagado', comprobante_validado: true }
+                ? { ...p, estado: 'pagado', comprobante_validado: true, monto_pagado: montoFinal }
                 : p
               ));
               Alert.alert('¡Aprobado!', `El pago de @${item.username} fue confirmado.`);
@@ -271,7 +399,6 @@ export default function AdminDashboardScreen() {
 
   // ── Eliminar quiniela ────────────────────────────────────────────────────
   const handleEliminarQuiniela = (quinielaId: string, titulo: string) => {
-    // Cerrar el swipeable antes de mostrar el alert
     swipeableRefs.current[quinielaId]?.close();
     Alert.alert(
       '🗑 Eliminar quiniela',
@@ -432,7 +559,18 @@ export default function AdminDashboardScreen() {
 
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadQuinielas(); setRetirosData([]); }} tintColor="#9B59B6" />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              // BUG FIX: resetear retirosData para que se recargue limpio al refrescar
+              setRetirosData([]);
+              loadQuinielas();
+            }}
+            tintColor="#9B59B6"
+          />
+        }
       >
         {/* Stats */}
         <View style={styles.statsContainer}>
@@ -504,13 +642,16 @@ export default function AdminDashboardScreen() {
                 }
                 const yaAprobado  = item.estado === 'pagado';
                 const ocrAbierto  = expandedOcrId === item.id;
+                const montoMostrar = item.monto_pagado && item.monto_pagado > 0
+                  ? item.monto_pagado
+                  : (item.precio_entrada ?? '?');
 
                 return (
                   <View key={item.id} style={[styles.speiCard, yaAprobado && { borderColor: '#2ECC7144' }]}>
                     <View style={styles.speiCardHeader}>
                       <Text style={styles.speiUser}>@{item.username}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={styles.speiMonto}>${item.monto_pagado || '?'}</Text>
+                        <Text style={styles.speiMonto}>${montoMostrar}</Text>
                         <View style={[styles.speiEstadoBadge, { borderColor: speiEstadoColor(item.estado) }]}>
                           <Text style={[styles.speiEstadoTxt, { color: speiEstadoColor(item.estado) }]}>{speiEstadoLabel(item.estado)}</Text>
                         </View>
@@ -527,7 +668,7 @@ export default function AdminDashboardScreen() {
                       <Text style={styles.speiError} numberOfLines={2}>{item.ultimo_error_spei}</Text>
                     ) : null}
 
-                    {/* Datos OCR colapsables — solo si existen */}
+                    {/* Datos OCR colapsables */}
                     {ocrData && (
                       <>
                         <TouchableOpacity
@@ -618,9 +759,8 @@ export default function AdminDashboardScreen() {
               <Text style={styles.retirosEmpty}>🎉 Sin retiros pendientes por procesar.</Text>
             ) : (
               retirosData.map((item) => {
-                const pagando    = accionandoRetiro === item.id + '_pagar';
                 const rechazando = accionandoRetiro === item.id + '_rechazar';
-                const ocupado    = pagando || rechazando;
+                const ocupado    = rechazando;
                 return (
                   <View key={item.id} style={styles.retiroCard}>
                     <View style={styles.retiroCardHeader}>
@@ -654,14 +794,13 @@ export default function AdminDashboardScreen() {
                           ? <ActivityIndicator color="#E74C3C" size="small" />
                           : <Text style={styles.retiroRechazarTxt}>✕ Rechazar</Text>}
                       </TouchableOpacity>
+                      {/* BUG FIX: abrir modal con comprobante en vez de Alert directo */}
                       <TouchableOpacity
                         style={[styles.retiroPagarBtn, ocupado && { opacity: 0.4 }]}
-                        onPress={() => handlePagarRetiro(item)}
+                        onPress={() => handleAbrirModalPago(item)}
                         disabled={ocupado}
                       >
-                        {pagando
-                          ? <ActivityIndicator color="#000" size="small" />
-                          : <Text style={styles.retiroPagarTxt}>✓ Ya pagué</Text>}
+                        <Text style={styles.retiroPagarTxt}>✓ Ya pagué</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -746,7 +885,6 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
-        {/* ── Cards de quinielas con swipe-to-delete ── */}
         {quinielasFiltradas.map((q) => (
           <Swipeable
             key={q.id}
@@ -806,6 +944,78 @@ export default function AdminDashboardScreen() {
         onConfirm={handlePickerConfirm}
         onCancel={() => setPickerVisible(false)}
       />
+
+      {/* ── Modal confirmar pago con comprobante (inline retiros) ── */}
+      <Modal visible={modalPagoRetiro} transparent animationType="slide" onRequestClose={() => !subiendoComp && setModalPagoRetiro(false)}>
+        <TouchableWithoutFeedback onPress={() => !subiendoComp && setModalPagoRetiro(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                <View style={styles.modalBox}>
+                  <View style={styles.modalHandle} />
+                  <Text style={styles.modalPagoTitle}>💸 Confirmar pago</Text>
+
+                  <View style={styles.modalInfoRow}>
+                    <View style={styles.modalAvatarCircle}>
+                      <Text style={styles.modalAvatarTxt}>{(retiroPagoItem?.profiles?.username ?? 'U')[0].toUpperCase()}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.modalUser}>@{retiroPagoItem?.profiles?.username}</Text>
+                      <Text style={styles.modalMonto}>${Number(retiroPagoItem?.monto ?? 0).toFixed(2)} MXN</Text>
+                      <Text style={styles.modalDestino}>
+                        {retiroPagoItem?.metodo === 'spei' ? `🏦 ${retiroPagoItem?.clabe}` : `💳 ${retiroPagoItem?.alias_mp}`}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.inputLabel}>COMPROBANTE DE TRANSFERENCIA (opcional)</Text>
+                  <TouchableOpacity
+                    style={styles.uploadBtn}
+                    onPress={seleccionarComprobante}
+                    disabled={subiendoComp}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.uploadBtnTxt}>
+                      {comprobanteUri ? '🔄 Cambiar imagen' : '📎 Adjuntar comprobante'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {comprobanteUri ? (
+                    <Image
+                      source={{ uri: comprobanteUri }}
+                      style={styles.previewImg}
+                      resizeMode="contain"
+                    />
+                  ) : null}
+
+                  <Text style={styles.modalNota}>
+                    ⚠️ Solo confirma si ya realizaste la transferencia. Se notificará al usuario automáticamente.
+                  </Text>
+
+                  <View style={styles.modalBtns}>
+                    <TouchableOpacity
+                      style={[styles.modalCancelBtn, subiendoComp && { opacity: 0.4 }]}
+                      onPress={() => setModalPagoRetiro(false)}
+                      disabled={subiendoComp}
+                    >
+                      <Text style={styles.modalCancelTxt}>Cancelar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalConfirmPagoBtn, subiendoComp && { opacity: 0.4 }]}
+                      onPress={handleConfirmarPagoRetiro}
+                      disabled={subiendoComp}
+                    >
+                      {subiendoComp
+                        ? <ActivityIndicator color="#000" size="small" />
+                        : <Text style={styles.modalConfirmPagoTxt}>✓ Confirmar pago</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       {/* Modal participantes */}
       <Modal visible={usuariosModal} animationType="slide" transparent>
@@ -965,7 +1175,6 @@ const styles = StyleSheet.create({
   emptyBox:             { padding: 30, alignItems: 'center' },
   emptyText:            { color: '#505050', fontSize: 14 },
 
-  // Swipe delete action
   deleteAction:         { backgroundColor: '#E74C3C', justifyContent: 'center', alignItems: 'center', width: 90, borderRadius: 12, marginBottom: 12 },
   deleteActionIcon:     { fontSize: 22, marginBottom: 2 },
   deleteActionText:     { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
@@ -985,8 +1194,29 @@ const styles = StyleSheet.create({
   dangerText:           { color: '#E74C3C', fontSize: 12, fontWeight: '600' },
   disabledBtn:          { opacity: 0.4 },
 
-  modalOverlay:         { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalBox:             { backgroundColor: '#15181F', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '80%' },
+  // Modal pago retiro inline
+  modalHandle:          { width: 36, height: 4, backgroundColor: '#2A2D38', borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
+  modalPagoTitle:       { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
+  modalInfoRow:         { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#0A0C12', borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#1E2128' },
+  modalAvatarCircle:    { width: 42, height: 42, borderRadius: 21, backgroundColor: '#1C1F28', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2A2D38' },
+  modalAvatarTxt:       { color: '#F39C12', fontWeight: 'bold', fontSize: 18 },
+  modalUser:            { color: '#FFF', fontWeight: '700', fontSize: 14 },
+  modalMonto:           { color: '#2ECC71', fontWeight: 'bold', fontSize: 16, marginTop: 2 },
+  modalDestino:         { color: '#606070', fontSize: 12, marginTop: 3 },
+  inputLabel:           { color: '#505060', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  uploadBtn:            { backgroundColor: '#1C1F28', borderRadius: 12, borderWidth: 1, borderColor: '#2A2D38', borderStyle: 'dashed', padding: 14, alignItems: 'center', marginBottom: 10 },
+  uploadBtnTxt:         { color: '#F39C12', fontWeight: '700', fontSize: 14 },
+  previewImg:           { width: '100%', height: 160, borderRadius: 12, marginBottom: 10, backgroundColor: '#0A0C12' },
+  modalNota:            { color: '#505060', fontSize: 12, marginTop: 4, marginBottom: 4 },
+  modalBtns:            { flexDirection: 'row', gap: 12, marginTop: 16 },
+  modalCancelBtn:       { flex: 1, padding: 14, borderRadius: 13, alignItems: 'center', backgroundColor: '#1C1F28', borderWidth: 1, borderColor: '#2A2D38' },
+  modalCancelTxt:       { color: '#707080', fontWeight: 'bold' },
+  modalConfirmPagoBtn:  { flex: 2, padding: 14, borderRadius: 13, alignItems: 'center', backgroundColor: '#2ECC71' },
+  modalConfirmPagoTxt:  { color: '#000', fontWeight: 'bold', fontSize: 14 },
+
+  // Modal participantes
+  modalOverlay:         { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
+  modalBox:             { backgroundColor: '#12151C', borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 24, paddingTop: 12, borderTopWidth: 1, borderColor: '#1E2128', maxHeight: '85%' },
   modalHeader:          { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
   modalTitle:           { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   modalSubtitle:        { flex: 1, color: '#A0A0A0', fontSize: 13 },

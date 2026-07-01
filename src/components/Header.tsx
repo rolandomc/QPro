@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   StyleSheet, Text, View, Pressable,
   Modal, TouchableOpacity, TouchableWithoutFeedback,
@@ -8,14 +8,13 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { WalletService } from '../services/wallet.service';
 import { supabase } from '../config/supabase';
 import { colors } from '../theme/colors';
-import { SlidingTabs } from './SlidingTabs';
 
 export type Deporte = 'futbol' | 'beisbol' | 'basquet';
 
-const TABS_DEPORTE: { key: Deporte; label: string; emoji: string; disabled?: boolean }[] = [
-  { key: 'futbol',  label: 'Fútbol',     emoji: '⚽' },
-  { key: 'beisbol', label: 'Béisbol',    emoji: '⚾' },
-  { key: 'basquet', label: 'Básquet',    emoji: '🏀', disabled: true },
+const OPCIONES_DEPORTE: { key: Deporte; label: string; emoji: string; disabled?: boolean }[] = [
+  { key: 'futbol',  label: 'Fútbol',  emoji: '⚽' },
+  { key: 'beisbol', label: 'Béisbol', emoji: '⚾' },
+  { key: 'basquet', label: 'Básquet', emoji: '🏀', disabled: true },
 ];
 
 const NOTIF_ICON: Record<string, string> = {
@@ -38,12 +37,129 @@ const NOTIF_COLOR: Record<string, string> = {
   info:             colors.notifInfo,
 };
 
+// ── Durations ────────────────────────────────────────────
+const OPEN_DUR  = 250;
+const CLOSE_DUR = 150;
+
+// ── Animated Dropdown ────────────────────────────────────
+type DropState = 'closed' | 'open' | 'closing';
+
+interface SportDropdownProps {
+  active: Deporte;
+  onChange: (d: Deporte) => void;
+}
+
+function SportDropdown({ active, onChange }: SportDropdownProps) {
+  const [dropState, setDropState] = useState<DropState>('closed');
+  const anim = useRef(new Animated.Value(0)).current;
+
+  const isVisible = dropState !== 'closed';
+
+  useEffect(() => {
+    if (dropState === 'open') {
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: OPEN_DUR,
+        useNativeDriver: true,
+      }).start();
+    } else if (dropState === 'closing') {
+      Animated.timing(anim, {
+        toValue: 0,
+        duration: CLOSE_DUR,
+        useNativeDriver: true,
+      }).start(() => setDropState('closed'));
+    }
+  }, [dropState]);
+
+  const toggle = () =>
+    setDropState(s => (s === 'open' ? 'closing' : 'open'));
+
+  const handleSelect = (key: Deporte) => {
+    onChange(key);
+    setDropState('closing');
+  };
+
+  const scaleAnim   = anim.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] });
+  const opacityAnim = anim;
+
+  const current = OPCIONES_DEPORTE.find(o => o.key === active) ?? OPCIONES_DEPORTE[0];
+
+  return (
+    <View style={dd.wrapper}>
+      {/* Trigger */}
+      <Pressable style={dd.trigger} onPress={toggle}>
+        <Text style={dd.triggerEmoji}>{current.emoji}</Text>
+        <Text style={dd.triggerLabel}>{current.label}</Text>
+        <Text style={[dd.chevron, isVisible && dd.chevronOpen]}>▾</Text>
+      </Pressable>
+
+      {/* Dropdown panel — origin: top-left */}
+      {isVisible && (
+        <Animated.View
+          style={[
+            dd.panel,
+            { opacity: opacityAnim, transform: [{ scale: scaleAnim }] },
+          ]}
+          pointerEvents={dropState === 'open' ? 'auto' : 'none'}
+        >
+          {OPCIONES_DEPORTE.map(opt => {
+            const isActive   = opt.key === active;
+            const isDisabled = !!opt.disabled;
+            return (
+              <Pressable
+                key={opt.key}
+                style={({ pressed }) => [
+                  dd.item,
+                  isActive   && dd.itemActive,
+                  isDisabled && dd.itemDisabled,
+                  pressed && !isDisabled && dd.itemPressed,
+                ]}
+                onPress={() => !isDisabled && handleSelect(opt.key)}
+                disabled={isDisabled}
+              >
+                <Text style={dd.itemEmoji}>{opt.emoji}</Text>
+                <Text style={[dd.itemLabel, isActive && dd.itemLabelActive, isDisabled && dd.itemLabelDisabled]}>
+                  {opt.label}
+                </Text>
+                {isActive   && <Text style={dd.checkmark}>✓</Text>}
+                {isDisabled && <Text style={dd.pronto}>Pronto</Text>}
+              </Pressable>
+            );
+          })}
+        </Animated.View>
+      )}
+    </View>
+  );
+}
+
+const dd = StyleSheet.create({
+  wrapper:           { position: 'relative', zIndex: 100 },
+  trigger:           { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border },
+  triggerEmoji:      { fontSize: 16 },
+  triggerLabel:      { color: colors.text, fontWeight: '700', fontSize: 13 },
+  chevron:           { color: colors.textMuted, fontSize: 10, marginLeft: 2 },
+  chevronOpen:       { transform: [{ rotate: '180deg' }] },
+  panel:             { position: 'absolute', top: 44, left: 0, backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, minWidth: 160, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.6, shadowRadius: 20, elevation: 20 },
+  item:              { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
+  itemActive:        { backgroundColor: 'rgba(46,204,113,0.08)' },
+  itemDisabled:      { opacity: 0.4 },
+  itemPressed:       { backgroundColor: colors.surface },
+  itemEmoji:         { fontSize: 18 },
+  itemLabel:         { flex: 1, color: colors.textMuted, fontWeight: '600', fontSize: 14 },
+  itemLabelActive:   { color: colors.primary, fontWeight: '700' },
+  itemLabelDisabled: { color: colors.textFaint },
+  checkmark:         { color: colors.primary, fontWeight: 'bold', fontSize: 14 },
+  pronto:            { color: colors.textFaint, fontSize: 10, fontStyle: 'italic' },
+});
+
+// ── Props ────────────────────────────────────────────────
 interface Props {
   deporteActivo?: Deporte;
   onDeporteChange?: (d: Deporte) => void;
   onRefresh?: () => Promise<void> | void;
 }
 
+// ── Main Header ──────────────────────────────────────────
 export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRefresh }: Props) {
   const router = useRouter();
   const [notifVisible,  setNotifVisible]  = useState(false);
@@ -148,13 +264,22 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
 
   return (
     <View style={styles.container}>
-      {/* Fila superior: logo + saldo + refresh + campanita */}
       <View style={styles.topRow}>
-        <Text style={styles.headerTitle}>
-          <Text style={styles.neonTextGreen}>Q</Text>
-          <Text style={styles.logoWhite}>Pro</Text>
-        </Text>
+        {/* Logo + dropdown deporte */}
+        <View style={styles.leftGroup}>
+          <Text style={styles.headerTitle}>
+            <Text style={styles.neonTextGreen}>Q</Text>
+            <Text style={styles.logoWhite}>Pro</Text>
+          </Text>
+          {onDeporteChange && (
+            <SportDropdown
+              active={deporteActivo}
+              onChange={onDeporteChange}
+            />
+          )}
+        </View>
 
+        {/* Saldo + refresh + campanita */}
         <View style={styles.rightGroup}>
           <Pressable style={styles.balanceButton} onPress={() => router.push('/wallet')}>
             <Text style={styles.balanceText}>{saldoLabel}</Text>
@@ -182,19 +307,6 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
           </Pressable>
         </View>
       </View>
-
-      {/* Fila inferior: SlidingTabs de deporte */}
-      {onDeporteChange && (
-        <View style={styles.tabsRow}>
-          <SlidingTabs
-            tabs={TABS_DEPORTE.filter(t => !t.disabled).map(t => ({ key: t.key, label: t.label, emoji: t.emoji }))}
-            activeKey={deporteActivo === 'basquet' ? 'futbol' : deporteActivo}
-            onChange={(key) => onDeporteChange(key as Deporte)}
-            barColor="#15181F"
-            pillColor="#2A2D35"
-          />
-        </View>
-      )}
 
       {/* Panel notificaciones */}
       <Modal visible={notifVisible} transparent animationType="fade" onRequestClose={() => setNotifVisible(false)}>
@@ -269,8 +381,8 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
 
 const styles = StyleSheet.create({
   container:          { backgroundColor: 'transparent' },
-  topRow:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 15, paddingBottom: 10 },
-  tabsRow:            { paddingHorizontal: 20, paddingBottom: 10 },
+  topRow:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 15, paddingBottom: 12 },
+  leftGroup:          { flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerTitle:        { fontSize: 22, fontWeight: 'bold' },
   neonTextGreen:      { color: colors.primary, fontWeight: 'bold', textShadowColor: 'rgba(46,204,113,0.8)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10 },
   logoWhite:          { color: colors.text, fontWeight: 'bold' },

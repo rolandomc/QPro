@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, Animated, Share, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../config/supabase';
-import { colors } from '../theme/colors';
+import { colors, spacing, radii, text } from '../theme';
+import { common, layout } from '../styles';
 
 interface Props {
   id: string;
@@ -12,7 +13,7 @@ interface Props {
   premioTotal: number;
   estado: 'abierta' | 'cerrada' | 'finalizada';
   totalPartidos: number;
-  fechaCierre?: string;  // ahora representa fecha del primer partido
+  fechaCierre?: string;
   jugadoresMinimos?: number;
   porcentajeAdmin?: number;
   modoResultados?: boolean;
@@ -31,27 +32,26 @@ function SkeletonBlock({ width, height = 18, style }: { width: number | string; 
       ])
     ).start();
   }, [anim]);
-  return <Animated.View style={[{ width, height, borderRadius: 6, backgroundColor: '#2A2D35', opacity: anim }, style]} />;
+  return (
+    <Animated.View
+      style={[{ width, height, borderRadius: radii.xs, backgroundColor: colors.border, opacity: anim }, style]}
+    />
+  );
 }
 
 // ─── Countdown hook ────────────────────────────────────────────
 function useCountdown(fechaPrimerPartido?: string, estado?: string) {
   const [label, setLabel] = useState<string | null>(null);
-
   useEffect(() => {
     if (!fechaPrimerPartido || estado !== 'abierta') { setLabel(null); return; }
-
     const calc = () => {
       const diff = new Date(fechaPrimerPartido).getTime() - Date.now();
-
       if (diff <= 0) { setLabel(null); return; }
-
       const totalSecs = Math.floor(diff / 1000);
       const days  = Math.floor(totalSecs / 86400);
       const hours = Math.floor((totalSecs % 86400) / 3600);
       const mins  = Math.floor((totalSecs % 3600) / 60);
       const secs  = totalSecs % 60;
-
       if (days > 0) {
         setLabel(`⏱ Primer partido en ${days}d ${hours}h`);
       } else if (hours > 0) {
@@ -60,32 +60,20 @@ function useCountdown(fechaPrimerPartido?: string, estado?: string) {
         setLabel(`⚠️ ¡Últimos ${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')} para participar!`);
       }
     };
-
     calc();
     const interval = setInterval(calc, 1000);
     return () => clearInterval(interval);
   }, [fechaPrimerPartido, estado]);
-
   return label;
 }
 
 // ─── Componente principal ────────────────────────────────────────────
 export function QuinielaCard({
-  id,
-  titulo,
-  descripcion,
-  precioEntrada,
-  premioTotal,
-  estado,
-  totalPartidos,
-  fechaCierre,
-  jugadoresMinimos = 0,
-  porcentajeAdmin  = 0,
-  modoResultados   = false,
-  jugadoresCount,
-  yaParticipo: yaParticipoInit,
+  id, titulo, descripcion, precioEntrada, premioTotal, estado,
+  totalPartidos, fechaCierre, jugadoresMinimos = 0, porcentajeAdmin = 0,
+  modoResultados = false, jugadoresCount, yaParticipo: yaParticipoInit,
 }: Props) {
-  const router = useRouter();
+  const router   = useRouter();
   const countdown = useCountdown(fechaCierre, estado);
 
   const [jugadoresPagados, setJugadoresPagados] = useState<number | null>(
@@ -94,7 +82,6 @@ export function QuinielaCard({
   const [yaParticipo, setYaParticipo] = useState<boolean | null>(
     yaParticipoInit !== undefined ? yaParticipoInit : null
   );
-  // Nuevo: detectar si el usuario tiene una participación con pago pendiente
   const [pagoPendiente, setPagoPendiente] = useState(false);
 
   useEffect(() => {
@@ -103,54 +90,39 @@ export function QuinielaCard({
     const needsParticipo = yaParticipoInit === undefined;
 
     if (!needsCount && !needsParticipo) {
-      // Aunque no necesitemos recargar conteo, sí necesitamos saber si el pago está pendiente
       const fetchPendingStatus = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data: part } = await supabase
-            .from('participaciones')
-            .select('id, estado')
-            .eq('quiniela_id', id)
-            .eq('user_id', user.id)
-            .maybeSingle();
+            .from('participaciones').select('id, estado')
+            .eq('quiniela_id', id).eq('user_id', user.id).maybeSingle();
           setPagoPendiente(part?.estado === 'pendiente');
         }
       };
       fetchPendingStatus();
-
-      const channel = supabase
-        .channel(`pozo-${id}`)
+      const channel = supabase.channel(`pozo-${id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` },
           async () => {
-            const { count } = await supabase
-              .from('participaciones')
+            const { count } = await supabase.from('participaciones')
               .select('*', { count: 'exact', head: true })
-              .eq('quiniela_id', id)
-              .in('estado', ['pagado', 'ganador', 'perdedor', 'pendiente']);
+              .eq('quiniela_id', id).in('estado', ['pagado', 'ganador', 'perdedor', 'pendiente']);
             setJugadoresPagados(count ?? 0);
           }
-        )
-        .subscribe();
+        ).subscribe();
       return () => { supabase.removeChannel(channel); };
     }
 
     let channel: any;
     const cargar = async () => {
-      const { count } = await supabase
-        .from('participaciones')
+      const { count } = await supabase.from('participaciones')
         .select('*', { count: 'exact', head: true })
-        .eq('quiniela_id', id)
-        .in('estado', ['pagado', 'ganador', 'perdedor', 'pendiente']);
+        .eq('quiniela_id', id).in('estado', ['pagado', 'ganador', 'perdedor', 'pendiente']);
       setJugadoresPagados(count ?? 0);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data: part } = await supabase
-          .from('participaciones')
-          .select('id, estado')
-          .eq('quiniela_id', id)
-          .eq('user_id', user.id)
-          .maybeSingle();
+        const { data: part } = await supabase.from('participaciones')
+          .select('id, estado').eq('quiniela_id', id).eq('user_id', user.id).maybeSingle();
         setYaParticipo(!!part);
         setPagoPendiente(part?.estado === 'pendiente');
       } else {
@@ -158,10 +130,8 @@ export function QuinielaCard({
         setPagoPendiente(false);
       }
     };
-
     cargar();
-    channel = supabase
-      .channel(`pozo-${id}`)
+    channel = supabase.channel(`pozo-${id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` }, cargar)
       .subscribe();
     return () => { if (channel) supabase.removeChannel(channel); };
@@ -171,163 +141,145 @@ export function QuinielaCard({
   const jug             = jugadoresPagados ?? 0;
   const pozoActual      = jug * precioEntrada;
   const premioCalculado = tieneMinimo && porcentajeAdmin > 0
-    ? pozoActual * (1 - porcentajeAdmin / 100)
-    : premioTotal;
+    ? pozoActual * (1 - porcentajeAdmin / 100) : premioTotal;
   const minimoAlcanzado = tieneMinimo ? jug >= jugadoresMinimos : true;
   const faltanJugadores = Math.max(0, jugadoresMinimos - jug);
   const premioVisible   = !tieneMinimo || minimoAlcanzado;
   const isLoading       = jugadoresPagados === null || yaParticipo === null;
 
-  const estadoColor = estado === 'abierta' ? '#2ECC71' : estado === 'cerrada' ? '#F39C12' : '#9B59B6';
+  const estadoColor = estado === 'abierta' ? colors.success : estado === 'cerrada' ? colors.warning : colors.notifCerrada;
   const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🟡 Cerrada' : '✅ Finalizada';
 
   const handlePress = () => {
-    if (modoResultados) {
-      router.push(`/quiniela/${id}`);
-      return;
-    }
-    if (estado === 'abierta') {
-      router.push(`/quiniela/details?id=${id}`);
-      return;
-    }
+    if (modoResultados) { router.push(`/quiniela/${id}`); return; }
+    if (estado === 'abierta') { router.push(`/quiniela/details?id=${id}`); return; }
     router.push(`/quiniela/${id}`);
   };
-
-  const handleReintentarPago = () => {
-    // Navegar a details — esa pantalla detecta pagoPendiente y muestra el banner con "Pagar ahora"
-    router.push(`/quiniela/details?id=${id}`);
-  };
-
+  const handleReintentarPago = () => router.push(`/quiniela/details?id=${id}`);
   const handleShare = async () => {
-    const premioTexto = premioVisible && premioCalculado > 0
-      ? `$${premioCalculado.toFixed(0)} en juego`
-      : `Entrada $${precioEntrada}`;
+    const premioTexto   = premioVisible && premioCalculado > 0 ? `$${premioCalculado.toFixed(0)} en juego` : `Entrada $${precioEntrada}`;
     const countdownTexto = countdown ? `\n${countdown}` : '';
     try {
       await Share.share({
         title: `🏆 ${titulo} — QPro`,
-        message:
-          `🏆 ${titulo}\n` +
-          `${premioTexto} · ${totalPartidos} partidos${countdownTexto}\n\n` +
-          `¡Únete y demuestra que sabes de fútbol! 👇\n` +
-          `qpro://quiniela/${id}`,
+        message: `🏆 ${titulo}\n${premioTexto} · ${totalPartidos} partidos${countdownTexto}\n\n¡Únete y demuestra que sabes de fútbol! 👇\nqpro://quiniela/${id}`,
       });
     } catch (_) {}
   };
 
-  const botonLabel = modoResultados
+  const botonLabel  = modoResultados
     ? (estado === 'finalizada' ? 'Ver resultado →' : 'Ver mis picks →')
     : estado === 'abierta'
       ? (yaParticipo ? '✏️ Ver / Editar picks →' : 'Participar →')
       : 'Ver detalle →';
-
   const botonActivo = modoResultados || estado === 'abierta';
 
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress} activeOpacity={0.85}>
 
-      <View style={styles.cardHeader}>
+      {/* Header */}
+      <View style={[layout.rowBetween, { marginBottom: spacing.sm }]}>
         <Text style={styles.title}>🏆 {titulo}</Text>
-        <View style={styles.headerRight}>
-          <View style={[styles.estadoBadge, { borderColor: estadoColor }]}>
-            <Text style={[styles.estadoText, { color: estadoColor }]}>{estadoLabel}</Text>
+        <View style={[layout.row, layout.gapSm]}>
+          <View style={[common.badge, { borderWidth: 1, borderColor: estadoColor }]}>
+            <Text style={[common.badgeText, { color: estadoColor }]}>{estadoLabel}</Text>
           </View>
           <TouchableOpacity onPress={handleShare} style={styles.shareBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={styles.shareIcon}>⬆️</Text>
+            <Text style={{ fontSize: 16 }}>⬆️</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {descripcion ? <Text style={styles.descripcion}>{descripcion}</Text> : null}
+      {descripcion ? <Text style={[text.body, common.textMuted, { marginBottom: spacing.md }]}>{descripcion}</Text> : null}
 
+      {/* Countdown */}
       {countdown && (
         <View style={styles.countdownRow}>
           <Text style={styles.countdownText}>{countdown}</Text>
         </View>
       )}
 
+      {/* Stats */}
       <View style={styles.statsRow}>
         <View style={styles.stat}>
           <Text style={styles.statValue}>{totalPartidos}</Text>
-          <Text style={styles.statLabel}>Partidos</Text>
+          <Text style={[text.label, common.textMuted]}>Partidos</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.stat}>
           <Text style={styles.statValue}>${precioEntrada}</Text>
-          <Text style={styles.statLabel}>Entrada</Text>
+          <Text style={[text.label, common.textMuted]}>Entrada</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.stat}>
           {isLoading ? (
-            <SkeletonBlock width={52} height={20} style={{ marginBottom: 4 }} />
+            <SkeletonBlock width={52} height={20} style={{ marginBottom: spacing.xs }} />
           ) : premioVisible ? (
-            <Text style={[styles.statValue, { color: '#2ECC71' }]}>
+            <Text style={[styles.statValue, { color: colors.success }]}>
               ${premioCalculado > 0 ? premioCalculado.toFixed(0) : '---'}
             </Text>
           ) : (
-            <Text style={[styles.statValue, { color: '#505050' }]}>🔒 Oculto</Text>
+            <Text style={[styles.statValue, { color: colors.textFaint }]}>🔒 Oculto</Text>
           )}
-          <Text style={styles.statLabel}>Premio</Text>
+          <Text style={[text.label, common.textMuted]}>Premio</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.stat}>
           {isLoading ? (
-            <SkeletonBlock width={32} height={20} style={{ marginBottom: 4 }} />
+            <SkeletonBlock width={32} height={20} style={{ marginBottom: spacing.xs }} />
           ) : (
-            <Text style={[styles.statValue, { color: '#00E5FF' }]}>{jug}</Text>
+            <Text style={[styles.statValue, { color: colors.info }]}>{jug}</Text>
           )}
-          <Text style={styles.statLabel}>Jugadores</Text>
+          <Text style={[text.label, common.textMuted]}>Jugadores</Text>
         </View>
       </View>
 
+      {/* Barra de mínimo */}
       {tieneMinimo && (
         <View style={styles.pozoBox}>
           {isLoading ? (
-            <SkeletonBlock width="70%" height={12} style={{ marginBottom: 8 }} />
+            <SkeletonBlock width="70%" height={12} style={{ marginBottom: spacing.sm }} />
           ) : !minimoAlcanzado ? (
-            <Text style={styles.faltanText}>
+            <Text style={[text.label, common.textWarning]}>
               ⏳ Faltan {faltanJugadores} jugador{faltanJugadores !== 1 ? 'es' : ''} para activar el pozo
             </Text>
           ) : (
-            <Text style={styles.pozoActivoText}>✅ Pozo activo — aumentando en tiempo real</Text>
+            <Text style={[text.label, common.textSuccess]}>✅ Pozo activo — aumentando en tiempo real</Text>
           )}
-          <View style={styles.progressRow}>
+          <View style={[layout.row, { gap: spacing.sm, marginTop: spacing.xs }]}>
             <View style={styles.progressTrack}>
               {isLoading ? (
-                <SkeletonBlock width="40%" height={5} style={{ borderRadius: 3 }} />
+                <SkeletonBlock width="40%" height={5} style={{ borderRadius: radii.xs }} />
               ) : (
                 <View style={[
                   styles.progressFill,
                   { width: `${Math.min((jug / jugadoresMinimos) * 100, 100)}%` },
-                  minimoAlcanzado && styles.progressFillGreen,
+                  minimoAlcanzado && { backgroundColor: colors.success },
                 ]} />
               )}
             </View>
             {isLoading ? (
               <SkeletonBlock width={28} height={10} />
             ) : (
-              <Text style={styles.progressLabel}>{jug}/{jugadoresMinimos}</Text>
+              <Text style={[text.caption, common.textFaint]}>{jug}/{jugadoresMinimos}</Text>
             )}
           </View>
         </View>
       )}
 
+      {/* Botón principal */}
       <TouchableOpacity
-        style={[styles.button, !botonActivo && styles.buttonDisabled]}
+        style={[common.btnPrimary, !botonActivo && styles.buttonDisabled]}
         onPress={handlePress}
       >
-        <Text style={[styles.buttonText, !botonActivo && { color: '#707070' }]}>
+        <Text style={[common.btnPrimaryText, !botonActivo && common.textFaint]}>
           {botonLabel}
         </Text>
       </TouchableOpacity>
 
-      {/* Botón de reintentar pago — solo se muestra si el usuario tiene pago pendiente */}
+      {/* Reintentar pago */}
       {pagoPendiente && estado === 'abierta' && (
-        <TouchableOpacity
-          style={styles.reintentarBtn}
-          onPress={handleReintentarPago}
-          activeOpacity={0.8}
-        >
+        <TouchableOpacity style={styles.reintentarBtn} onPress={handleReintentarPago} activeOpacity={0.8}>
           <Text style={styles.reintentarBtnText}>💳 Reintentar pago</Text>
         </TouchableOpacity>
       )}
@@ -338,35 +290,21 @@ export function QuinielaCard({
 
 export default QuinielaCard;
 
+// Solo estilos MUY específicos de este componente que no existen en common/layout
 const styles = StyleSheet.create({
-  card:              { backgroundColor: colors.card, borderRadius: 16, padding: 20, marginBottom: 15, borderWidth: 1, borderColor: colors.border },
-  cardHeader:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
-  title:             { color: colors.text, fontSize: 16, fontWeight: 'bold', flex: 1, marginRight: 10 },
-  headerRight:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  estadoBadge:       { borderWidth: 1, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
-  estadoText:        { fontSize: 11, fontWeight: 'bold' },
-  shareBtn:          { padding: 2 },
-  shareIcon:         { fontSize: 16 },
-  countdownRow:      { backgroundColor: 'rgba(243,156,18,0.10)', borderWidth: 1, borderColor: 'rgba(243,156,18,0.3)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 12, alignSelf: 'flex-start' },
-  countdownText:     { color: '#F39C12', fontSize: 12, fontWeight: '600', letterSpacing: 0.3 },
-  descripcion:       { color: colors.textMuted, fontSize: 13, marginBottom: 12 },
-  statsRow:          { flexDirection: 'row', backgroundColor: '#1C1F26', borderRadius: 12, padding: 12, marginBottom: 12, alignItems: 'center' },
-  stat:              { flex: 1, alignItems: 'center', minHeight: 40, justifyContent: 'center' },
-  statValue:         { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  statLabel:         { color: colors.textMuted, fontSize: 11, marginTop: 2 },
-  statDivider:       { width: 1, height: 30, backgroundColor: '#2A2D35' },
-  pozoBox:           { backgroundColor: '#1C1F26', borderRadius: 10, padding: 10, marginBottom: 12 },
-  faltanText:        { color: '#F39C12', fontSize: 11, marginBottom: 6 },
-  pozoActivoText:    { color: '#2ECC71', fontSize: 11, marginBottom: 6 },
-  progressRow:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  progressTrack:     { flex: 1, height: 5, backgroundColor: '#2A2D35', borderRadius: 3, overflow: 'hidden' },
-  progressFill:      { height: '100%', backgroundColor: '#F39C12', borderRadius: 3 },
-  progressFillGreen: { backgroundColor: '#2ECC71' },
-  progressLabel:     { color: '#707070', fontSize: 10, minWidth: 30, textAlign: 'right' },
-  button:            { backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-  buttonDisabled:    { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35' },
-  buttonText:        { color: '#000', fontWeight: 'bold', fontSize: 16 },
-  // Botón reintentar pago
-  reintentarBtn:     { backgroundColor: '#EF4444', paddingVertical: 11, borderRadius: 12, alignItems: 'center', marginTop: 8 },
-  reintentarBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
+  card:           { backgroundColor: colors.card, borderRadius: radii.lg, padding: spacing.xl, marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border },
+  title:          { ...text.sectionTitle, color: colors.text, flex: 1, marginRight: spacing.sm },
+  shareBtn:       { padding: spacing.xxs },
+  countdownRow:   { backgroundColor: 'rgba(243,156,18,0.10)', borderWidth: 1, borderColor: 'rgba(243,156,18,0.3)', borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginBottom: spacing.md, alignSelf: 'flex-start' },
+  countdownText:  { ...text.bodySmallBold, color: colors.warning, letterSpacing: 0.3 },
+  statsRow:       { flexDirection: 'row', backgroundColor: colors.backgroundDeep, borderRadius: radii.md, padding: spacing.md, marginBottom: spacing.md, alignItems: 'center' },
+  stat:           { flex: 1, alignItems: 'center', minHeight: 40, justifyContent: 'center' },
+  statValue:      { ...text.sectionTitle, color: colors.text },
+  statDivider:    { width: 1, height: 30, backgroundColor: colors.border },
+  pozoBox:        { backgroundColor: colors.backgroundDeep, borderRadius: radii.sm, padding: spacing.sm, marginBottom: spacing.md },
+  progressTrack:  { flex: 1, height: 5, backgroundColor: colors.border, borderRadius: radii.xs, overflow: 'hidden' },
+  progressFill:   { height: '100%', backgroundColor: colors.warning, borderRadius: radii.xs },
+  buttonDisabled: { backgroundColor: colors.backgroundDeep, borderWidth: 1, borderColor: colors.border },
+  reintentarBtn:     { backgroundColor: colors.error, paddingVertical: 11, borderRadius: radii.md, alignItems: 'center', marginTop: spacing.sm },
+  reintentarBtnText: { ...text.itemTitle, color: '#FFF' },
 });

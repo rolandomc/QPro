@@ -85,7 +85,7 @@ export class AdminService {
     return { matches };
   }
 
-  // ─── Crear quiniela con partidos ──────────────────────────────────────────
+  // ─── Crear quiniela con partidos ──────────────────────────────────────────────
   static async createQuinielaConPartidos(
     titulo: string,
     descripcion: string,
@@ -102,8 +102,6 @@ export class AdminService {
     cierreAutomatico: boolean = true,
     primerPartido: string | null = null,
   ) {
-    // Intentamos insertar con las columnas nuevas; si fallan (migración pendiente),
-    // reintentamos sin ellas para no bloquear al admin.
     const insertPayloadFull = {
       titulo,
       descripcion,
@@ -126,14 +124,12 @@ export class AdminService {
       .single();
 
     if (errFull) {
-      // Si el error es por columna inexistente, reintentamos sin las columnas nuevas
       const missingCol = errFull.message?.includes('cierre_automatico') ||
                          errFull.message?.includes('primer_partido') ||
                          errFull.message?.includes('jugadores_minimos') ||
                          errFull.message?.includes('porcentaje_admin');
       if (!missingCol) throw errFull;
 
-      // Fallback: insertar solo con columnas base
       const { data: dataBasic, error: errBasic } = await supabase
         .from('quinielas')
         .insert({
@@ -166,25 +162,24 @@ export class AdminService {
     return quiniela;
   }
 
-  // ─── Obtener quinielas — tolerante a columnas faltantes ──────────────────
+  // ─── Obtener quinielas — incluye campo deporte ──────────────────────────────
   static async getQuinielas() {
-    // Intento 1: select completo con columnas nuevas
     const { data, error } = await supabase
       .from('quinielas')
-      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, auto_resultados, jugadores_minimos, porcentaje_admin, cierre_automatico, primer_partido, created_at, partidos(count)')
+      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, deporte, auto_resultados, jugadores_minimos, porcentaje_admin, cierre_automatico, primer_partido, created_at, partidos(count)')
       .order('created_at', { ascending: false });
 
     if (!error) return data;
 
-    // Si el error es por columnas inexistentes (migración pendiente), select reducido
+    // Fallback si alguna columna no existe (migración pendiente)
     const missingCol = error.message?.includes('cierre_automatico') ||
                        error.message?.includes('primer_partido') ||
                        error.message?.includes('jugadores_minimos') ||
-                       error.message?.includes('porcentaje_admin');
+                       error.message?.includes('porcentaje_admin') ||
+                       error.message?.includes('deporte');
 
     if (!missingCol) throw error;
 
-    // Intento 2: columnas base únicamente
     const { data: dataBasic, error: errBasic } = await supabase
       .from('quinielas')
       .select('id, titulo, descripcion, precio_entrada, premio_total, estado, created_at, partidos(count)')
@@ -192,9 +187,9 @@ export class AdminService {
 
     if (errBasic) throw errBasic;
 
-    // Rellenar con defaults para que la UI no explote
     return (dataBasic ?? []).map((q: any) => ({
       ...q,
+      deporte:            q.deporte            ?? 'futbol',
       jugadores_minimos:  q.jugadores_minimos  ?? 5,
       porcentaje_admin:   q.porcentaje_admin   ?? 10,
       cierre_automatico:  q.cierre_automatico  ?? false,
@@ -202,7 +197,7 @@ export class AdminService {
     }));
   }
 
-  // ─── Cerrar quiniela (verifica minimo y anula si no cumple) ───────────────
+  // ─── Cerrar quiniela ───────────────────────────────────────────────────────────────
   static async cerrarQuiniela(quinielaId: string): Promise<{ valida: boolean; jugadoresPagados: number }> {
     const { data: q, error: errQ } = await supabase
       .from('quinielas')

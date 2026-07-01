@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { colors, spacing, radii, text } from '../theme';
 
 interface Props {
   icon: string;
@@ -8,57 +9,49 @@ interface Props {
   neonColor?: string;
 }
 
-export default function Badge({ icon, title, isUnlocked, neonColor = '#F39C12' }: Props) {
-  // boxShadow calculado dinámicamente con el neonColor recibido por prop
+export default function Badge({ icon, title, isUnlocked, neonColor = colors.warning }: Props) {
   const neonShadow = isUnlocked
-    ? { boxShadow: `0 0 10px 3px ${neonColor}CC` } // CC = ~80% opacidad en hex
+    ? { boxShadow: `0 0 10px 3px ${neonColor}CC` }
     : undefined;
 
   return (
     <View
       style={[
-        styles.container,
+        s.container,
         isUnlocked && { borderColor: neonColor },
-        isUnlocked && styles.unlocked,
+        isUnlocked && s.unlocked,
         neonShadow,
       ]}
     >
-      <Text style={[styles.icon, !isUnlocked && styles.lockedIcon]}>{icon}</Text>
-      <Text style={[styles.title, !isUnlocked && styles.lockedText]}>{title}</Text>
+      <Text style={[s.icon, !isUnlocked && s.lockedIcon]}>{icon}</Text>
+      <Text style={[text.caption, { fontWeight: 'bold', textAlign: 'center', color: isUnlocked ? colors.text : colors.textFaint }]}>
+        {title}
+      </Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: {
     width: 90,
     height: 100,
-    backgroundColor: '#15181F',
-    borderRadius: 16,
-    padding: 10,
+    backgroundColor: colors.card,
+    borderRadius: radii.lg,
+    padding: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 15,
+    marginRight: spacing.md,
     borderWidth: 1.5,
-    borderColor: '#2A2D35',
+    borderColor: colors.border,
   },
   unlocked: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   icon: {
     fontSize: 28,
-    marginBottom: 8,
-  },
-  title: {
-    color: '#FFF',
-    fontSize: 10,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    marginBottom: spacing.sm,
   },
   lockedIcon: {
     opacity: 0.3,
-  },
-  lockedText: {
-    color: '#707070',
   },
 });

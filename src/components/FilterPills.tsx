@@ -1,39 +1,43 @@
-import React, { useState } from 'react';
-import { FlatList, StyleSheet, Text, Pressable } from 'react-native';
+import React from 'react';
+import { ScrollView, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { colors, spacing, radii, text } from '../theme';
+import { common } from '../styles';
 
-const CATEGORIAS = ['Todos', 'Mundial 2026', 'Champions', 'Liga MX', 'Premier'];
+interface Props {
+  options:  string[];
+  selected: string;
+  onChange: (v: string) => void;
+}
 
-export default function FilterPills() {
-  const [active, setActive] = useState('Todos');
-
+export default function FilterPills({ options, selected, onChange }: Props) {
   return (
-    <FlatList
+    <ScrollView
       horizontal
-      data={CATEGORIAS}
-      keyExtractor={(item) => item}
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.container}
-      renderItem={({ item: cat }) => (
-        <Pressable
-          onPress={() => setActive(cat)}
-          style={[styles.pill, active === cat && styles.pillActive]}
-        >
-          <Text style={[styles.text, active === cat && styles.textActive]}>{cat}</Text>
-        </Pressable>
-      )}
-    />
+      contentContainerStyle={s.row}
+    >
+      {options.map((opt) => {
+        const active = opt === selected;
+        return (
+          <TouchableOpacity
+            key={opt}
+            style={active ? common.pillActive : common.pill}
+            onPress={() => onChange(opt)}
+            activeOpacity={0.75}
+          >
+            <Text style={active ? common.pillTextActive : common.pillText}>{opt}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { paddingHorizontal: 15, paddingVertical: 10, gap: 10, marginBottom: 10 },
-  pill: {
-    paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20,
-    backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35',
+const s = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
   },
-  pillActive: {
-    backgroundColor: 'rgba(46, 204, 113, 0.1)', borderColor: '#2ECC71',
-  },
-  text: { color: '#A0A0A0', fontSize: 13, fontWeight: '600' },
-  textActive: { color: '#2ECC71', fontWeight: 'bold' },
 });

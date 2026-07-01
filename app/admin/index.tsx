@@ -13,6 +13,7 @@ import { AdminService } from '../../src/services/admin.service';
 import { QuinielasService } from '../../src/services/quinielas.service';
 import { supabase } from '../../src/config/supabase';
 import DateTimePicker from '../../src/components/DateTimePicker';
+import { SlidingTabs } from '../../src/components/SlidingTabs';
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
 function formatDisplay(iso: string) {
@@ -38,10 +39,10 @@ const FILTROS: { key: FiltroEstado; label: string; color: string }[] = [
   { key: 'nula',     label: 'Nulas',     color: '#A0A0A0' },
 ];
 
-const FILTROS_DEPORTE: { key: FiltroDeporte; label: string; color: string; emoji: string }[] = [
-  { key: 'todos',   label: 'Todos',   color: '#9B59B6', emoji: '🏆' },
-  { key: 'futbol',  label: 'Fútbol',  color: '#2ECC71', emoji: '⚽' },
-  { key: 'beisbol', label: 'Béisbol', color: '#E8A020', emoji: '⚾' },
+const TABS_DEPORTE = [
+  { key: 'todos',   label: 'Todos',   emoji: '🏆', color: '#9B59B6' },
+  { key: 'futbol',  label: 'Fútbol',  emoji: '⚽', color: '#2ECC71' },
+  { key: 'beisbol', label: 'Béisbol', emoji: '⚾', color: '#E8A020' },
 ];
 
 const FILTROS_SPEI: { key: FiltroSPEI; label: string; color: string }[] = [
@@ -622,7 +623,7 @@ export default function AdminDashboardScreen() {
                   <TouchableOpacity
                     key={f.key}
                     style={[styles.filtroPill, activo && { backgroundColor: f.color, borderColor: f.color }, !activo && { borderColor: f.color }]}
-                    onPress={() => setFiltroSPEI(f.key)}
+                    onPress={() => setFiltroSPEI(f.key as FiltroSPEI)}
                   >
                     <Text style={[styles.filtroPillText, { color: activo ? '#000' : f.color }]}>{f.label}</Text>
                     <View style={[styles.filtroCount, activo ? { backgroundColor: 'rgba(0,0,0,0.2)' } : { backgroundColor: `${f.color}22` }]}>
@@ -880,23 +881,15 @@ export default function AdminDashboardScreen() {
           })}
         </ScrollView>
 
-        {/* Filtro por deporte */}
-        <View style={styles.deporteFiltroRow}>
-          {FILTROS_DEPORTE.map(f => {
-            const activo = filtroDeporte === f.key;
-            return (
-              <TouchableOpacity
-                key={f.key}
-                style={[styles.deportePill, activo && { backgroundColor: f.color + '22', borderColor: f.color }]}
-                onPress={() => setFiltroDeporte(f.key)}
-                activeOpacity={0.75}
-              >
-                <Text style={styles.deportePillEmoji}>{f.emoji}</Text>
-                <Text style={[styles.deportePillText, { color: activo ? f.color : '#A0A0A0' }]}>{f.label}</Text>
-                {activo && <View style={[styles.deportePillDot, { backgroundColor: f.color }]} />}
-              </TouchableOpacity>
-            );
-          })}
+        {/* ── Filtro por deporte — SlidingTabs ── */}
+        <View style={styles.slidingTabsWrapper}>
+          <SlidingTabs
+            tabs={TABS_DEPORTE}
+            activeKey={filtroDeporte}
+            onChange={(key) => setFiltroDeporte(key as FiltroDeporte)}
+            barColor="#15181F"
+            pillColor="#2A2D35"
+          />
         </View>
 
         {quinielasFiltradas.length === 0 && (
@@ -1200,12 +1193,8 @@ const styles = StyleSheet.create({
   filtroCount:          { borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5 },
   filtroCountText:      { fontSize: 11, fontWeight: 'bold' },
 
-  // Filtro deporte
-  deporteFiltroRow:     { flexDirection: 'row', gap: 8, marginBottom: 14, marginTop: 2 },
-  deportePill:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5, borderColor: '#2A2D35', backgroundColor: '#15181F' },
-  deportePillEmoji:     { fontSize: 16 },
-  deportePillText:      { fontSize: 12, fontWeight: '700' },
-  deportePillDot:       { width: 6, height: 6, borderRadius: 3 },
+  // SlidingTabs wrapper
+  slidingTabsWrapper:   { marginBottom: 14, marginTop: 2 },
 
   emptyBox:             { padding: 30, alignItems: 'center' },
   emptyText:            { color: '#505050', fontSize: 14 },

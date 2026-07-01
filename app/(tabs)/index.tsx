@@ -40,8 +40,10 @@ export default function QuinielasScreen() {
     await loadQuinielas();
   }, [loadQuinielas]);
 
+  // Fútbol: quinielas sin campo deporte O con deporte === 'futbol'
+  // Béisbol/otros: filtrar exacto por deporte
   const quinielasFiltradas = deporteActivo === 'futbol'
-    ? quinielas
+    ? quinielas.filter((q) => !q.deporte || q.deporte === 'futbol')
     : quinielas.filter((q) => q.deporte === deporteActivo);
 
   const { titulo, emoji } = DEPORTE_LABELS[deporteActivo];
@@ -81,7 +83,7 @@ export default function QuinielasScreen() {
         bounces={true}
         alwaysBounceVertical={true}
         ListEmptyComponent={
-          deporteActivo !== 'futbol'
+          deporteActivo === 'basquet'
             ? (
               <View style={styles.proximamenteContainer}>
                 <Text style={styles.proximamenteEmoji}>{emoji}</Text>

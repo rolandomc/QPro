@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
-import Header from '../../src/components/Header';
+import Header, { type Deporte } from '../../src/components/Header';
 import { QuinielaCard } from '../../src/components/QuinielaCard';
 import SegmentedControl from '../../src/components/SegmentedControl';
 import { supabase } from '../../src/config/supabase';
@@ -28,6 +28,7 @@ export default function ResultsScreen() {
   const [participaciones, setParticipaciones] = useState<any[]>([]);
   const [loading,         setLoading]         = useState(true);
   const [refreshing,      setRefreshing]      = useState(false);
+  const [deporteActivo,   setDeporteActivo]   = useState<Deporte>('futbol');
 
   const loadData = useCallback(async () => {
     try {
@@ -40,7 +41,7 @@ export default function ResultsScreen() {
           id, aciertos, estado, premio_ganado, monto_pagado, created_at,
           quinielas (
             id, titulo, descripcion, precio_entrada, premio_total, estado,
-            fecha_cierre, jugadores_minimos, porcentaje_admin,
+            fecha_cierre, jugadores_minimos, porcentaje_admin, deporte,
             partidos ( id ),
             participaciones ( count )
           )
@@ -91,10 +92,17 @@ export default function ResultsScreen() {
     await loadData();
   }, [loadData]);
 
-  const enJuego  = participaciones.filter((p: any) =>
+  // ── Filtrar por deporte activo ────────────────────────────────────────────────
+  const participacionesFiltradas = participaciones.filter((p: any) => {
+    const dep = p.quinielas?.deporte;
+    if (deporteActivo === 'futbol') return !dep || dep === 'futbol';
+    return dep === deporteActivo;
+  });
+
+  const enJuego  = participacionesFiltradas.filter((p: any) =>
     ['abierta', 'cerrada'].includes(p.quinielas?.estado)
   );
-  const historial = participaciones.filter((p: any) =>
+  const historial = participacionesFiltradas.filter((p: any) =>
     p.quinielas?.estado === 'finalizada' ||
     p.estado === 'ganador' ||
     p.estado === 'perdedor'
@@ -113,9 +121,11 @@ export default function ResultsScreen() {
   const roiNum = Number(roi);
   const pctAcierto = totalJugadas > 0 ? Math.round((totalGanadas / totalJugadas) * 100) : 0;
 
+  const deporteEmoji = deporteActivo === 'beisbol' ? '⚾' : deporteActivo === 'basquet' ? '🏀' : '⚽';
+
   return (
     <SafeAreaView style={s.container} edges={['top']}>
-      <Header onRefresh={handleRefresh} />
+      <Header deporteActivo={deporteActivo} onDeporteChange={setDeporteActivo} onRefresh={handleRefresh} />
       <SegmentedControl options={['En Juego', 'Historial']} selectedOption={tab} onSelect={setTab} />
 
       {loading ? (
@@ -177,9 +187,9 @@ export default function ResultsScreen() {
               <View style={s.sectionRow}>
                 {tab === 'En Juego' ? (
                   <><View style={s.liveDot} />
-                  <Text style={s.sectionTxt}>Quinielas activas</Text></>
+                  <Text style={s.sectionTxt}>{deporteEmoji} Quinielas activas</Text></>
                 ) : (
-                  <Text style={s.sectionTxt}>Resultados finales</Text>
+                  <Text style={s.sectionTxt}>{deporteEmoji} Resultados finales</Text>
                 )}
                 <View style={s.countPill}>
                   <Text style={s.countTxt}>{lista.length}</Text>
@@ -189,13 +199,13 @@ export default function ResultsScreen() {
           }
           ListEmptyComponent={
             <View style={s.emptyBox}>
-              <Text style={s.emptyIcon}>{tab === 'En Juego' ? '🎥' : '📊'}</Text>
+              <Text style={s.emptyIcon}>{tab === 'En Juego' ? (deporteActivo === 'beisbol' ? '⚾' : '🎥') : '📊'}</Text>
               <Text style={s.emptyTitulo}>
                 {tab === 'En Juego' ? 'Sin quinielas activas' : 'Sin historial aún'}
               </Text>
               <Text style={s.emptySub}>
                 {tab === 'En Juego'
-                  ? 'Las quinielas donde participes aparecerán aquí.'
+                  ? `Las quinielas de ${deporteActivo === 'beisbol' ? 'béisbol' : 'fútbol'} donde participes aparecerán aquí.`
                   : 'Las quinielas finalizadas aparecerán aquí.'}
               </Text>
             </View>

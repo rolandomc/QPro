@@ -8,13 +8,14 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { WalletService } from '../services/wallet.service';
 import { supabase } from '../config/supabase';
 import { colors } from '../theme/colors';
+import { SlidingTabs } from './SlidingTabs';
 
 export type Deporte = 'futbol' | 'beisbol' | 'basquet';
 
-const DEPORTES: { key: Deporte; label: string; emoji: string; proximamente?: boolean }[] = [
+const TABS_DEPORTE: { key: Deporte; label: string; emoji: string; disabled?: boolean }[] = [
   { key: 'futbol',  label: 'Fútbol',     emoji: '⚽' },
-  { key: 'beisbol', label: 'Béisbol',    emoji: '⚾' },   // ← habilitado
-  { key: 'basquet', label: 'Básquetbol', emoji: '🏀', proximamente: true },
+  { key: 'beisbol', label: 'Béisbol',    emoji: '⚾' },
+  { key: 'basquet', label: 'Básquet',    emoji: '🏀', disabled: true },
 ];
 
 const NOTIF_ICON: Record<string, string> = {
@@ -45,7 +46,6 @@ interface Props {
 
 export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRefresh }: Props) {
   const router = useRouter();
-  const [menuVisible,   setMenuVisible]   = useState(false);
   const [notifVisible,  setNotifVisible]  = useState(false);
   const [saldo,         setSaldo]         = useState<number | null>(null);
   const [notifs,        setNotifs]        = useState<any[]>([]);
@@ -142,54 +142,59 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
   const noLeidas  = visibleNotifs.filter(n => !n.leida).length;
   const hayLeidas = visibleNotifs.some(n => n.leida);
 
-  const deporteLabel = DEPORTES.find(d => d.key === deporteActivo);
-  const saldoLabel   = saldo === null
+  const saldoLabel = saldo === null
     ? '...'
     : `$${saldo.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
 
   return (
-    <View style={styles.header}>
-      {/* Logo + selector deporte */}
-      <Pressable style={styles.logoRow} onPress={() => setMenuVisible(true)}>
+    <View style={styles.container}>
+      {/* Fila superior: logo + saldo + refresh + campanita */}
+      <View style={styles.topRow}>
         <Text style={styles.headerTitle}>
           <Text style={styles.neonTextGreen}>Q</Text>
           <Text style={styles.logoWhite}>Pro</Text>
         </Text>
-        <View style={styles.deportePill}>
-          <Text style={styles.deportePillText}>
-            {deporteLabel?.emoji} {deporteLabel?.label}
-          </Text>
-          <Text style={styles.chevron}>▾</Text>
-        </View>
-      </Pressable>
 
-      {/* Saldo + refresh + campanita */}
-      <View style={styles.rightGroup}>
-        <Pressable style={styles.balanceButton} onPress={() => router.push('/wallet')}>
-          <Text style={styles.balanceText}>{saldoLabel}</Text>
-        </Pressable>
-
-        {onRefresh && (
-          <Pressable
-            style={[styles.iconBtn, spinning && styles.iconBtnActive]}
-            onPress={handleRefreshPress}
-            disabled={spinning}
-          >
-            <Animated.Text style={[styles.refreshIcon, { transform: [{ rotate: spin }] }]}>
-              ↻
-            </Animated.Text>
+        <View style={styles.rightGroup}>
+          <Pressable style={styles.balanceButton} onPress={() => router.push('/wallet')}>
+            <Text style={styles.balanceText}>{saldoLabel}</Text>
           </Pressable>
-        )}
 
-        <Pressable style={styles.bellBtn} onPress={handleOpenNotifs}>
-          <Text style={styles.bellIcon}>🔔</Text>
-          {noLeidas > 0 && (
-            <View style={styles.badgeWrap}>
-              <Text style={styles.badgeTxt}>{noLeidas > 99 ? '99+' : noLeidas}</Text>
-            </View>
+          {onRefresh && (
+            <Pressable
+              style={[styles.iconBtn, spinning && styles.iconBtnActive]}
+              onPress={handleRefreshPress}
+              disabled={spinning}
+            >
+              <Animated.Text style={[styles.refreshIcon, { transform: [{ rotate: spin }] }]}>
+                ↻
+              </Animated.Text>
+            </Pressable>
           )}
-        </Pressable>
+
+          <Pressable style={styles.bellBtn} onPress={handleOpenNotifs}>
+            <Text style={styles.bellIcon}>🔔</Text>
+            {noLeidas > 0 && (
+              <View style={styles.badgeWrap}>
+                <Text style={styles.badgeTxt}>{noLeidas > 99 ? '99+' : noLeidas}</Text>
+              </View>
+            )}
+          </Pressable>
+        </View>
       </View>
+
+      {/* Fila inferior: SlidingTabs de deporte */}
+      {onDeporteChange && (
+        <View style={styles.tabsRow}>
+          <SlidingTabs
+            tabs={TABS_DEPORTE.filter(t => !t.disabled).map(t => ({ key: t.key, label: t.label, emoji: t.emoji }))}
+            activeKey={deporteActivo === 'basquet' ? 'futbol' : deporteActivo}
+            onChange={(key) => onDeporteChange(key as Deporte)}
+            barColor="#15181F"
+            pillColor="#2A2D35"
+          />
+        </View>
+      )}
 
       {/* Panel notificaciones */}
       <Modal visible={notifVisible} transparent animationType="fade" onRequestClose={() => setNotifVisible(false)}>
@@ -258,69 +263,27 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-
-      {/* Modal selector de deporte */}
-      <Modal visible={menuVisible} transparent animationType="fade" onRequestClose={() => setMenuVisible(false)}>
-        <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
-          <View style={styles.overlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.dropdown}>
-                <Text style={styles.dropdownTitle}>Seleccionar deporte</Text>
-                {DEPORTES.map((d) => (
-                  <TouchableOpacity
-                    key={d.key}
-                    style={[
-                      styles.dropdownItem,
-                      deporteActivo === d.key && styles.dropdownItemActive,
-                      d.proximamente && styles.dropdownItemDisabled,
-                    ]}
-                    onPress={() => { if (!d.proximamente) { onDeporteChange?.(d.key); setMenuVisible(false); } }}
-                    activeOpacity={d.proximamente ? 1 : 0.7}
-                  >
-                    <Text style={styles.dropdownEmoji}>{d.emoji}</Text>
-                    <Text style={[
-                      styles.dropdownLabel,
-                      deporteActivo === d.key && styles.dropdownLabelActive,
-                      d.proximamente && styles.dropdownLabelDisabled,
-                    ]}>{d.label}</Text>
-                    {d.proximamente && (
-                      <View style={styles.proximamenteBadge}>
-                        <Text style={styles.proximamenteText}>Próximamente</Text>
-                      </View>
-                    )}
-                    {deporteActivo === d.key && !d.proximamente && (
-                      <Text style={styles.checkmark}>✓</Text>
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15 },
-  logoRow:          { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerTitle:      { fontSize: 22, fontWeight: 'bold' },
-  neonTextGreen:    { color: colors.primary, fontWeight: 'bold', textShadowColor: 'rgba(46,204,113,0.8)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10 },
-  logoWhite:        { color: colors.text, fontWeight: 'bold' },
-  deportePill:      { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: colors.border, gap: 4 },
-  deportePillText:  { color: colors.text, fontSize: 13, fontWeight: '600' },
-  chevron:          { color: colors.textMuted, fontSize: 11 },
-  rightGroup:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  balanceButton:    { backgroundColor: colors.surface, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: colors.primary },
-  balanceText:      { color: colors.primary, fontWeight: 'bold', fontSize: 13 },
-  iconBtn:          { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center' },
-  iconBtnActive:    { borderColor: colors.primary, backgroundColor: colors.primaryDim },
-  refreshIcon:      { color: colors.textMuted, fontSize: 18, lineHeight: 20 },
-  bellBtn:          { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center' },
-  bellIcon:         { fontSize: 18 },
-  badgeWrap:        { position: 'absolute', top: -2, right: -2, backgroundColor: colors.error, borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 1.5, borderColor: colors.background },
-  badgeTxt:         { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
+  container:          { backgroundColor: 'transparent' },
+  topRow:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 15, paddingBottom: 10 },
+  tabsRow:            { paddingHorizontal: 20, paddingBottom: 10 },
+  headerTitle:        { fontSize: 22, fontWeight: 'bold' },
+  neonTextGreen:      { color: colors.primary, fontWeight: 'bold', textShadowColor: 'rgba(46,204,113,0.8)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10 },
+  logoWhite:          { color: colors.text, fontWeight: 'bold' },
+  rightGroup:         { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  balanceButton:      { backgroundColor: colors.surface, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: colors.primary },
+  balanceText:        { color: colors.primary, fontWeight: 'bold', fontSize: 13 },
+  iconBtn:            { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center' },
+  iconBtnActive:      { borderColor: colors.primary, backgroundColor: colors.primaryDim },
+  refreshIcon:        { color: colors.textMuted, fontSize: 18, lineHeight: 20 },
+  bellBtn:            { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center' },
+  bellIcon:           { fontSize: 18 },
+  badgeWrap:          { position: 'absolute', top: -2, right: -2, backgroundColor: colors.error, borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 1.5, borderColor: colors.background },
+  badgeTxt:           { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
   notifOverlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)' },
   notifPanel:         { position: 'absolute', top: 70, right: 16, width: 320, maxHeight: 480, backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.7, shadowRadius: 24, elevation: 24 },
   notifPanelHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
@@ -349,17 +312,4 @@ const styles = StyleSheet.create({
   emptyIcon:          { fontSize: 40, marginBottom: 10, opacity: 0.4 },
   emptyTxt:           { color: colors.textMuted, fontWeight: '700', fontSize: 14, marginBottom: 4 },
   emptySubTxt:        { color: colors.textFaint, fontSize: 12, textAlign: 'center' },
-  overlay:               { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-start', paddingTop: 90, paddingHorizontal: 20 },
-  dropdown:              { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, paddingVertical: 8, overflow: 'hidden' },
-  dropdownTitle:         { color: colors.textFaint, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
-  dropdownItem:          { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
-  dropdownItemActive:    { backgroundColor: colors.primaryDim },
-  dropdownItemDisabled:  { opacity: 0.45 },
-  dropdownEmoji:         { fontSize: 20 },
-  dropdownLabel:         { color: colors.text, fontSize: 15, fontWeight: '600', flex: 1 },
-  dropdownLabelActive:   { color: colors.primary },
-  dropdownLabelDisabled: { color: colors.textFaint },
-  proximamenteBadge:     { backgroundColor: 'rgba(243,156,18,0.15)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: colors.warning },
-  proximamenteText:      { color: colors.warning, fontSize: 10, fontWeight: '700' },
-  checkmark:             { color: colors.primary, fontSize: 16, fontWeight: 'bold' },
 });

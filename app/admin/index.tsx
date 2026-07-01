@@ -31,12 +31,12 @@ type FiltroEstado  = 'todas' | 'abierta' | 'cerrada' | 'finalizada' | 'nula';
 type FiltroSPEI    = 'todos' | 'pendiente_revision' | 'spei_pendiente' | 'pagado';
 type FiltroDeporte = 'todos' | 'futbol' | 'beisbol';
 
-const FILTROS: { key: FiltroEstado; label: string; color: string }[] = [
-  { key: 'todas',     label: 'Todas',     color: '#9B59B6' },
-  { key: 'abierta',  label: 'Abiertas',  color: '#2ECC71' },
-  { key: 'cerrada',  label: 'Cerradas',  color: '#3498DB' },
-  { key: 'finalizada', label: 'Canceladas', color: '#E74C3C' },
-  { key: 'nula',     label: 'Nulas',     color: '#A0A0A0' },
+const TABS_ESTADO: { key: FiltroEstado; label: string; emoji: string; color: string }[] = [
+  { key: 'todas',      label: 'Todas',    emoji: '📋', color: '#9B59B6' },
+  { key: 'abierta',   label: 'Abiertas', emoji: '🟢', color: '#2ECC71' },
+  { key: 'cerrada',   label: 'Cerradas', emoji: '🔵', color: '#3498DB' },
+  { key: 'finalizada',label: 'Canceladas',emoji: '🔴', color: '#E74C3C' },
+  { key: 'nula',      label: 'Nulas',    emoji: '⚫', color: '#A0A0A0' },
 ];
 
 const TABS_DEPORTE = [
@@ -45,11 +45,11 @@ const TABS_DEPORTE = [
   { key: 'beisbol', label: 'Béisbol', emoji: '⚾', color: '#E8A020' },
 ];
 
-const FILTROS_SPEI: { key: FiltroSPEI; label: string; color: string }[] = [
-  { key: 'todos',              label: 'Todos',            color: '#9B59B6' },
-  { key: 'spei_pendiente',     label: '⏳ Por revisar',   color: '#F39C12' },
-  { key: 'pendiente_revision', label: '👁 Rev. manual',   color: '#3498DB' },
-  { key: 'pagado',             label: '✅ Aprobados',     color: '#2ECC71' },
+const TABS_SPEI: { key: FiltroSPEI; label: string; emoji: string; color: string }[] = [
+  { key: 'todos',              label: 'Todos',       emoji: '📋', color: '#9B59B6' },
+  { key: 'spei_pendiente',     label: 'Pendientes',  emoji: '⏳', color: '#F39C12' },
+  { key: 'pendiente_revision', label: 'Revisión',    emoji: '👁',  color: '#3498DB' },
+  { key: 'pagado',             label: 'Aprobados',   emoji: '✅', color: '#2ECC71' },
 ];
 
 function pickFileWeb(): Promise<File | null> {
@@ -615,24 +615,16 @@ export default function AdminDashboardScreen() {
 
         {speiExpanded && (
           <View style={styles.speiList}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 8 }}>
-              {FILTROS_SPEI.map(f => {
-                const activo = filtroSPEI === f.key;
-                const cnt = f.key === 'todos' ? todosSpei.length : todosSpei.filter(p => p.estado === f.key).length;
-                return (
-                  <TouchableOpacity
-                    key={f.key}
-                    style={[styles.filtroPill, activo && { backgroundColor: f.color, borderColor: f.color }, !activo && { borderColor: f.color }]}
-                    onPress={() => setFiltroSPEI(f.key as FiltroSPEI)}
-                  >
-                    <Text style={[styles.filtroPillText, { color: activo ? '#000' : f.color }]}>{f.label}</Text>
-                    <View style={[styles.filtroCount, activo ? { backgroundColor: 'rgba(0,0,0,0.2)' } : { backgroundColor: `${f.color}22` }]}>
-                      <Text style={[styles.filtroCountText, { color: activo ? '#000' : f.color }]}>{cnt}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            {/* SlidingTabs filtro SPEI */}
+            <View style={styles.slidingTabsWrapper}>
+              <SlidingTabs
+                tabs={TABS_SPEI}
+                activeKey={filtroSPEI}
+                onChange={(key) => setFiltroSPEI(key as FiltroSPEI)}
+                barColor="#0D1117"
+                pillColor="#1C1F26"
+              />
+            </View>
 
             {speiFiltrados.length === 0 ? (
               <Text style={styles.speiEmpty}>✅ Sin registros para este filtro.</Text>
@@ -854,34 +846,20 @@ export default function AdminDashboardScreen() {
           </Text>
         </View>
 
-        {/* Filtro por estado */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtrosContainer}>
-          {FILTROS.map(f => {
-            const activo = filtroEstado === f.key;
-            const quinByEstado = f.key === 'todas'
-              ? quinielas
-              : f.key === 'nula'
-                ? quinielas.filter(q => !q.estado || q.estado === 'nula')
-                : quinielas.filter(q => q.estado === f.key);
-            const count = filtroDeporte === 'todos'
-              ? quinByEstado.length
-              : quinByEstado.filter(q => (q.deporte ?? 'futbol') === filtroDeporte).length;
-            return (
-              <TouchableOpacity
-                key={f.key}
-                style={[styles.filtroPill, activo && { backgroundColor: f.color, borderColor: f.color }, !activo && { borderColor: f.color }]}
-                onPress={() => setFiltroEstado(f.key)}
-              >
-                <Text style={[styles.filtroPillText, { color: activo ? '#000' : f.color }]}>{f.label}</Text>
-                <View style={[styles.filtroCount, activo ? { backgroundColor: 'rgba(0,0,0,0.2)' } : { backgroundColor: `${f.color}22` }]}>
-                  <Text style={[styles.filtroCountText, { color: activo ? '#000' : f.color }]}>{count}</Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        {/* SlidingTabs filtro por estado */}
+        <View style={[styles.slidingTabsWrapper, { marginBottom: 10 }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <SlidingTabs
+              tabs={TABS_ESTADO}
+              activeKey={filtroEstado}
+              onChange={(key) => setFiltroEstado(key as FiltroEstado)}
+              barColor="#15181F"
+              pillColor="#2A2D35"
+            />
+          </ScrollView>
+        </View>
 
-        {/* ── Filtro por deporte — SlidingTabs ── */}
+        {/* SlidingTabs filtro por deporte */}
         <View style={styles.slidingTabsWrapper}>
           <SlidingTabs
             tabs={TABS_DEPORTE}
@@ -1187,13 +1165,6 @@ const styles = StyleSheet.create({
   sectionTitle:         { color: '#A0A0A0', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   sectionCount:         { color: '#505050', fontSize: 12 },
 
-  filtrosContainer:     { paddingBottom: 12, gap: 8 },
-  filtroPill:           { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1.5, backgroundColor: 'transparent' },
-  filtroPillText:       { fontSize: 12, fontWeight: '700' },
-  filtroCount:          { borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5 },
-  filtroCountText:      { fontSize: 11, fontWeight: 'bold' },
-
-  // SlidingTabs wrapper
   slidingTabsWrapper:   { marginBottom: 14, marginTop: 2 },
 
   emptyBox:             { padding: 30, alignItems: 'center' },

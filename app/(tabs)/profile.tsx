@@ -12,6 +12,7 @@ import Badge from '../../src/components/Badge';
 import { AuthService } from '../../src/services/auth.service';
 import { AdminService } from '../../src/services/admin.service';
 import { supabase } from '../../src/config/supabase';
+import { useDeporte } from '../../src/context/DeporteContext';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -29,6 +30,10 @@ function formatFechaCorta(iso: string) {
 
 export default function ProfileScreen() {
   const router = useRouter();
+
+  // ── Deporte global (compartido con todas las tabs) ──────────────────────────
+  const { deporteActivo, setDeporteActivo } = useDeporte();
+
   const [username,    setUsername]    = useState('');
   const [displayName, setDisplayName] = useState('');
   const [fullName,    setFullName]    = useState<string | null>(null);
@@ -50,7 +55,6 @@ export default function ProfileScreen() {
     roi: 0, invertido: 0, ganado: 0, mejorPos: null as number | null,
   });
 
-  // Retiros — el ref evita que retirosOpen entre en deps de loadUserData
   const [retirosOpen,    setRetirosOpen]    = useState(false);
   const retirosOpenRef                      = useRef(false);
   const [retiros,        setRetiros]        = useState<any[]>([]);
@@ -80,7 +84,6 @@ export default function ProfileScreen() {
     if (opening && userIdRef.current) cargarRetiros(userIdRef.current);
   };
 
-  // loadUserData NO depende de retirosOpen ni cargarRetiros
   const loadUserData = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -165,14 +168,13 @@ export default function ProfileScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []); // <-- sin dependencias que cambien al abrir el acordeón
+  }, []);
 
   useFocusEffect(useCallback(() => { setLoading(true); loadUserData(); }, [loadUserData]));
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadUserData();
-    // Si el acordeón está abierto, refrescar retiros también
     if (retirosOpenRef.current && userIdRef.current) {
       cargarRetiros(userIdRef.current);
     }
@@ -271,7 +273,13 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={st.container} edges={['top']}>
-      <Header onRefresh={handleRefresh} />
+      {/* Header con selector de deporte conectado al context global */}
+      <Header
+        deporteActivo={deporteActivo}
+        onDeporteChange={setDeporteActivo}
+        onRefresh={handleRefresh}
+      />
+
       <ScrollView
         contentContainerStyle={st.scroll}
         showsVerticalScrollIndicator={false}
@@ -370,7 +378,7 @@ export default function ProfileScreen() {
           </View>
         </ScrollView>
 
-        {/* ── Historial de Retiros ── */}
+        {/* Historial de Retiros */}
         <TouchableOpacity style={st.retirosToggle} onPress={toggleRetiros} activeOpacity={0.8}>
           <View style={st.retirosToggleLeft}>
             <Text style={st.retirosToggleIcon}>💸</Text>
@@ -402,7 +410,6 @@ export default function ProfileScreen() {
                       </View>
                       <Text style={st.retiroFecha}>{formatFechaCorta(r.created_at)}</Text>
                     </View>
-
                     <View style={st.retiroMontoRow}>
                       <Text style={st.retiroMonto}>
                         ${Number(r.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
@@ -415,14 +422,12 @@ export default function ProfileScreen() {
                         </Text>
                       </View>
                     </View>
-
                     {r.nota_admin ? (
                       <View style={st.retiroNotaBox}>
                         <Text style={st.retiroNotaLabel}>📝 Motivo</Text>
                         <Text style={st.retiroNotaVal}>{r.nota_admin}</Text>
                       </View>
                     ) : null}
-
                     {r.comprobante_url ? (
                       <TouchableOpacity
                         style={st.retiroCompBtn}

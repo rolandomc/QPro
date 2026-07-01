@@ -5,10 +5,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
-import Header, { type Deporte } from '../../src/components/Header';
+import Header from '../../src/components/Header';
 import { QuinielaCard } from '../../src/components/QuinielaCard';
 import SegmentedControl from '../../src/components/SegmentedControl';
 import { supabase } from '../../src/config/supabase';
+import { useDeporte } from '../../src/context/DeporteContext';
 
 function StatBox({ valor, label, color = '#FFF', glow = false }: {
   valor: string; label: string; color?: string; glow?: boolean;
@@ -28,7 +29,8 @@ export default function ResultsScreen() {
   const [participaciones, setParticipaciones] = useState<any[]>([]);
   const [loading,         setLoading]         = useState(true);
   const [refreshing,      setRefreshing]      = useState(false);
-  const [deporteActivo,   setDeporteActivo]   = useState<Deporte>('futbol');
+
+  const { deporteActivo, setDeporteActivo } = useDeporte();
 
   const loadData = useCallback(async () => {
     try {
@@ -72,7 +74,7 @@ export default function ResultsScreen() {
 
       const enriquecido = (data || []).map((item: any) => ({
         ...item,
-        jugadores_count: item.quinielas?.participaciones?.[0]?.count ?? 0,
+        jugadores_count:      item.quinielas?.participaciones?.[0]?.count ?? 0,
         fecha_primer_partido: primerPartidoMap[item.quinielas?.id] ?? item.quinielas?.fecha_cierre ?? null,
       }));
 
@@ -92,7 +94,7 @@ export default function ResultsScreen() {
     await loadData();
   }, [loadData]);
 
-  // ── Filtrar por deporte activo ────────────────────────────────────────────────
+  // Filtrar por deporte activo (viene del context global)
   const participacionesFiltradas = participaciones.filter((p: any) => {
     const dep = p.quinielas?.deporte;
     if (deporteActivo === 'futbol') return !dep || dep === 'futbol';
@@ -118,10 +120,10 @@ export default function ResultsScreen() {
   const roi            = totalInvertido > 0
     ? (((totalGanado - totalInvertido) / totalInvertido) * 100).toFixed(0)
     : '0';
-  const roiNum = Number(roi);
+  const roiNum     = Number(roi);
   const pctAcierto = totalJugadas > 0 ? Math.round((totalGanadas / totalJugadas) * 100) : 0;
 
-  const deporteEmoji = deporteActivo === 'beisbol' ? '⚾' : deporteActivo === 'basquet' ? '🏀' : '⚽';
+  const deporteEmoji = deporteActivo === 'beisbol' ? '\u26be' : deporteActivo === 'basquet' ? '\ud83c\udfc0' : '\u26bd';
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -154,13 +156,13 @@ export default function ResultsScreen() {
               {tab === 'Historial' && totalJugadas > 0 && (
                 <View style={s.statsCard}>
                   <View style={s.statsNeonLine} />
-                  <Text style={s.statsTitle}>TUS ESTADÍSTICAS</Text>
+                  <Text style={s.statsTitle}>TUS ESTAD\u00cdSTICAS</Text>
                   <View style={s.statsGrid}>
-                    <StatBox valor={String(totalJugadas)} label="Jugadas" color="#00E5FF" glow />
+                    <StatBox valor={String(totalJugadas)} label="Jugadas"  color="#00E5FF" glow />
                     <View style={s.statsDiv} />
-                    <StatBox valor={String(totalGanadas)} label="Ganadas" color="#FFD700" glow />
+                    <StatBox valor={String(totalGanadas)} label="Ganadas"  color="#FFD700" glow />
                     <View style={s.statsDiv} />
-                    <StatBox valor={`${pctAcierto}%`} label="Win Rate" color="#9B59B6" glow />
+                    <StatBox valor={`${pctAcierto}%`}     label="Win Rate" color="#9B59B6" glow />
                     <View style={s.statsDiv} />
                     <StatBox
                       valor={`${roiNum >= 0 ? '+' : ''}${roi}%`}
@@ -176,9 +178,9 @@ export default function ResultsScreen() {
                     </View>
                     <View style={[s.statsFinBox, { borderLeftWidth: 1, borderLeftColor: '#1E2330' }]}>
                       <Text style={s.statsFinLbl}>GANADO</Text>
-                      <Text style={[s.statsFinVal, {
-                        color: '#2ECC71', textShadowColor: '#2ECC71', textShadowRadius: 8,
-                      }]}>${totalGanado.toLocaleString()}</Text>
+                      <Text style={[s.statsFinVal, { color: '#2ECC71', textShadowColor: '#2ECC71', textShadowRadius: 8 }]}>
+                        ${totalGanado.toLocaleString()}
+                      </Text>
                     </View>
                   </View>
                 </View>
@@ -199,14 +201,14 @@ export default function ResultsScreen() {
           }
           ListEmptyComponent={
             <View style={s.emptyBox}>
-              <Text style={s.emptyIcon}>{tab === 'En Juego' ? (deporteActivo === 'beisbol' ? '⚾' : '🎥') : '📊'}</Text>
+              <Text style={s.emptyIcon}>{tab === 'En Juego' ? (deporteActivo === 'beisbol' ? '\u26be' : '\ud83c\udfa5') : '\ud83d\udcca'}</Text>
               <Text style={s.emptyTitulo}>
-                {tab === 'En Juego' ? 'Sin quinielas activas' : 'Sin historial aún'}
+                {tab === 'En Juego' ? 'Sin quinielas activas' : 'Sin historial a\u00fan'}
               </Text>
               <Text style={s.emptySub}>
                 {tab === 'En Juego'
-                  ? `Las quinielas de ${deporteActivo === 'beisbol' ? 'béisbol' : 'fútbol'} donde participes aparecerán aquí.`
-                  : 'Las quinielas finalizadas aparecerán aquí.'}
+                  ? `Las quinielas de ${deporteActivo === 'beisbol' ? 'b\u00e9isbol' : 'f\u00fatbol'} donde participes aparecer\u00e1n aqu\u00ed.`
+                  : 'Las quinielas finalizadas aparecer\u00e1n aqu\u00ed.'}
               </Text>
             </View>
           }
@@ -238,35 +240,28 @@ export default function ResultsScreen() {
 }
 
 const s = StyleSheet.create({
-  container:     { flex: 1, backgroundColor: '#0A0C10' },
-  list:          { paddingHorizontal: 14, paddingBottom: 40, paddingTop: 8 },
-  centered:      { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingTxt:    { color: '#606060', fontSize: 13, letterSpacing: 1 },
-  statsCard:     { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 18,
-                   borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                   shadowColor: '#9B59B6', shadowOpacity: 0.2, shadowRadius: 14, elevation: 6 },
-  statsNeonLine: { height: 2, backgroundColor: '#9B59B6',
-                   shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
-  statsTitle:    { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3,
-                   textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
-  statsGrid:     { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 14, alignItems: 'center' },
-  statsDiv:      { width: 1, height: 36, backgroundColor: '#1E2330' },
-  statsFinRow:   { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
-  statsFinBox:   { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  statsFinLbl:   { color: '#404040', fontSize: 9, letterSpacing: 2, marginBottom: 4 },
-  statsFinVal:   { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  sectionRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  liveDot:       { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2ECC71',
-                   shadowColor: '#2ECC71', shadowOpacity: 1, shadowRadius: 6 },
-  sectionTxt:    { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1 },
-  countPill:     { backgroundColor: 'rgba(155,89,182,0.15)', borderRadius: 10,
-                   paddingHorizontal: 10, paddingVertical: 2,
-                   borderWidth: 1, borderColor: '#9B59B6' },
-  countTxt:      { color: '#9B59B6', fontWeight: 'bold', fontSize: 12 },
-  emptyBox:      { alignItems: 'center', paddingTop: 60, gap: 10 },
-  emptyIcon:     { fontSize: 50 },
-  emptyTitulo:   { color: '#FFF', fontSize: 17, fontWeight: 'bold' },
-  emptySub:      { color: '#505050', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  container:   { flex: 1, backgroundColor: '#0A0C10' },
+  list:        { paddingHorizontal: 14, paddingBottom: 40, paddingTop: 8 },
+  centered:    { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingTxt:  { color: '#606060', fontSize: 13, letterSpacing: 1 },
+  statsCard:   { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 18, borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden', shadowColor: '#9B59B6', shadowOpacity: 0.2, shadowRadius: 14, elevation: 6 },
+  statsNeonLine: { height: 2, backgroundColor: '#9B59B6', shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+  statsTitle:  { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3, textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
+  statsGrid:   { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 14, alignItems: 'center' },
+  statsDiv:    { width: 1, height: 36, backgroundColor: '#1E2330' },
+  statsFinRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
+  statsFinBox: { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  statsFinLbl: { color: '#404040', fontSize: 9, letterSpacing: 2, marginBottom: 4 },
+  statsFinVal: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  sectionRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  liveDot:     { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 1, shadowRadius: 6 },
+  sectionTxt:  { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1 },
+  countPill:   { backgroundColor: 'rgba(155,89,182,0.15)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 2, borderWidth: 1, borderColor: '#9B59B6' },
+  countTxt:    { color: '#9B59B6', fontWeight: 'bold', fontSize: 12 },
+  emptyBox:    { alignItems: 'center', paddingTop: 60, gap: 10 },
+  emptyIcon:   { fontSize: 50 },
+  emptyTitulo: { color: '#FFF', fontSize: 17, fontWeight: 'bold' },
+  emptySub:    { color: '#505050', fontSize: 13, textAlign: 'center', lineHeight: 20 },
 });
 
 const sb = StyleSheet.create({

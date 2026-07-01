@@ -58,16 +58,22 @@ export default function QuinielaDetailsScreen() {
   const [confirmState,    setConfirmState]    = useState<ConfirmState>(
     isPendingPago.current ? 'success' : 'idle'
   );
-  const [errorMsg,         setErrorMsg]         = useState('');
-  const [faltanMsg,        setFaltanMsg]        = useState('');
-  const [retryingPago,     setRetryingPago]     = useState(false);
-  const [metodoPago,       setMetodoPago]       = useState<MetodoPago>('mp');
-  const [comprobanteUrl,   setComprobanteUrl]   = useState<string | null>(null);
-  const [speiValidResult,  setSpeiValidResult]  = useState<{ valid: boolean; errorMsg?: string } | null>(null);
+  const [errorMsg,        setErrorMsg]        = useState('');
+  const [faltanMsg,       setFaltanMsg]       = useState('');
+  const [retryingPago,    setRetryingPago]    = useState(false);
+  const [metodoPago,      setMetodoPago]      = useState<MetodoPago>('mp');
+  const [comprobanteUrl,  setComprobanteUrl]  = useState<string | null>(null);
+  const [speiValidResult, setSpeiValidResult] = useState<{ valid: boolean; errorMsg?: string } | null>(null);
 
   const openingRef         = useRef(false);
   const picksOriginalesRef = useRef<Record<string, SeleccionConGoles>>({});
   const participacionIdRef = useRef<string | null>(null);
+
+  // ─── ¿Es béisbol? ───────────────────────────────────────────────────────────
+  const esBeisbol = quiniela?.deporte === 'beisbol';
+  // En béisbol no hay empate → el desempate por puntos (carreras) no aplica igual
+  // Usamos "carreras" en vez de "goles" y ocultamos el bloque de desempate por marcador
+  const labelPuntos = esBeisbol ? 'carreras' : 'goles';
 
   const cargarPicksActuales = useCallback(async (partId: string) => {
     const { data: sels } = await supabase
@@ -155,7 +161,7 @@ export default function QuinielaDetailsScreen() {
     if (!participacionId) return;
     setSaving(true);
     try {
-      const totalGolesPredichos = Object.values(selecciones).reduce(
+      const totalPuntosPredichos = Object.values(selecciones).reduce(
         (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0), 0
       );
       const rows = Object.entries(selecciones).map(([partido_id, sel]) => ({
@@ -167,7 +173,7 @@ export default function QuinielaDetailsScreen() {
       }));
       const [{ error: selErr }] = await Promise.all([
         supabase.from('selecciones').upsert(rows, { onConflict: 'participacion_id,partido_id' }),
-        supabase.from('participaciones').update({ total_goles_predichos: totalGolesPredichos }).eq('id', participacionId),
+        supabase.from('participaciones').update({ total_goles_predichos: totalPuntosPredichos }).eq('id', participacionId),
       ]);
       if (selErr) throw selErr;
       picksOriginalesRef.current = { ...selecciones };
@@ -183,7 +189,7 @@ export default function QuinielaDetailsScreen() {
 
   const handleConfirmarEdicionClick = () => {
     const faltan = partidos.filter(p => !selecciones[p.id]);
-    if (faltan.length > 0) { setFaltanMsg(`⚠️ Aún te faltan ${faltan.length} partido(s).`); return; }
+    if (faltan.length > 0) { setFaltanMsg(`\u26a0\ufe0f A\u00fan te faltan ${faltan.length} partido(s).`); return; }
     setFaltanMsg('');
     setConfirmState('confirmingEdit');
   };
@@ -191,7 +197,7 @@ export default function QuinielaDetailsScreen() {
   const handleConfirmarClick = () => {
     if (yaParticipo) return;
     const faltan = partidos.filter(p => !selecciones[p.id]);
-    if (faltan.length > 0) { setFaltanMsg(`⚠️ Aún te faltan ${faltan.length} partido(s).`); return; }
+    if (faltan.length > 0) { setFaltanMsg(`\u26a0\ufe0f A\u00fan te faltan ${faltan.length} partido(s).`); return; }
     setFaltanMsg('');
     setConfirmState('choosingPayment');
   };
@@ -242,7 +248,6 @@ export default function QuinielaDetailsScreen() {
     }
   };
 
-  // Retoma el flujo SPEI para un usuario que ya tiene spei_pendiente
   const handleRetomarSpei = useCallback(() => {
     participacionIdRef.current = participacionId;
     setComprobanteUrl(null);
@@ -256,10 +261,7 @@ export default function QuinielaDetailsScreen() {
     setConfirmState('speiSubiendo');
     try {
       const url = await SpeiService.subirComprobante(partId);
-      if (!url) {
-        setConfirmState('speiDatos');
-        return;
-      }
+      if (!url) { setConfirmState('speiDatos'); return; }
       setComprobanteUrl(url);
       setConfirmState('speiValidando');
       await handleValidarAutomatico(partId, url);
@@ -297,16 +299,16 @@ export default function QuinielaDetailsScreen() {
       }
     } catch (e: any) {
       openingRef.current = false;
-      Alert.alert('Error', e.message ?? 'No pudimos abrir el pago. Intenta más tarde.');
+      Alert.alert('Error', e.message ?? 'No pudimos abrir el pago. Intenta m\u00e1s tarde.');
     } finally {
       setRetryingPago(false);
     }
   };
 
-  const totalSeleccionados    = Object.keys(selecciones).length;
-  const isComplete            = totalSeleccionados === partidos.length && partidos.length > 0;
-  const puedeEditar           = yaParticipo && quiniela?.estado === 'abierta';
-  const golesPredichosTotales = Object.values(selecciones).reduce(
+  const totalSeleccionados   = Object.keys(selecciones).length;
+  const isComplete           = totalSeleccionados === partidos.length && partidos.length > 0;
+  const puedeEditar          = yaParticipo && quiniela?.estado === 'abierta';
+  const puntosPredichosTotales = Object.values(selecciones).reduce(
     (acc, s) => acc + (s.golesLocal ?? 0) + (s.golesVisitante ?? 0), 0
   );
   const clabe = process.env.EXPO_PUBLIC_CLABE_DESTINO ?? 'CLABE no configurada';
@@ -327,10 +329,10 @@ export default function QuinielaDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
-          <Text style={{ fontSize: 60, marginBottom: 20 }}>🎉</Text>
-          <Text style={styles.successTitle}>¡Listo, ya estás dentro!</Text>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>\ud83c\udf89</Text>
+          <Text style={styles.successTitle}>\u00a1Listo, ya est\u00e1s dentro!</Text>
           <Text style={styles.successSub}>
-            Tus picks fueron guardados y tu participación está confirmada.
+            Tus picks fueron guardados y tu participaci\u00f3n est\u00e1 confirmada.
           </Text>
           <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/results')}>
             <Text style={styles.successBtnTxt}>Ver mis quinielas</Text>
@@ -344,15 +346,15 @@ export default function QuinielaDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
-          <Text style={{ fontSize: 60, marginBottom: 16 }}>📨</Text>
+          <Text style={{ fontSize: 60, marginBottom: 16 }}>\ud83d\udce8</Text>
           <Text style={styles.successTitle}>Comprobante recibido</Text>
           <Text style={styles.successSub}>
-            Revisaremos tu transferencia y te notificaremos cuando se confirme tu participación.
+            Revisaremos tu transferencia y te notificaremos cuando se confirme tu participaci\u00f3n.
           </Text>
           <View style={styles.speiEnviadoCard}>
-            <Text style={styles.speiEnviadoRow}>⏱ Tiempo estimado de revisión</Text>
-            <Text style={styles.speiEnviadoVal}>15 – 60 minutos</Text>
-            <Text style={[styles.speiEnviadoRow, { marginTop: 12 }]}>📩 Recibirás una notificación cuando</Text>
+            <Text style={styles.speiEnviadoRow}>\u23f1 Tiempo estimado de revisi\u00f3n</Text>
+            <Text style={styles.speiEnviadoVal}>15 \u2013 60 minutos</Text>
+            <Text style={[styles.speiEnviadoRow, { marginTop: 12 }]}>\ud83d\udce9 Recibir\u00e1s una notificaci\u00f3n cuando</Text>
             <Text style={styles.speiEnviadoVal}>tu pago sea validado o rechazado</Text>
           </View>
           <TouchableOpacity style={styles.successBtn} onPress={() => router.replace('/')}>
@@ -370,8 +372,8 @@ export default function QuinielaDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
-          <Text style={{ fontSize: 60, marginBottom: 20 }}>✅</Text>
-          <Text style={styles.successTitle}>¡Picks actualizados!</Text>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>\u2705</Text>
+          <Text style={styles.successTitle}>\u00a1Picks actualizados!</Text>
           <Text style={styles.successSub}>Tus cambios quedaron guardados.</Text>
           <TouchableOpacity style={styles.successBtn} onPress={() => setConfirmState('idle')}>
             <Text style={styles.successBtnTxt}>Ver mis picks</Text>
@@ -385,8 +387,8 @@ export default function QuinielaDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
-          <Text style={{ fontSize: 60, marginBottom: 20 }}>❌</Text>
-          <Text style={styles.successTitle}>Algo salió mal</Text>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>\u274c</Text>
+          <Text style={styles.successTitle}>Algo sali\u00f3 mal</Text>
           <Text style={styles.successSub}>{errorMsg}</Text>
           <TouchableOpacity style={styles.successBtn} onPress={() => setConfirmState('idle')}>
             <Text style={styles.successBtnTxt}>Reintentar</Text>
@@ -400,16 +402,19 @@ export default function QuinielaDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centered}>
-          <Text style={{ fontSize: 60, marginBottom: 20 }}>📝</Text>
+          <Text style={{ fontSize: 60, marginBottom: 20 }}>\ud83d\udcdd</Text>
           <Text style={styles.successTitle}>Confirmar cambios</Text>
-          <Text style={styles.successSub}>Se guardarán tus picks actualizados.</Text>
-          <View style={styles.desempateSummary}>
-            <Text style={styles.desempateLabel}>🎯 Tus goles totales predichos</Text>
-            <Text style={styles.desempateValue}>{golesPredichosTotales}</Text>
-            <Text style={styles.desempateHint}>
-              En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
-            </Text>
-          </View>
+          <Text style={styles.successSub}>Se guardar\u00e1n tus picks actualizados.</Text>
+          {/* Solo mostrar desempate si NO es béisbol */}
+          {!esBeisbol && (
+            <View style={styles.desempateSummary}>
+              <Text style={styles.desempateLabel}>\ud83c\udfaf Tus {labelPuntos} totales predichos</Text>
+              <Text style={styles.desempateValue}>{puntosPredichosTotales}</Text>
+              <Text style={styles.desempateHint}>
+                En caso de empate en aciertos, quien m\u00e1s se acerque al total de {labelPuntos} reales gana.
+              </Text>
+            </View>
+          )}
           <TouchableOpacity
             style={[styles.successBtn, saving && styles.btnDisabled]}
             onPress={handleGuardarEdicion}
@@ -432,15 +437,18 @@ export default function QuinielaDetailsScreen() {
       <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
           <ScrollView contentContainerStyle={styles.centered}>
-            <Text style={styles.payTitle}>¿Cómo quieres pagar?</Text>
+            <Text style={styles.payTitle}>\u00bfC\u00f3mo quieres pagar?</Text>
             <Text style={styles.paySub}>Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${monto} MXN</Text></Text>
-            <View style={styles.desempateSummary}>
-              <Text style={styles.desempateLabel}>🎯 Goles totales predichos</Text>
-              <Text style={styles.desempateValue}>{golesPredichosTotales}</Text>
-              <Text style={styles.desempateHint}>
-                En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
-              </Text>
-            </View>
+            {/* Desempate solo para fútbol */}
+            {!esBeisbol && (
+              <View style={styles.desempateSummary}>
+                <Text style={styles.desempateLabel}>\ud83c\udfaf {labelPuntos.charAt(0).toUpperCase() + labelPuntos.slice(1)} totales predichos</Text>
+                <Text style={styles.desempateValue}>{puntosPredichosTotales}</Text>
+                <Text style={styles.desempateHint}>
+                  En caso de empate en aciertos, quien m\u00e1s se acerque al total de {labelPuntos} reales gana.
+                </Text>
+              </View>
+            )}
             <TouchableOpacity
               style={[styles.payOptionCard, metodoPago === 'mp' && styles.payOptionCardActive]}
               onPress={() => setMetodoPago('mp')}
@@ -448,11 +456,11 @@ export default function QuinielaDetailsScreen() {
             >
               <View style={styles.payOptionRow}>
                 <View style={styles.payOptionIconWrap}>
-                  <Text style={styles.payOptionIcon}>💳</Text>
+                  <Text style={styles.payOptionIcon}>\ud83d\udcb3</Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.payOptionTitle}>Mercado Pago</Text>
-                  <Text style={styles.payOptionDesc}>Tarjeta, OXXO, saldo MP — pago instantáneo</Text>
+                  <Text style={styles.payOptionDesc}>Tarjeta, OXXO, saldo MP \u2014 pago instant\u00e1neo</Text>
                 </View>
                 <View style={[styles.radioOuter, metodoPago === 'mp' && styles.radioOuterActive]}>
                   {metodoPago === 'mp' && <View style={styles.radioInner} />}
@@ -460,8 +468,8 @@ export default function QuinielaDetailsScreen() {
               </View>
               {metodoPago === 'mp' && (
                 <View style={styles.payOptionDetail}>
-                  <Text style={styles.payOptionDetailTxt}>✅ Confirmación automática al pagar</Text>
-                  <Text style={styles.payOptionDetailTxt}>✅ Acepta tarjeta, débito, OXXO</Text>
+                  <Text style={styles.payOptionDetailTxt}>\u2705 Confirmaci\u00f3n autom\u00e1tica al pagar</Text>
+                  <Text style={styles.payOptionDetailTxt}>\u2705 Acepta tarjeta, d\u00e9bito, OXXO</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -472,11 +480,11 @@ export default function QuinielaDetailsScreen() {
             >
               <View style={styles.payOptionRow}>
                 <View style={styles.payOptionIconWrap}>
-                  <Text style={styles.payOptionIcon}>🏦</Text>
+                  <Text style={styles.payOptionIcon}>\ud83c\udfe6</Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.payOptionTitle}>Transferencia SPEI</Text>
-                  <Text style={styles.payOptionDesc}>Desde cualquier banco mexicano, sin comisión extra</Text>
+                  <Text style={styles.payOptionDesc}>Desde cualquier banco mexicano, sin comisi\u00f3n extra</Text>
                 </View>
                 <View style={[styles.radioOuter, metodoPago === 'spei' && styles.radioOuterActive]}>
                   {metodoPago === 'spei' && <View style={styles.radioInner} />}
@@ -484,9 +492,9 @@ export default function QuinielaDetailsScreen() {
               </View>
               {metodoPago === 'spei' && (
                 <View style={styles.payOptionDetail}>
-                  <Text style={styles.payOptionDetailTxt}>✅ Sin comisión adicional</Text>
-                  <Text style={styles.payOptionDetailTxt}>✅ Desde cualquier banco (BBVA, HSBC, Santander…)</Text>
-                  <Text style={styles.payOptionDetailTxt}>⚡ Valida tu comprobante automáticamente</Text>
+                  <Text style={styles.payOptionDetailTxt}>\u2705 Sin comisi\u00f3n adicional</Text>
+                  <Text style={styles.payOptionDetailTxt}>\u2705 Desde cualquier banco (BBVA, HSBC, Santander\u2026)</Text>
+                  <Text style={styles.payOptionDetailTxt}>\u26a1 Valida tu comprobante autom\u00e1ticamente</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -498,11 +506,11 @@ export default function QuinielaDetailsScreen() {
               {saving
                 ? <ActivityIndicator color="#000" />
                 : <Text style={styles.confirmBtnTxt}>
-                    {metodoPago === 'mp' ? 'Continuar con Mercado Pago →' : 'Continuar con SPEI →'}
+                    {metodoPago === 'mp' ? 'Continuar con Mercado Pago \u2192' : 'Continuar con SPEI \u2192'}
                   </Text>}
             </TouchableOpacity>
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmState('idle')} disabled={saving}>
-              <Text style={styles.cancelBtnTxt}>← Volver a mis picks</Text>
+              <Text style={styles.cancelBtnTxt}>\u2190 Volver a mis picks</Text>
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -518,7 +526,7 @@ export default function QuinielaDetailsScreen() {
       <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
           <ScrollView contentContainerStyle={styles.centered}>
-            <Text style={{ fontSize: 52, marginBottom: 16 }}>🏦</Text>
+            <Text style={{ fontSize: 52, marginBottom: 16 }}>\ud83c\udfe6</Text>
             <Text style={styles.payTitle}>Paga y confirma</Text>
             <Text style={styles.paySub}>
               Realiza una transferencia SPEI por{' '}
@@ -528,7 +536,7 @@ export default function QuinielaDetailsScreen() {
               <Text style={styles.clabeLabel}>CLABE Interbancaria</Text>
               <Text style={styles.clabeValue} selectable>{clabe}</Text>
               <Text style={styles.clabeHint}>
-                Concepto: QPro – {id?.toString().slice(0, 8).toUpperCase()}
+                Concepto: QPro \u2013 {id?.toString().slice(0, 8).toUpperCase()}
               </Text>
             </View>
             <View style={styles.spaySeparator}>
@@ -537,11 +545,11 @@ export default function QuinielaDetailsScreen() {
               <View style={styles.spaySeparatorLine} />
             </View>
             <Text style={styles.speiInstruccion}>
-              Sube tu <Text style={{ color: '#E0E0E0', fontWeight: '600' }}>comprobante de transferencia</Text> (imagen o XML) para confirmar tu participación automáticamente.
+              Sube tu <Text style={{ color: '#E0E0E0', fontWeight: '600' }}>comprobante de transferencia</Text> (imagen o XML) para confirmar tu participaci\u00f3n autom\u00e1ticamente.
             </Text>
             {comprobanteUrl ? (
               <View style={styles.comprobanteOkBox}>
-                <Text style={styles.comprobanteOkTxt}>✅ Comprobante subido correctamente</Text>
+                <Text style={styles.comprobanteOkTxt}>\u2705 Comprobante subido correctamente</Text>
               </View>
             ) : null}
             {validando ? (
@@ -564,7 +572,7 @@ export default function QuinielaDetailsScreen() {
                   </View>
                 ) : (
                   <Text style={styles.speiUploadBtnTxt}>
-                    {comprobanteUrl ? '🔄 Cambiar comprobante' : '📎 Subir comprobante'}
+                    {comprobanteUrl ? '\ud83d\udd04 Cambiar comprobante' : '\ud83d\udcce Subir comprobante'}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -577,7 +585,7 @@ export default function QuinielaDetailsScreen() {
               onPress={() => setConfirmState('choosingPayment')}
               disabled={ocupado}
             >
-              <Text style={styles.cancelBtnTxt}>← Cambiar método de pago</Text>
+              <Text style={styles.cancelBtnTxt}>\u2190 Cambiar m\u00e9todo de pago</Text>
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -589,14 +597,14 @@ export default function QuinielaDetailsScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backIcon}>‹</Text>
+          <Text style={styles.backIcon}>\u2039</Text>
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {quiniela?.titulo ?? 'Quiniela'}
           </Text>
           <Text style={styles.headerSub}>
-            {quiniela?.estado === 'abierta' ? '🟢 Abierta' : '🔴 Cerrada'}
+            {quiniela?.estado === 'abierta' ? '\ud83d\udfe2 Abierta' : '\ud83d\udd34 Cerrada'}
           </Text>
         </View>
         <View style={{ width: 36 }} />
@@ -615,21 +623,20 @@ export default function QuinielaDetailsScreen() {
         <View style={styles.participandoWrap}>
           <View style={styles.participandoBanner}>
             <Text style={styles.participandoText}>
-              ✅ Ya tienes picks guardados  •  🎯 {golesPredichosTotales} goles predichos
+              {esBeisbol
+                ? `\u2705 Ya tienes picks guardados  \u2022  \u26be ${puntosPredichosTotales} carreras predichas`
+                : `\u2705 Ya tienes picks guardados  \u2022  \ud83c\udfaf ${puntosPredichosTotales} goles predichos`
+              }
             </Text>
           </View>
-
-          {/* Botón editar picks */}
           {puedeEditar && (
             <TouchableOpacity style={styles.editBtn} onPress={() => setModoEdicion(true)}>
-              <Text style={styles.editBtnTxt}>✏️ Editar mis picks</Text>
+              <Text style={styles.editBtnTxt}>\u270f\ufe0f Editar mis picks</Text>
             </TouchableOpacity>
           )}
-
-          {/* Botón subir comprobante SPEI — solo si el pago está pendiente por SPEI */}
           {estadoPago === 'spei_pendiente' && quiniela?.estado === 'abierta' && (
             <TouchableOpacity style={styles.speiRetryBtn} onPress={handleRetomarSpei}>
-              <Text style={styles.speiRetryBtnTxt}>🏦 Subir comprobante SPEI</Text>
+              <Text style={styles.speiRetryBtnTxt}>\ud83c\udfe6 Subir comprobante SPEI</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -638,9 +645,8 @@ export default function QuinielaDetailsScreen() {
       {pagoPendiente && !modoEdicion && (
         <View style={styles.pendingBanner}>
           <Text style={styles.pendingBannerText}>
-            ⏳ Tu pago está pendiente. Tus picks están guardados.
+            \u23f3 Tu pago est\u00e1 pendiente. Tus picks est\u00e1n guardados.
           </Text>
-          {/* Solo mostrar Reintentar MP si el método pendiente es MP */}
           {estadoPago === 'pendiente' && (
             <TouchableOpacity style={styles.pendingBannerBtn} onPress={handleReintentarPago} disabled={retryingPago}>
               {retryingPago
@@ -651,10 +657,20 @@ export default function QuinielaDetailsScreen() {
         </View>
       )}
 
-      {(!yaParticipo || modoEdicion) && (
+      {/* Banner desempate: solo para fútbol */}
+      {(!yaParticipo || modoEdicion) && !esBeisbol && (
         <View style={styles.desempateInfoBanner}>
           <Text style={styles.desempateInfoText}>
-            ⚔️ <Text style={{ fontWeight: '600' }}>Desempate por goles:</Text> ingresa el marcador exacto que predices. En caso de empate en aciertos, quien más se acerque al total de goles reales gana.
+            \u2694\ufe0f <Text style={{ fontWeight: '600' }}>Desempate por goles:</Text> ingresa el marcador exacto que predices. En caso de empate en aciertos, quien m\u00e1s se acerque al total de goles reales gana.
+          </Text>
+        </View>
+      )}
+
+      {/* Banner béisbol: sin empate */}
+      {(!yaParticipo || modoEdicion) && esBeisbol && (
+        <View style={[styles.desempateInfoBanner, styles.beisbolInfoBanner]}>
+          <Text style={styles.desempateInfoText}>
+            \u26be <Text style={{ fontWeight: '600' }}>B\u00e9isbol MLB:</Text> no hay empate \u2014 selecciona Local o Visitante. En caso de empate en aciertos, se usa el total de carreras predichas como desempate.
           </Text>
         </View>
       )}
@@ -691,7 +707,7 @@ export default function QuinielaDetailsScreen() {
                 onPress={handleConfirmarClick}
                 disabled={!isComplete}
               >
-                <Text style={styles.confirmBtnTxt}>Confirmar picks y elegir pago →</Text>
+                <Text style={styles.confirmBtnTxt}>Confirmar picks y elegir pago \u2192</Text>
               </TouchableOpacity>
             )}
             {modoEdicion && (
@@ -706,7 +722,7 @@ export default function QuinielaDetailsScreen() {
                     : <Text style={styles.confirmBtnTxt}>Guardar cambios</Text>}
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.cancelBtn} onPress={handleCancelarEdicion} disabled={saving}>
-                  <Text style={styles.cancelBtnTxt}>Cancelar edición</Text>
+                  <Text style={styles.cancelBtnTxt}>Cancelar edici\u00f3n</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -733,128 +749,68 @@ const styles = StyleSheet.create({
   headerSub:    { color: '#606060', fontSize: 11, marginTop: 2 },
   progressWrap: { paddingHorizontal: 16, paddingTop: 12 },
   progressText: { color: '#606060', fontSize: 12, marginTop: 6, marginBottom: 4 },
-  participandoWrap: { marginHorizontal: 16, marginTop: 12, gap: 8 },
-  participandoBanner: {
-    backgroundColor: '#0D2B1A', borderRadius: 10,
-    borderWidth: 1, borderColor: '#1A4D2E', padding: 12,
-  },
-  participandoText: { color: '#2ECC71', fontSize: 13, textAlign: 'center' },
-  editBtn:    { backgroundColor: '#1E2128', borderRadius: 10, padding: 12, alignItems: 'center' },
-  editBtnTxt: { color: '#E0E0E0', fontSize: 14, fontWeight: '600' },
-  // Botón de reintento SPEI — estilo azul/bancario discreto
-  speiRetryBtn: {
-    backgroundColor: '#0D1A2B',
-    borderRadius: 10,
-    padding: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#1A3A5C',
-  },
+  participandoWrap:   { marginHorizontal: 16, marginTop: 12, gap: 8 },
+  participandoBanner: { backgroundColor: '#0D2B1A', borderRadius: 10, borderWidth: 1, borderColor: '#1A4D2E', padding: 12 },
+  participandoText:   { color: '#2ECC71', fontSize: 13, textAlign: 'center' },
+  editBtn:     { backgroundColor: '#1E2128', borderRadius: 10, padding: 12, alignItems: 'center' },
+  editBtnTxt:  { color: '#E0E0E0', fontSize: 14, fontWeight: '600' },
+  speiRetryBtn:    { backgroundColor: '#0D1A2B', borderRadius: 10, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: '#1A3A5C' },
   speiRetryBtnTxt: { color: '#4DABB8', fontSize: 14, fontWeight: '600' },
-  pendingBanner: {
-    backgroundColor: '#2B1D0A', marginHorizontal: 16, marginTop: 10,
-    borderRadius: 10, padding: 12, gap: 10,
-    borderWidth: 1, borderColor: '#5C3A1E',
-  },
-  pendingBannerText:    { color: '#E0A050', fontSize: 13, textAlign: 'center' },
-  pendingBannerBtn:     { backgroundColor: '#2ECC71', borderRadius: 8, padding: 10, alignItems: 'center' },
-  pendingBannerBtnTxt:  { color: '#000', fontWeight: '700', fontSize: 13 },
-  desempateInfoBanner: {
-    marginHorizontal: 16, marginTop: 10, marginBottom: 4,
-    backgroundColor: '#12151F', borderRadius: 10,
-    padding: 12, borderWidth: 1, borderColor: '#1E2535',
-  },
-  desempateInfoText: { color: '#8090B0', fontSize: 12, lineHeight: 18 },
+  pendingBanner:       { backgroundColor: '#2B1D0A', marginHorizontal: 16, marginTop: 10, borderRadius: 10, padding: 12, gap: 10, borderWidth: 1, borderColor: '#5C3A1E' },
+  pendingBannerText:   { color: '#E0A050', fontSize: 13, textAlign: 'center' },
+  pendingBannerBtn:    { backgroundColor: '#2ECC71', borderRadius: 8, padding: 10, alignItems: 'center' },
+  pendingBannerBtnTxt: { color: '#000', fontWeight: '700', fontSize: 13 },
+  desempateInfoBanner: { marginHorizontal: 16, marginTop: 10, marginBottom: 4, backgroundColor: '#12151F', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#1E2535' },
+  beisbolInfoBanner:   { borderColor: '#2A1F0A', backgroundColor: '#1A1505' },
+  desempateInfoText:   { color: '#8090B0', fontSize: 12, lineHeight: 18 },
   list:   { paddingBottom: 32 },
   footer: { padding: 16, gap: 10 },
   faltanMsg:   { color: '#FF6B6B', fontSize: 13, textAlign: 'center', marginBottom: 8 },
   editActions: { gap: 10 },
-  confirmBtn: {
-    backgroundColor: '#2ECC71', borderRadius: 14,
-    paddingVertical: 16, alignItems: 'center', width: '100%',
-  },
+  confirmBtn:    { backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 16, alignItems: 'center', width: '100%' },
   confirmBtnTxt: { color: '#0A0C12', fontWeight: '800', fontSize: 15 },
   btnDisabled:   { opacity: 0.4 },
   cancelBtn:    { paddingVertical: 14, alignItems: 'center', width: '100%' },
   cancelBtnTxt: { color: '#606060', fontSize: 14 },
   successTitle: { color: '#E0E0E0', fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 12 },
   successSub:   { color: '#808080', fontSize: 14, textAlign: 'center', marginBottom: 24, lineHeight: 22 },
-  successBtn: {
-    backgroundColor: '#2ECC71', borderRadius: 14,
-    paddingVertical: 16, paddingHorizontal: 32,
-    alignItems: 'center', width: '100%',
-  },
+  successBtn:    { backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 16, paddingHorizontal: 32, alignItems: 'center', width: '100%' },
   successBtnTxt: { color: '#0A0C12', fontWeight: '800', fontSize: 15 },
-  desempateSummary: {
-    backgroundColor: '#12151F', borderRadius: 12, padding: 16, width: '100%',
-    marginBottom: 20, borderWidth: 1, borderColor: '#1E2535', alignItems: 'center',
-  },
-  desempateLabel: { color: '#8090B0', fontSize: 12, marginBottom: 4 },
-  desempateValue: { color: '#2ECC71', fontSize: 36, fontWeight: '900', marginBottom: 8 },
-  desempateHint:  { color: '#606880', fontSize: 11, textAlign: 'center', lineHeight: 16 },
+  desempateSummary: { backgroundColor: '#12151F', borderRadius: 12, padding: 16, width: '100%', marginBottom: 20, borderWidth: 1, borderColor: '#1E2535', alignItems: 'center' },
+  desempateLabel:   { color: '#8090B0', fontSize: 12, marginBottom: 4 },
+  desempateValue:   { color: '#2ECC71', fontSize: 36, fontWeight: '900', marginBottom: 8 },
+  desempateHint:    { color: '#606880', fontSize: 11, textAlign: 'center', lineHeight: 16 },
   payTitle: { color: '#E0E0E0', fontSize: 22, fontWeight: '800', marginBottom: 6, textAlign: 'center' },
   paySub:   { color: '#808080', fontSize: 14, marginBottom: 20, textAlign: 'center' },
-  payOptionCard: {
-    width: '100%', backgroundColor: '#12151F',
-    borderRadius: 14, padding: 16, marginBottom: 12,
-    borderWidth: 1.5, borderColor: '#1E2535',
-  },
-  payOptionCardActive: { borderColor: '#2ECC71', backgroundColor: '#0D1A11' },
-  payOptionRow:        { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  payOptionIconWrap:   { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1E2535', justifyContent: 'center', alignItems: 'center' },
-  payOptionIcon:       { fontSize: 22 },
-  payOptionTitle:      { color: '#E0E0E0', fontSize: 15, fontWeight: '700' },
-  payOptionDesc:       { color: '#606060', fontSize: 12, marginTop: 2 },
-  payOptionDetail:     { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#1E2535', gap: 4 },
-  payOptionDetailTxt:  { color: '#60A878', fontSize: 12 },
-  radioOuter: {
-    width: 20, height: 20, borderRadius: 10,
-    borderWidth: 2, borderColor: '#303540',
-    justifyContent: 'center', alignItems: 'center',
-  },
+  payOptionCard:        { width: '100%', backgroundColor: '#12151F', borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1.5, borderColor: '#1E2535' },
+  payOptionCardActive:  { borderColor: '#2ECC71', backgroundColor: '#0D1A11' },
+  payOptionRow:         { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  payOptionIconWrap:    { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1E2535', justifyContent: 'center', alignItems: 'center' },
+  payOptionIcon:        { fontSize: 22 },
+  payOptionTitle:       { color: '#E0E0E0', fontSize: 15, fontWeight: '700' },
+  payOptionDesc:        { color: '#606060', fontSize: 12, marginTop: 2 },
+  payOptionDetail:      { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#1E2535', gap: 4 },
+  payOptionDetailTxt:   { color: '#60A878', fontSize: 12 },
+  radioOuter:       { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#303540', justifyContent: 'center', alignItems: 'center' },
   radioOuterActive: { borderColor: '#2ECC71' },
   radioInner:       { width: 10, height: 10, borderRadius: 5, backgroundColor: '#2ECC71' },
-  clabeBanner: {
-    width: '100%', backgroundColor: '#0D1A1B',
-    borderRadius: 14, padding: 18, marginBottom: 20,
-    borderWidth: 1.5, borderColor: '#1A4045', alignItems: 'center',
-  },
-  clabeLabel: { color: '#4DABB8', fontSize: 11, fontWeight: '600', letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' },
-  clabeValue: { color: '#E0E0E0', fontSize: 20, fontWeight: '900', letterSpacing: 2, marginBottom: 8 },
-  clabeHint:  { color: '#406870', fontSize: 11 },
-  spaySeparator:    { flexDirection: 'row', alignItems: 'center', width: '100%', marginVertical: 16, gap: 10 },
+  clabeBanner:  { width: '100%', backgroundColor: '#0D1A1B', borderRadius: 14, padding: 18, marginBottom: 20, borderWidth: 1.5, borderColor: '#1A4045', alignItems: 'center' },
+  clabeLabel:   { color: '#4DABB8', fontSize: 11, fontWeight: '600', letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' },
+  clabeValue:   { color: '#E0E0E0', fontSize: 20, fontWeight: '900', letterSpacing: 2, marginBottom: 8 },
+  clabeHint:    { color: '#406870', fontSize: 11 },
+  spaySeparator:     { flexDirection: 'row', alignItems: 'center', width: '100%', marginVertical: 16, gap: 10 },
   spaySeparatorLine: { flex: 1, height: 1, backgroundColor: '#1E2535' },
   spaySeparatorTxt:  { color: '#404860', fontSize: 12 },
-  speiInstruccion: {
-    color: '#8090B0', fontSize: 13, textAlign: 'center',
-    lineHeight: 20, marginBottom: 20, paddingHorizontal: 8,
-  },
-  speiUploadBtn: {
-    width: '100%', backgroundColor: '#2ECC71',
-    borderRadius: 14, paddingVertical: 16,
-    alignItems: 'center', marginBottom: 8,
-  },
+  speiInstruccion:  { color: '#8090B0', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 20, paddingHorizontal: 8 },
+  speiUploadBtn:    { width: '100%', backgroundColor: '#2ECC71', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 8 },
   speiUploadBtnTxt: { color: '#0A0C12', fontWeight: '800', fontSize: 15 },
-  speiFormatos: { color: '#404060', fontSize: 11, textAlign: 'center', marginBottom: 20 },
-  comprobanteOkBox: {
-    backgroundColor: '#0D2B1A', borderRadius: 10,
-    padding: 12, width: '100%', marginBottom: 14,
-    borderWidth: 1, borderColor: '#1A4D2E', alignItems: 'center',
-  },
+  speiFormatos:     { color: '#404060', fontSize: 11, textAlign: 'center', marginBottom: 20 },
+  comprobanteOkBox: { backgroundColor: '#0D2B1A', borderRadius: 10, padding: 12, width: '100%', marginBottom: 14, borderWidth: 1, borderColor: '#1A4D2E', alignItems: 'center' },
   comprobanteOkTxt: { color: '#2ECC71', fontSize: 13, fontWeight: '600' },
-  validandoBox: {
-    width: '100%', alignItems: 'center',
-    backgroundColor: '#0D1220', borderRadius: 14,
-    padding: 24, marginBottom: 16,
-    borderWidth: 1, borderColor: '#1E2535',
-  },
+  validandoBox: { width: '100%', alignItems: 'center', backgroundColor: '#0D1220', borderRadius: 14, padding: 24, marginBottom: 16, borderWidth: 1, borderColor: '#1E2535' },
   validandoTxt: { color: '#E0E0E0', fontSize: 15, fontWeight: '700', marginBottom: 6 },
   validandoSub: { color: '#606080', fontSize: 12 },
-  speiEnviadoCard: {
-    width: '100%', backgroundColor: '#12151F',
-    borderRadius: 14, padding: 20, marginBottom: 24,
-    borderWidth: 1, borderColor: '#1E2535',
-  },
-  speiEnviadoRow: { color: '#808098', fontSize: 12, textAlign: 'center' },
-  speiEnviadoVal: { color: '#E0E0E0', fontSize: 14, fontWeight: '700', textAlign: 'center', marginBottom: 2 },
+  speiEnviadoCard: { width: '100%', backgroundColor: '#12151F', borderRadius: 14, padding: 20, marginBottom: 24, borderWidth: 1, borderColor: '#1E2535' },
+  speiEnviadoRow:  { color: '#808098', fontSize: 12, textAlign: 'center' },
+  speiEnviadoVal:  { color: '#E0E0E0', fontSize: 14, fontWeight: '700', textAlign: 'center', marginBottom: 2 },
 });

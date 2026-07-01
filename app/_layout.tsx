@@ -1,8 +1,9 @@
-import '../src/utils/alertPatch'; // <-- parchea Alert.alert globalmente en web
+import '../src/utils/alertPatch';
 import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar, View, ActivityIndicator, Platform } from 'react-native';
 import { supabase } from '../src/config/supabase';
+import { DeporteProvider } from '../src/context/DeporteContext';
 
 export default function RootLayout() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -20,10 +21,10 @@ export default function RootLayout() {
         document.head.appendChild(link);
       }
       const metaTags = [
-        { name: 'apple-mobile-web-app-capable',        content: 'yes' },
+        { name: 'apple-mobile-web-app-capable',          content: 'yes' },
         { name: 'apple-mobile-web-app-status-bar-style', content: 'black' },
-        { name: 'apple-mobile-web-app-title',           content: 'QPro' },
-        { name: 'theme-color',                          content: '#0A0C10' },
+        { name: 'apple-mobile-web-app-title',            content: 'QPro' },
+        { name: 'theme-color',                           content: '#0A0C10' },
       ];
       metaTags.forEach(({ name, content }) => {
         if (!document.querySelector(`meta[name="${name}"]`)) {
@@ -45,14 +46,12 @@ export default function RootLayout() {
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
-        // Marcar que estamos en flujo de recuperación y redirigir a reset
         setIsPasswordRecovery(true);
         setSession(session);
         router.replace('/auth/reset-password');
         return;
       }
       if (event === 'USER_UPDATED') {
-        // Contraseña actualizada, limpiar flag de recovery
         setIsPasswordRecovery(false);
       }
       setSession(session);
@@ -62,13 +61,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (!isInitialized) return;
-    // Si estamos en flujo de recovery, no redirigir
     if (isPasswordRecovery) return;
-
     const inAuthGroup = segments[0] === 'auth';
     const inPagoGroup = segments[0] === 'pago';
     const inResetPassword = segments[1] === 'reset-password';
-
     if (!session && !inAuthGroup && !inPagoGroup) {
       router.replace('/auth/login');
     } else if (session && inAuthGroup && !inResetPassword) {
@@ -85,7 +81,7 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <DeporteProvider>
       <StatusBar barStyle="light-content" backgroundColor="#0A0C10" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="auth/login" />
@@ -101,6 +97,6 @@ export default function RootLayout() {
         <Stack.Screen name="pago/fallo" />
         <Stack.Screen name="pago/pendiente" />
       </Stack>
-    </>
+    </DeporteProvider>
   );
 }

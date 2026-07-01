@@ -26,8 +26,9 @@ function formatFecha(iso: string) {
   });
 }
 
-type FiltroEstado = 'todas' | 'abierta' | 'cerrada' | 'finalizada' | 'nula';
-type FiltroSPEI   = 'todos' | 'pendiente_revision' | 'spei_pendiente' | 'pagado';
+type FiltroEstado  = 'todas' | 'abierta' | 'cerrada' | 'finalizada' | 'nula';
+type FiltroSPEI    = 'todos' | 'pendiente_revision' | 'spei_pendiente' | 'pagado';
+type FiltroDeporte = 'todos' | 'futbol' | 'beisbol';
 
 const FILTROS: { key: FiltroEstado; label: string; color: string }[] = [
   { key: 'todas',     label: 'Todas',     color: '#9B59B6' },
@@ -35,6 +36,12 @@ const FILTROS: { key: FiltroEstado; label: string; color: string }[] = [
   { key: 'cerrada',  label: 'Cerradas',  color: '#3498DB' },
   { key: 'finalizada', label: 'Canceladas', color: '#E74C3C' },
   { key: 'nula',     label: 'Nulas',     color: '#A0A0A0' },
+];
+
+const FILTROS_DEPORTE: { key: FiltroDeporte; label: string; color: string; emoji: string }[] = [
+  { key: 'todos',   label: 'Todos',   color: '#9B59B6', emoji: '🏆' },
+  { key: 'futbol',  label: 'Fútbol',  color: '#2ECC71', emoji: '⚽' },
+  { key: 'beisbol', label: 'Béisbol', color: '#E8A020', emoji: '⚾' },
 ];
 
 const FILTROS_SPEI: { key: FiltroSPEI; label: string; color: string }[] = [
@@ -58,9 +65,6 @@ function pickFileWeb(): Promise<File | null> {
 export default function AdminDashboardScreen() {
   const router = useRouter();
   const swipeableRefs = useRef<Record<string, any>>({});
-
-  // Ref para saber si retiros estaba expandido al salir de la pantalla,
-  // sin que sea dependencia del useFocusEffect
   const retirosExpandedRef = useRef(false);
 
   const [quinielas,            setQuinielas]            = useState<any[]>([]);
@@ -77,7 +81,8 @@ export default function AdminDashboardScreen() {
   const [pickerVisible,        setPickerVisible]        = useState(false);
   const [retirosPendientes,    setRetirosPendientes]    = useState(0);
 
-  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('todas');
+  const [filtroEstado,  setFiltroEstado]  = useState<FiltroEstado>('todas');
+  const [filtroDeporte, setFiltroDeporte] = useState<FiltroDeporte>('todos');
 
   // ── Comprobantes SPEI ─────────────────────────────────────────────────────
   const [todosSpei,            setTodosSpei]            = useState<any[]>([]);
@@ -93,12 +98,12 @@ export default function AdminDashboardScreen() {
   const [accionandoRetiro,     setAccionandoRetiro]     = useState<string | null>(null);
 
   // ── Modal pago con comprobante (inline) ───────────────────────────────────
-  const [modalPagoRetiro,      setModalPagoRetiro]      = useState(false);
-  const [retiroPagoItem,       setRetiroPagoItem]       = useState<any | null>(null);
-  const [comprobanteUri,       setComprobanteUri]       = useState<string | null>(null);
-  const [comprobanteB64,       setComprobanteB64]       = useState<string | null>(null);
-  const [comprobanteMime,      setComprobanteMime]      = useState<string>('image/jpeg');
-  const [subiendoComp,         setSubiendoComp]         = useState(false);
+  const [modalPagoRetiro,  setModalPagoRetiro]  = useState(false);
+  const [retiroPagoItem,   setRetiroPagoItem]   = useState<any | null>(null);
+  const [comprobanteUri,   setComprobanteUri]   = useState<string | null>(null);
+  const [comprobanteB64,   setComprobanteB64]   = useState<string | null>(null);
+  const [comprobanteMime,  setComprobanteMime]  = useState<string>('image/jpeg');
+  const [subiendoComp,     setSubiendoComp]     = useState(false);
 
   const handleBack = () => {
     if (router.canGoBack()) router.back();
@@ -190,9 +195,6 @@ export default function AdminDashboardScreen() {
     }
   };
 
-  // useFocusEffect SIN retirosExpanded como dependencia → nunca dispara por el toggle.
-  // Solo se ejecuta al montar / volver a la pantalla desde otra ruta.
-  // Si el panel de retiros estaba abierto al salir, lo recarga silenciosamente.
   useFocusEffect(useCallback(() => {
     setLoading(true);
     loadQuinielas();
@@ -202,11 +204,17 @@ export default function AdminDashboardScreen() {
     }
   }, [])); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const quinielasFiltradas = filtroEstado === 'todas'
-    ? quinielas
-    : filtroEstado === 'nula'
-      ? quinielas.filter(q => !q.estado || q.estado === 'nula')
-      : quinielas.filter(q => q.estado === filtroEstado);
+  // ── Filtros combinados: estado + deporte ──────────────────────────────────
+  const quinielasFiltradas = quinielas
+    .filter(q => {
+      if (filtroEstado === 'todas') return true;
+      if (filtroEstado === 'nula') return !q.estado || q.estado === 'nula';
+      return q.estado === filtroEstado;
+    })
+    .filter(q => {
+      if (filtroDeporte === 'todos') return true;
+      return (q.deporte ?? 'futbol') === filtroDeporte;
+    });
 
   const speiFiltrados = filtroSPEI === 'todos'
     ? todosSpei
@@ -214,14 +222,11 @@ export default function AdminDashboardScreen() {
 
   const speiPendientesCount = todosSpei.filter(p => ['spei_pendiente', 'pendiente_revision'].includes(p.estado)).length;
 
-  // Toggle retiros: solo carga la sección, nunca toca el resto de la pantalla
   const handleToggleRetiros = async () => {
     const next = !retirosExpanded;
     retirosExpandedRef.current = next;
     setRetirosExpanded(next);
-    if (next) {
-      await loadRetirosData();
-    }
+    if (next) await loadRetirosData();
   };
 
   const llamarEdgeFunction = async (solicitud_id: string, accion: 'pagar' | 'rechazar', comprobante_url?: string) => {
@@ -237,7 +242,6 @@ export default function AdminDashboardScreen() {
     return json;
   };
 
-  // ── Seleccionar comprobante ───────────────────────────────────────────────
   const seleccionarComprobante = async () => {
     if (Platform.OS === 'web') {
       const file = await pickFileWeb();
@@ -271,7 +275,6 @@ export default function AdminDashboardScreen() {
     }
   };
 
-  // ── Subir comprobante a Storage ───────────────────────────────────────────
   const subirComprobanteStorage = async (retiroId: string): Promise<string | null> => {
     if (!comprobanteB64) return null;
     const ext  = comprobanteMime === 'image/png' ? 'png' : 'jpg';
@@ -286,7 +289,6 @@ export default function AdminDashboardScreen() {
     return data?.signedUrl ?? null;
   };
 
-  // ── Abrir modal pago ──────────────────────────────────────────────────────
   const handleAbrirModalPago = (item: any) => {
     setRetiroPagoItem(item);
     setComprobanteUri(null);
@@ -294,7 +296,6 @@ export default function AdminDashboardScreen() {
     setModalPagoRetiro(true);
   };
 
-  // ── Confirmar pago con comprobante (inline) ───────────────────────────────
   const handleConfirmarPagoRetiro = async () => {
     if (!retiroPagoItem) return;
     setSubiendoComp(true);
@@ -346,7 +347,6 @@ export default function AdminDashboardScreen() {
     );
   };
 
-  // ── Aprobar SPEI ──────────────────────────────────────────────────────────
   const handleAprobarSPEI = (item: any) => {
     Alert.alert(
       '✅ Aprobar Pago',
@@ -401,7 +401,6 @@ export default function AdminDashboardScreen() {
     );
   };
 
-  // ── Eliminar quiniela ─────────────────────────────────────────────────────
   const handleEliminarQuiniela = (quinielaId: string, titulo: string) => {
     swipeableRefs.current[quinielaId]?.close();
     Alert.alert(
@@ -846,22 +845,26 @@ export default function AdminDashboardScreen() {
           <Text style={styles.createBtnText}>+ Diseñar Nueva Quiniela</Text>
         </TouchableOpacity>
 
-        {/* Quinielas con filtros */}
+        {/* ── Sección Quinielas con filtros estado + deporte ── */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Quinielas</Text>
           <Text style={styles.sectionCount}>
-            {quinielasFiltradas.length}{filtroEstado !== 'todas' ? ` / ${quinielas.length}` : ''}
+            {quinielasFiltradas.length}{(filtroEstado !== 'todas' || filtroDeporte !== 'todos') ? ` / ${quinielas.length}` : ''}
           </Text>
         </View>
 
+        {/* Filtro por estado */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtrosContainer}>
           {FILTROS.map(f => {
             const activo = filtroEstado === f.key;
-            const count = f.key === 'todas'
-              ? quinielas.length
+            const quinByEstado = f.key === 'todas'
+              ? quinielas
               : f.key === 'nula'
-                ? quinielas.filter(q => !q.estado || q.estado === 'nula').length
-                : quinielas.filter(q => q.estado === f.key).length;
+                ? quinielas.filter(q => !q.estado || q.estado === 'nula')
+                : quinielas.filter(q => q.estado === f.key);
+            const count = filtroDeporte === 'todos'
+              ? quinByEstado.length
+              : quinByEstado.filter(q => (q.deporte ?? 'futbol') === filtroDeporte).length;
             return (
               <TouchableOpacity
                 key={f.key}
@@ -877,65 +880,90 @@ export default function AdminDashboardScreen() {
           })}
         </ScrollView>
 
+        {/* Filtro por deporte */}
+        <View style={styles.deporteFiltroRow}>
+          {FILTROS_DEPORTE.map(f => {
+            const activo = filtroDeporte === f.key;
+            return (
+              <TouchableOpacity
+                key={f.key}
+                style={[styles.deportePill, activo && { backgroundColor: f.color + '22', borderColor: f.color }]}
+                onPress={() => setFiltroDeporte(f.key)}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.deportePillEmoji}>{f.emoji}</Text>
+                <Text style={[styles.deportePillText, { color: activo ? f.color : '#A0A0A0' }]}>{f.label}</Text>
+                {activo && <View style={[styles.deportePillDot, { backgroundColor: f.color }]} />}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         {quinielasFiltradas.length === 0 && (
           <View style={styles.emptyBox}>
             <Text style={styles.emptyText}>
-              {quinielas.length === 0 ? 'No hay quinielas creadas aún.' : `No hay quinielas con estado "${filtroEstado}".`}
+              {quinielas.length === 0
+                ? 'No hay quinielas creadas aún.'
+                : `No hay quinielas${filtroDeporte !== 'todos' ? ` de ${filtroDeporte}` : ''} con estado "${filtroEstado}".`}
             </Text>
           </View>
         )}
 
-        {quinielasFiltradas.map((q) => (
-          <Swipeable
-            key={q.id}
-            ref={ref => { swipeableRefs.current[q.id] = ref; }}
-            friction={2}
-            rightThreshold={60}
-            renderRightActions={() => renderDeleteAction(q.id, q.titulo)}
-            overshootRight={false}
-          >
-            <TouchableOpacity style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
-                <View style={[styles.estadoBadge, { borderColor: getEstadoColor(q.estado) }]}>
-                  <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado?.toUpperCase() ?? 'NULA'}</Text>
+        {quinielasFiltradas.map((q) => {
+          const esBeisbol = (q.deporte ?? 'futbol') === 'beisbol';
+          return (
+            <Swipeable
+              key={q.id}
+              ref={ref => { swipeableRefs.current[q.id] = ref; }}
+              friction={2}
+              rightThreshold={60}
+              renderRightActions={() => renderDeleteAction(q.id, q.titulo)}
+              overshootRight={false}
+            >
+              <TouchableOpacity style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardDeporteBadge}>{esBeisbol ? '⚾' : '⚽'}</Text>
+                  <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
+                  <View style={[styles.estadoBadge, { borderColor: getEstadoColor(q.estado) }]}>
+                    <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado?.toUpperCase() ?? 'NULA'}</Text>
+                  </View>
+                  <Text style={styles.cardArrow}>›</Text>
                 </View>
-                <Text style={styles.cardArrow}>›</Text>
-              </View>
-              <View style={styles.cardInfo}>
-                <Text style={styles.infoText}>🎦 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
-                <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada}</Text></Text>
-              </View>
-              <View style={styles.cardInfo}>
-                <Text style={styles.infoText}>👥 Mín: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0}</Text></Text>
-                <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
-              </View>
-              <View style={styles.cardActions}>
-                <TouchableOpacity style={styles.actionBtn} onPress={(e) => { e.stopPropagation?.(); handleVerUsuarios(q.id, q.titulo); }}>
-                  <Text style={styles.actionText}>👥 Usuarios</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, q.estado !== 'abierta' && styles.disabledBtn]}
-                  disabled={q.estado !== 'abierta' || actionLoading === q.id + '_cerrar'}
-                  onPress={(e) => { e.stopPropagation?.(); handleCerrarApuestas(q.id, q.titulo); }}
-                >
-                  {actionLoading === q.id + '_cerrar'
-                    ? <ActivityIndicator size="small" color="#3498DB" />
-                    : <Text style={[styles.actionText, q.estado !== 'abierta' && { color: '#505050' }]}>🔒 Cerrar</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.dangerBtn, q.estado === 'finalizada' && styles.disabledBtn]}
-                  disabled={q.estado === 'finalizada' || actionLoading === q.id + '_cancelar'}
-                  onPress={(e) => { e.stopPropagation?.(); handleCancelar(q.id, q.titulo); }}
-                >
-                  {actionLoading === q.id + '_cancelar'
-                    ? <ActivityIndicator size="small" color="#E91E63" />
-                    : <Text style={[styles.dangerText, q.estado === 'finalizada' && { color: '#505050' }]}>❌ Cancelar</Text>}
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </Swipeable>
-        ))}
+                <View style={styles.cardInfo}>
+                  <Text style={styles.infoText}>🎦 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
+                  <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada}</Text></Text>
+                </View>
+                <View style={styles.cardInfo}>
+                  <Text style={styles.infoText}>👥 Mín: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0}</Text></Text>
+                  <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
+                </View>
+                <View style={styles.cardActions}>
+                  <TouchableOpacity style={styles.actionBtn} onPress={(e) => { e.stopPropagation?.(); handleVerUsuarios(q.id, q.titulo); }}>
+                    <Text style={styles.actionText}>👥 Usuarios</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, q.estado !== 'abierta' && styles.disabledBtn]}
+                    disabled={q.estado !== 'abierta' || actionLoading === q.id + '_cerrar'}
+                    onPress={(e) => { e.stopPropagation?.(); handleCerrarApuestas(q.id, q.titulo); }}
+                  >
+                    {actionLoading === q.id + '_cerrar'
+                      ? <ActivityIndicator size="small" color="#3498DB" />
+                      : <Text style={[styles.actionText, q.estado !== 'abierta' && { color: '#505050' }]}>🔒 Cerrar</Text>}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.dangerBtn, q.estado === 'finalizada' && styles.disabledBtn]}
+                    disabled={q.estado === 'finalizada' || actionLoading === q.id + '_cancelar'}
+                    onPress={(e) => { e.stopPropagation?.(); handleCancelar(q.id, q.titulo); }}
+                  >
+                    {actionLoading === q.id + '_cancelar'
+                      ? <ActivityIndicator size="small" color="#E91E63" />
+                      : <Text style={[styles.dangerText, q.estado === 'finalizada' && { color: '#505050' }]}>❌ Cancelar</Text>}
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            </Swipeable>
+          );
+        })}
       </ScrollView>
 
       <DateTimePicker
@@ -945,7 +973,7 @@ export default function AdminDashboardScreen() {
         onCancel={() => setPickerVisible(false)}
       />
 
-      {/* ── Modal confirmar pago con comprobante (inline retiros) ── */}
+      {/* Modal pago retiro */}
       <Modal visible={modalPagoRetiro} transparent animationType="slide" onRequestClose={() => !subiendoComp && setModalPagoRetiro(false)}>
         <TouchableWithoutFeedback onPress={() => !subiendoComp && setModalPagoRetiro(false)}>
           <View style={styles.modalOverlay}>
@@ -1172,6 +1200,13 @@ const styles = StyleSheet.create({
   filtroCount:          { borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5 },
   filtroCountText:      { fontSize: 11, fontWeight: 'bold' },
 
+  // Filtro deporte
+  deporteFiltroRow:     { flexDirection: 'row', gap: 8, marginBottom: 14, marginTop: 2 },
+  deportePill:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5, borderColor: '#2A2D35', backgroundColor: '#15181F' },
+  deportePillEmoji:     { fontSize: 16 },
+  deportePillText:      { fontSize: 12, fontWeight: '700' },
+  deportePillDot:       { width: 6, height: 6, borderRadius: 3 },
+
   emptyBox:             { padding: 30, alignItems: 'center' },
   emptyText:            { color: '#505050', fontSize: 14 },
 
@@ -1181,6 +1216,7 @@ const styles = StyleSheet.create({
 
   card:                 { backgroundColor: '#15181F', borderRadius: 12, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#2A2D35' },
   cardHeader:           { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 },
+  cardDeporteBadge:     { fontSize: 18 },
   cardTitle:            { flex: 1, color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   estadoBadge:          { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   estadoBadgeText:      { fontSize: 10, fontWeight: 'bold' },
@@ -1194,7 +1230,6 @@ const styles = StyleSheet.create({
   dangerText:           { color: '#E74C3C', fontSize: 12, fontWeight: '600' },
   disabledBtn:          { opacity: 0.4 },
 
-  // Modal pago retiro inline
   modalHandle:          { width: 36, height: 4, backgroundColor: '#2A2D38', borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
   modalPagoTitle:       { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
   modalInfoRow:         { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#0A0C12', borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#1E2128' },
@@ -1214,7 +1249,6 @@ const styles = StyleSheet.create({
   modalConfirmPagoBtn:  { flex: 2, padding: 14, borderRadius: 13, alignItems: 'center', backgroundColor: '#2ECC71' },
   modalConfirmPagoTxt:  { color: '#000', fontWeight: 'bold', fontSize: 14 },
 
-  // Modal participantes
   modalOverlay:         { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   modalBox:             { backgroundColor: '#12151C', borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 24, paddingTop: 12, borderTopWidth: 1, borderColor: '#1E2128', maxHeight: '85%' },
   modalHeader:          { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },

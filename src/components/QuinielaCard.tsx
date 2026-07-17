@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Animated, Share, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../config/supabase';
-import { colors, spacing, radii, text } from '../theme';
 import { common, layout } from '../styles';
+import { colors, radii, shadows, spacing, text } from '../theme';
 
 interface Props {
   id: string;
@@ -164,7 +164,8 @@ export function QuinielaCard({
         title: `🏆 ${titulo} — QPro`,
         message: `🏆 ${titulo}\n${premioTexto} · ${totalPartidos} partidos${countdownTexto}\n\n¡Únete y demuestra que sabes de fútbol! 👇\nqpro://quiniela/${id}`,
       });
-    } catch (_) {}
+    } catch {
+    }
   };
 
   const botonLabel  = modoResultados
@@ -292,16 +293,16 @@ export default QuinielaCard;
 
 // Solo estilos MUY específicos de este componente que no existen en common/layout
 const styles = StyleSheet.create({
-  card:           { backgroundColor: colors.card, borderRadius: radii.lg, padding: spacing.xl, marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border },
-  title:          { ...text.sectionTitle, color: colors.text, flex: 1, marginRight: spacing.sm },
+  card:           { backgroundColor: colors.card, borderRadius: radii.xl, padding: spacing.xl, marginBottom: spacing.md, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', ...shadows.md },
+  title:          { ...text.sectionTitle, color: colors.text, flex: 1, marginRight: spacing.sm, lineHeight: 24 },
   shareBtn:       { padding: spacing.xxs },
-  countdownRow:   { backgroundColor: 'rgba(243,156,18,0.10)', borderWidth: 1, borderColor: 'rgba(243,156,18,0.3)', borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginBottom: spacing.md, alignSelf: 'flex-start' },
+  countdownRow:   { backgroundColor: 'rgba(243,156,18,0.12)', borderWidth: 1, borderColor: 'rgba(243,156,18,0.3)', borderRadius: radii.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginBottom: spacing.md, alignSelf: 'flex-start' },
   countdownText:  { ...text.bodySmallBold, color: colors.warning, letterSpacing: 0.3 },
-  statsRow:       { flexDirection: 'row', backgroundColor: colors.backgroundDeep, borderRadius: radii.md, padding: spacing.md, marginBottom: spacing.md, alignItems: 'center' },
+  statsRow:       { flexDirection: 'row', backgroundColor: colors.backgroundDeep, borderRadius: radii.lg, padding: spacing.md, marginBottom: spacing.md, alignItems: 'center', borderWidth: 1, borderColor: colors.borderSubtle },
   stat:           { flex: 1, alignItems: 'center', minHeight: 40, justifyContent: 'center' },
   statValue:      { ...text.sectionTitle, color: colors.text },
   statDivider:    { width: 1, height: 30, backgroundColor: colors.border },
-  pozoBox:        { backgroundColor: colors.backgroundDeep, borderRadius: radii.sm, padding: spacing.sm, marginBottom: spacing.md },
+  pozoBox:        { backgroundColor: colors.backgroundDeep, borderRadius: radii.md, padding: spacing.sm, marginBottom: spacing.md, borderWidth: 1, borderColor: colors.borderSubtle },
   progressTrack:  { flex: 1, height: 5, backgroundColor: colors.border, borderRadius: radii.xs, overflow: 'hidden' },
   progressFill:   { height: '100%', backgroundColor: colors.warning, borderRadius: radii.xs },
   buttonDisabled: { backgroundColor: colors.backgroundDeep, borderWidth: 1, borderColor: colors.border },

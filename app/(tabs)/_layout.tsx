@@ -1,13 +1,18 @@
-import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { Tabs } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, Platform,
-  TouchableOpacity, Animated,
+    Animated,
+    Platform,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../src/config/supabase';
+import { colors, radii, shadows, text } from '../../src/theme';
 
 const TAB_CONFIG = [
   { name: 'index',   title: 'Quinielas',  icon: 'football'    },
@@ -15,7 +20,7 @@ const TAB_CONFIG = [
   { name: 'profile', title: 'Perfil',     icon: null          },
 ] as const;
 
-const ACCENT     = '#9B59B6';
+const ACCENT     = colors.primary;
 const IND_MARGIN = 8; // margen a cada lado de la pastilla dentro de cada tab
 
 // ─── Badge ───────────────────────────────────────────────────────────────────────
@@ -78,7 +83,7 @@ function FloatingTabBar({ state, navigation }: any) {
       Animated.spring(translateX, { toValue: targetX, friction: 7, tension: 80, useNativeDriver: false }),
       Animated.spring(indWidth,   { toValue: targetW, friction: 7, tension: 80, useNativeDriver: false }),
     ]).start();
-  }, [currentIndex, tabLayouts]);
+  }, [currentIndex, tabLayouts, indWidth, translateX]);
 
   const inner = (
     <View style={styles.tabsRow}>
@@ -132,7 +137,7 @@ function FloatingTabBar({ state, navigation }: any) {
   if (Platform.OS === 'web') {
     return (
       <View style={[styles.floatingWrapper, { bottom: barBottom },
-        { backdropFilter: 'blur(20px) saturate(180%)', backgroundColor: 'rgba(18,21,28,0.72)' } as any]}>
+        { backdropFilter: 'blur(20px) saturate(180%)', backgroundColor: 'rgba(7,10,18,0.72)' } as any]}>
         <View style={styles.glassBorder} pointerEvents="none" />
         {inner}
       </View>
@@ -153,7 +158,7 @@ export default function TabLayout() {
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
-      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0C10' } }}
+      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}
     >
       <Tabs.Screen name="index"         options={{ title: 'Quinielas'  }} />
       <Tabs.Screen name="results"        options={{ title: 'Resultados' }} />
@@ -165,16 +170,15 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   floatingWrapper: {
-    position: 'absolute', left: 24, right: 24, borderRadius: 28, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.45, shadowRadius: 24, elevation: 20,
+    position: 'absolute', left: 20, right: 20, borderRadius: radii.xl, overflow: 'hidden',
+    ...shadows.xl,
   },
-  blurOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10,12,16,0.35)' },
-  glassBorder: { ...StyleSheet.absoluteFillObject, borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)' },
+  blurOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(9,13,22,0.35)' },
+  glassBorder: { ...StyleSheet.absoluteFillObject, borderRadius: radii.xl, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)' },
   tabsRow: {
     flexDirection: 'row',
     paddingVertical: 10,
-    paddingHorizontal: 6,
+    paddingHorizontal: 8,
     position: 'relative',
     overflow: 'hidden',
   },
@@ -182,20 +186,20 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8, bottom: 8,
     borderRadius: 18,
-    backgroundColor: 'rgba(155,89,182,0.28)',
+    backgroundColor: 'rgba(53,208,127,0.18)',
     borderWidth: 1,
-    borderColor: 'rgba(155,89,182,0.55)',
+    borderColor: 'rgba(53,208,127,0.45)',
     shadowColor: ACCENT,
     shadowOpacity: 0.7,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 0 },
     elevation: 6,
   },
-  tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 2, zIndex: 1 },
-  tabLabel: { fontSize: 10, fontWeight: '600', letterSpacing: 0.2 },
+  tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 4, zIndex: 1 },
+  tabLabel: { ...text.caption, fontSize: 10, letterSpacing: 0.2 },
   badge: {
     position: 'absolute', top: -4, right: -6,
-    backgroundColor: '#E74C3C', borderRadius: 8,
+    backgroundColor: colors.error, borderRadius: 8,
     minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
   },
   badgeText: { color: '#FFF', fontSize: 9, fontWeight: 'bold' },

@@ -25,12 +25,48 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
-    // ── Obtener precio_entrada real de la quiniela (fuente de verdad) ──────
-    const { data: part } = await supabase
+    const eventKey = `${participacion_id}:${comprobante_url}`;
+
+    const { data: currentPart } = await supabase
       .from('participaciones')
-      .select('quiniela_id')
+      .select('user_id, estado, comprobante_validado, clave_rastreo, monto_pagado, fecha_pago, spei_datos_ocr, ultimo_error_spei, quiniela_id')
       .eq('id', participacion_id)
       .single();
+
+    if (currentPart?.estado === 'pagado' && currentPart?.comprobante_validado) {
+      return Response.json({
+        valid: true,
+        confidence: 1,
+        cep: {
+          claveRastreo: currentPart.clave_rastreo ?? '',
+          monto: Number(currentPart.monto_pagado ?? monto),
+          emisor: '',
+          receptor: '',
+          fechaOperacion: currentPart.fecha_pago ?? new Date().toISOString(),
+          estado: 'LIQUIDADA',
+          cuentaBeneficiario: Deno.env.get('CLABE_DESTINO') ?? '',
+        },
+      });
+    }
+
+    const eventState = await claimPaymentEvent(supabase, {
+      source: 'validar-spei',
+      externalId: eventKey,
+      payload: { participacion_id, comprobante_url, monto },
+    });
+
+    if (eventState === 'processed' || eventState === 'processing') {
+      return Response.json({ valid: true, idempotent: true });
+    }
+
+    // ── Obtener precio_entrada real de la quiniela (fuente de verdad) ──────
+    const part = currentPart?.quiniela_id
+      ? currentPart
+      : (await supabase
+          .from('participaciones')
+          .select('quiniela_id')
+          .eq('id', participacion_id)
+          .single()).data;
 
     const { data: quiniela } = part?.quiniela_id
       ? await supabase
@@ -75,6 +111,7 @@ Deno.serve(async (req: Request) => {
     if (!cepRes.ok) {
       const msg = cepJson.message ?? cepJson.error ?? `apiCEP HTTP ${cepRes.status}`;
       await actualizarError(supabase, participacion_id, msg);
+      await markPaymentEventFailed(supabase, 'validar-spei', eventKey, participacion_id, msg);
       return Response.json({ valid: false, errorMsg: msg });
     }
 
@@ -87,12 +124,14 @@ Deno.serve(async (req: Request) => {
     if (status === 'error') {
       const msg = cepJson.error ?? 'El OCR no pudo leer el comprobante. Intenta con una imagen más clara.';
       await actualizarError(supabase, participacion_id, msg);
+      await markPaymentEventFailed(supabase, 'validar-spei', eventKey, participacion_id, msg);
       return Response.json({ valid: false, confidence, missingFields: cepJson.missingFields ?? [], errorMsg: msg });
     }
 
     if (status !== 'valid' || !validation.banxicoConfirmed) {
       const msg = `Transferencia no confirmada por Banxico (status: ${status})`;
       await actualizarError(supabase, participacion_id, msg);
+      await markPaymentEventFailed(supabase, 'validar-spei', eventKey, participacion_id, msg);
       return Response.json({ valid: false, confidence, errorMsg: msg });
     }
 
@@ -104,6 +143,7 @@ Deno.serve(async (req: Request) => {
       if (montoOcr < montoEsperado - tolerancia) {
         const msg = `Monto insuficiente. Esperado: $${montoEsperado} MXN, recibido: $${montoOcr} MXN`;
         await actualizarError(supabase, participacion_id, msg);
+        await markPaymentEventFailed(supabase, 'validar-spei', eventKey, participacion_id, msg);
         return Response.json({ valid: false, confidence, errorMsg: msg });
       }
     }
@@ -144,6 +184,17 @@ Deno.serve(async (req: Request) => {
       })
       .eq('id', participacion_id);
 
+    await upsertNotification(supabase, {
+      userId: (currentPart as any)?.user_id ?? '',
+      tipo: 'pago_confirmado_spei',
+      titulo: '✅ Pago SPEI confirmado',
+      mensaje: `Tu pago SPEI de $${montoEsperado} fue validado correctamente.`,
+      referenciaId: participacion_id,
+      referenciaTipo: 'participacion_spei',
+    });
+
+    await markPaymentEventProcessed(supabase, 'validar-spei', eventKey, participacion_id);
+
     return Response.json({
       valid: true,
       confidence,
@@ -171,5 +222,108 @@ async function actualizarError(supabase: ReturnType<typeof createClient>, partic
       .from('participaciones')
       .update({ ultimo_error_spei: msg, comprobante_validado: false })
       .eq('id', participacionId);
-  } catch (_) {}
+  } catch {}
+}
+
+async function claimPaymentEvent(
+  supabase: ReturnType<typeof createClient>,
+  params: { source: string; externalId: string; payload: unknown },
+): Promise<'claimed' | 'processed' | 'processing' | 'failed'> {
+  const { source, externalId, payload } = params;
+  const { data, error } = await supabase
+    .from('payment_events')
+    .insert({
+      source,
+      external_id: externalId,
+      status: 'processing',
+      payload: payload as any,
+    })
+    .select('status')
+    .maybeSingle();
+
+  if (!error && data) return 'claimed';
+
+  const { data: existing } = await supabase
+    .from('payment_events')
+    .select('status')
+    .eq('source', source)
+    .eq('external_id', externalId)
+    .maybeSingle();
+
+  return existing?.status ?? 'failed';
+}
+
+async function markPaymentEventProcessed(
+  supabase: ReturnType<typeof createClient>,
+  source: string,
+  externalId: string,
+  referenceId?: string | null,
+) {
+  await supabase
+    .from('payment_events')
+    .update({
+      status: 'processed',
+      reference_id: referenceId ?? null,
+      reference_type: 'participacion_spei',
+      error_message: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('source', source)
+    .eq('external_id', externalId);
+}
+
+async function markPaymentEventFailed(
+  supabase: ReturnType<typeof createClient>,
+  source: string,
+  externalId: string,
+  referenceId: string | null,
+  errorMessage: string,
+) {
+  await supabase
+    .from('payment_events')
+    .update({
+      status: 'failed',
+      reference_id: referenceId,
+      reference_type: 'participacion_spei',
+      error_message: errorMessage,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('source', source)
+    .eq('external_id', externalId);
+}
+
+async function upsertNotification(
+  supabase: ReturnType<typeof createClient>,
+  params: {
+    userId: string;
+    tipo: string;
+    titulo: string;
+    mensaje: string;
+    referenciaId: string;
+    referenciaTipo: string;
+  },
+) {
+  const { userId, tipo, titulo, mensaje, referenciaId, referenciaTipo } = params;
+  if (!userId) return;
+
+  const { data: exists } = await supabase
+    .from('notificaciones')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('tipo', tipo)
+    .eq('referencia_id', referenciaId)
+    .eq('referencia_tipo', referenciaTipo)
+    .maybeSingle();
+
+  if (exists) return;
+
+  await supabase.from('notificaciones').insert({
+    user_id: userId,
+    tipo,
+    titulo,
+    mensaje,
+    leida: false,
+    referencia_id: referenciaId,
+    referencia_tipo: referenciaTipo,
+  });
 }

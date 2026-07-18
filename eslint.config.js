@@ -7,4 +7,10 @@ module.exports = defineConfig([
   {
     ignores: ['dist/*'],
   },
+  {
+    files: ['supabase/functions/**/*.ts'],
+    rules: {
+      'import/no-unresolved': 'off',
+    },
+  },
 ]);

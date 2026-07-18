@@ -21,6 +21,8 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
+  let eventKey = '';
+
   try {
     const authHeader = req.headers.get('Authorization') ?? '';
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
@@ -43,6 +45,17 @@ Deno.serve(async (req: Request) => {
 
     if (!solicitud_id || !['pagar', 'rechazar'].includes(accion)) {
       return json({ error: 'Parámetros inválidos' }, 400);
+    }
+
+    eventKey = `${solicitud_id}:${accion}`;
+    const eventState = await claimPaymentEvent(supabase, {
+      source: 'procesar-retiro',
+      externalId: eventKey,
+      payload: { solicitud_id, accion, nota },
+    });
+
+    if (eventState === 'processed' || eventState === 'processing') {
+      return json({ success: true, idempotent: true });
     }
 
     const { data: solicitud, error: solError } = await supabase
@@ -93,10 +106,13 @@ Deno.serve(async (req: Request) => {
         .eq('referencia_id', solicitud.id)
         .eq('tipo', 'retiro');
 
-      await supabase.from('notificaciones').insert({
-        user_id: solicitud.user_id,
-        titulo:  '💸 Retiro enviado',
+      await upsertNotification(supabase, {
+        userId: solicitud.user_id,
+        tipo: 'retiro_enviado',
+        titulo: '💸 Retiro enviado',
         mensaje: `Tu retiro de $${solicitud.monto} MXN fue procesado. Revisa tu cuenta.`,
+        referenciaId: solicitud.id,
+        referenciaTipo: 'retiro_solicitud',
       });
 
     } else {
@@ -128,19 +144,136 @@ Deno.serve(async (req: Request) => {
         return json({ error: `Rechazado pero error devolviendo saldo: ${txError.message}` }, 500);
       }
 
-      await supabase.from('notificaciones').insert({
-        user_id: solicitud.user_id,
-        titulo:  '❌ Retiro rechazado',
+      await upsertNotification(supabase, {
+        userId: solicitud.user_id,
+        tipo: 'retiro_rechazado',
+        titulo: '❌ Retiro rechazado',
         mensaje: nota
           ? `Tu retiro de $${solicitud.monto} MXN fue rechazado. Motivo: ${nota}. El saldo fue devuelto.`
           : `Tu retiro de $${solicitud.monto} MXN fue rechazado. El saldo fue devuelto a tu billetera.`,
+        referenciaId: solicitud.id,
+        referenciaTipo: 'retiro_solicitud',
       });
     }
+
+    await markPaymentEventProcessed(supabase, 'procesar-retiro', eventKey, solicitud_id);
 
     return json({ success: true });
 
   } catch (err: any) {
     console.error('procesar-retiro catch:', err);
+    try {
+      if (eventKey) {
+        await markPaymentEventFailed(
+          createClient(SUPABASE_URL, SERVICE_KEY),
+          'procesar-retiro',
+          eventKey,
+          null,
+          err?.message ?? 'Error interno',
+        );
+      }
+    } catch {}
     return json({ error: err.message ?? 'Error interno' }, 500);
   }
 });
+
+async function claimPaymentEvent(
+  supabase: ReturnType<typeof createClient>,
+  params: { source: string; externalId: string; payload: unknown },
+): Promise<'claimed' | 'processed' | 'processing' | 'failed'> {
+  const { source, externalId, payload } = params;
+  const { data } = await supabase
+    .from('payment_events')
+    .insert({
+      source,
+      external_id: externalId,
+      status: 'processing',
+      payload: payload as any,
+    })
+    .select('status')
+    .maybeSingle();
+
+  if (data) return 'claimed';
+
+  const { data: existing } = await supabase
+    .from('payment_events')
+    .select('status')
+    .eq('source', source)
+    .eq('external_id', externalId)
+    .maybeSingle();
+
+  return existing?.status ?? 'failed';
+}
+
+async function markPaymentEventProcessed(
+  supabase: ReturnType<typeof createClient>,
+  source: string,
+  externalId: string,
+  referenceId?: string | null,
+) {
+  await supabase
+    .from('payment_events')
+    .update({
+      status: 'processed',
+      reference_id: referenceId ?? null,
+      reference_type: 'retiro_solicitud',
+      error_message: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('source', source)
+    .eq('external_id', externalId);
+}
+
+async function markPaymentEventFailed(
+  supabase: ReturnType<typeof createClient>,
+  source: string,
+  externalId: string,
+  referenceId: string | null,
+  errorMessage: string,
+) {
+  await supabase
+    .from('payment_events')
+    .update({
+      status: 'failed',
+      reference_id: referenceId,
+      reference_type: 'retiro_solicitud',
+      error_message: errorMessage,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('source', source)
+    .eq('external_id', externalId);
+}
+
+async function upsertNotification(
+  supabase: ReturnType<typeof createClient>,
+  params: {
+    userId: string;
+    tipo: string;
+    titulo: string;
+    mensaje: string;
+    referenciaId: string;
+    referenciaTipo: string;
+  },
+) {
+  const { userId, tipo, titulo, mensaje, referenciaId, referenciaTipo } = params;
+  const { data: exists } = await supabase
+    .from('notificaciones')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('tipo', tipo)
+    .eq('referencia_id', referenciaId)
+    .eq('referencia_tipo', referenciaTipo)
+    .maybeSingle();
+
+  if (exists) return;
+
+  await supabase.from('notificaciones').insert({
+    user_id: userId,
+    tipo,
+    titulo,
+    mensaje,
+    leida: false,
+    referencia_id: referenciaId,
+    referencia_tipo: referenciaTipo,
+  });
+}

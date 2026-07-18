@@ -11,6 +11,9 @@ Deno.serve(async (req: Request) => {
     return new Response("OK", { status: 200 });
   }
 
+  let paymentId = '';
+  let participacionId = '';
+
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const body = await req.json();
@@ -20,7 +23,7 @@ Deno.serve(async (req: Request) => {
       return new Response("ignored", { status: 200 });
     }
 
-    const paymentId = String(body.data.id);
+    paymentId = String(body.data.id);
 
     // Consultar el pago a la API de MP para verificarlo
     const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
@@ -30,11 +33,21 @@ Deno.serve(async (req: Request) => {
 
     const payment = await mpRes.json();
     const status           = payment.status;           // "approved" | "pending" | "rejected" ...
-    const participacionId  = payment.external_reference; // lo seteamos al crear la preferencia
+    participacionId  = payment.external_reference; // lo seteamos al crear la preferencia
     const montoPagado      = Number(payment.transaction_amount ?? 0);
 
     if (!participacionId) {
       return new Response("no external_reference", { status: 200 });
+    }
+
+    const event = await claimPaymentEvent(supabase, {
+      source: 'mercadopago-webhook',
+      externalId: paymentId,
+      payload: payment,
+    });
+
+    if (event === 'processed' || event === 'processing') {
+      return new Response("ok", { status: 200 });
     }
 
     if (status === "approved") {
@@ -47,10 +60,15 @@ Deno.serve(async (req: Request) => {
           mp_payment_id:  paymentId,
         })
         .eq("id", participacionId)
-        .select("quiniela_id")
-        .single();
+        .is("mp_payment_id", null)
+        .select("quiniela_id, user_id")
+        .maybeSingle();
 
       if (partErr) throw partErr;
+      if (!part) {
+        await markPaymentEventProcessed(supabase, 'mercadopago-webhook', paymentId, participacionId);
+        return new Response("ok", { status: 200 });
+      }
 
       // 2. Recalcular y actualizar premio_total de la quiniela
       const quinielaId = part.quiniela_id;
@@ -80,12 +98,13 @@ Deno.serve(async (req: Request) => {
       }
 
       // 3. Notificacion al usuario
-      await supabase.from("notificaciones").insert({
-        user_id: payment.metadata?.user_id ?? null,
-        tipo:    "pago_confirmado",
-        titulo:  "✅ Pago confirmado",
+      await upsertNotification(supabase, {
+        userId: String(payment.metadata?.user_id ?? part.user_id ?? ''),
+        tipo: 'pago_confirmado',
+        titulo: '✅ Pago confirmado',
         mensaje: `Tu pago de $${montoPagado} fue aprobado. ¡Ya estás inscrito!`,
-        leida:   false,
+        referenciaId: participacionId,
+        referenciaTipo: 'participacion_pago',
       });
 
     } else if (status === "rejected" || status === "cancelled") {
@@ -95,10 +114,121 @@ Deno.serve(async (req: Request) => {
         .eq("id", participacionId);
     }
 
+    await markPaymentEventProcessed(supabase, 'mercadopago-webhook', paymentId, participacionId);
+
     return new Response("ok", { status: 200 });
   } catch (e: any) {
     console.error("Webhook error:", e.message);
+    try {
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+      if (paymentId) {
+        await markPaymentEventFailed(supabase, 'mercadopago-webhook', paymentId, participacionId || null, e?.message ?? 'Webhook error');
+      }
+    } catch {}
     // Siempre responder 200 a MP para que no reintente indefinidamente
     return new Response("error handled", { status: 200 });
   }
 });
+
+async function claimPaymentEvent(
+  supabase: ReturnType<typeof createClient>,
+  params: { source: string; externalId: string; payload: unknown; },
+): Promise<'claimed' | 'processed' | 'processing' | 'failed'> {
+  const { source, externalId, payload } = params;
+  const { data, error } = await supabase
+    .from('payment_events')
+    .insert({
+      source,
+      external_id: externalId,
+      status: 'processing',
+      payload: payload as any,
+    })
+    .select('status')
+    .maybeSingle();
+
+  if (!error && data) return 'claimed';
+
+  const { data: existing } = await supabase
+    .from('payment_events')
+    .select('status')
+    .eq('source', source)
+    .eq('external_id', externalId)
+    .maybeSingle();
+
+  return existing?.status ?? 'failed';
+}
+
+async function markPaymentEventProcessed(
+  supabase: ReturnType<typeof createClient>,
+  source: string,
+  externalId: string,
+  referenceId?: string | null,
+) {
+  await supabase
+    .from('payment_events')
+    .update({
+      status: 'processed',
+      reference_id: referenceId ?? null,
+      reference_type: 'participacion',
+      error_message: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('source', source)
+    .eq('external_id', externalId);
+}
+
+async function markPaymentEventFailed(
+  supabase: ReturnType<typeof createClient>,
+  source: string,
+  externalId: string,
+  referenceId: string | null,
+  errorMessage: string,
+) {
+  await supabase
+    .from('payment_events')
+    .update({
+      status: 'failed',
+      reference_id: referenceId,
+      reference_type: referenceId ? 'participacion' : null,
+      error_message: errorMessage,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('source', source)
+    .eq('external_id', externalId);
+}
+
+async function upsertNotification(
+  supabase: ReturnType<typeof createClient>,
+  params: {
+    userId: string;
+    tipo: string;
+    titulo: string;
+    mensaje: string;
+    referenciaId: string;
+    referenciaTipo: string;
+  },
+) {
+  const { userId, tipo, titulo, mensaje, referenciaId, referenciaTipo } = params;
+  if (!userId) return;
+
+  const { data: exists } = await supabase
+    .from('notificaciones')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('tipo', tipo)
+    .eq('referencia_id', referenciaId)
+    .eq('referencia_tipo', referenciaTipo)
+    .maybeSingle();
+
+  if (exists) return;
+
+  await supabase.from('notificaciones').insert({
+    user_id: userId,
+    tipo,
+    titulo,
+    mensaje,
+    leida: false,
+    referencia_id: referenciaId,
+    referencia_tipo: referenciaTipo,
+  });
+}

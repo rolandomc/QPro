@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert,
+    ActivityIndicator, Alert,
+    ScrollView,
+    StyleSheet, Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../../src/config/supabase';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -20,9 +23,7 @@ export default function GanadoresScreen() {
   const [distribuyendo, setDistribuyendo] = useState(false);
   const [recalculando,  setRecalculando]  = useState(false);
 
-  useEffect(() => { cargarDatos(); }, [id]);
-
-  const cargarDatos = async () => {
+  const cargarDatos = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     try {
@@ -57,7 +58,9 @@ export default function GanadoresScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => { cargarDatos(); }, [cargarDatos]);
 
   const calcularPremioReal = () => {
     if (!quiniela) return 0;
@@ -115,75 +118,18 @@ export default function GanadoresScreen() {
           onPress: async () => {
             setDistribuyendo(true);
             try {
-              const notificaciones: any[]       = [];
-              const walletTransactions: any[]   = [];
               const ganadoresIds: string[]      = [];
 
-              // --- Ganadores ---
-              for (const g of ganadores) {
-                const { error } = await supabase
-                  .from('participaciones')
-                  .update({ premio_ganado: montoPorGanador, estado: 'ganador' })
-                  .eq('id', g.id);
-                if (error) throw error;
+              ganadores.forEach((g: any) => ganadoresIds.push(g.id));
 
-                ganadoresIds.push(g.id);
-
-                // ✅ WALLET: acreditar premio al ganador
-                walletTransactions.push({
-                  user_id:      g.user_id,
-                  tipo:         'premio',
-                  monto:        montoPorGanador,
-                  descripcion:  `Premio quiniela: ${quiniela.titulo}`,
-                  referencia_id: g.id,
-                });
-
-                notificaciones.push({
-                  user_id: g.user_id,
-                  tipo:    'ganador',
-                  titulo:  `🏆 ¡Ganaste en ${quiniela.titulo}!`,
-                  mensaje: `Tuviste ${maxAciertos} aciertos y ganaste $${montoPorGanador.toLocaleString()}. Ya está en tu billetera.`,
-                  leida:   false,
-                });
-              }
-
-              // --- Perdedores ---
-              const perdedores = participantes.filter((p: any) => !ganadoresIds.includes(p.id));
-              for (const p of perdedores) {
-                const { error } = await supabase
-                  .from('participaciones')
-                  .update({ estado: 'perdedor' })
-                  .eq('id', p.id);
-                if (error) throw error;
-
-                notificaciones.push({
-                  user_id: p.user_id,
-                  tipo:    'perdedor',
-                  titulo:  `Resultado en ${quiniela.titulo}`,
-                  mensaje: `Terminaste con ${p.aciertos} acierto${p.aciertos !== 1 ? 's' : ''}. ¡Suerte en la próxima!`,
-                  leida:   false,
-                });
-              }
-
-              // --- Insertar transacciones de wallet en lote ---
-              if (walletTransactions.length > 0) {
-                const { error: errWallet } = await supabase
-                  .from('wallet_transactions')
-                  .insert(walletTransactions);
-                if (errWallet) throw errWallet;
-              }
-
-              // --- Finalizar quiniela ---
-              const { error: errFin } = await supabase
-                .from('quinielas')
-                .update({ estado: 'finalizada', premio_total: premioReal })
-                .eq('id', id);
-              if (errFin) throw errFin;
-
-              // --- Notificaciones ---
-              if (notificaciones.length > 0) {
-                await supabase.from('notificaciones').insert(notificaciones);
-              }
+              const { error: errorRPC } = await supabase.rpc('distribuir_premios_quiniela', {
+                p_quiniela_id: id,
+                p_ganador_ids: ganadoresIds,
+                p_monto_por_ganador: montoPorGanador,
+                p_premio_total: premioReal,
+                p_max_aciertos: maxAciertos,
+              });
+              if (errorRPC) throw errorRPC;
 
               await cargarDatos();
               Alert.alert(

@@ -1,9 +1,10 @@
-import '../src/utils/alertPatch';
-import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { StatusBar, View, ActivityIndicator, Platform } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Platform, StatusBar, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { supabase } from '../src/config/supabase';
 import { DeporteProvider } from '../src/context/DeporteContext';
+import '../src/utils/alertPatch';
 
 export default function RootLayout() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -81,22 +82,24 @@ export default function RootLayout() {
   }
 
   return (
-    <DeporteProvider>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0C10" />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="auth/login" />
-        <Stack.Screen name="auth/register" />
-        <Stack.Screen name="auth/forgot-password" />
-        <Stack.Screen name="auth/reset-password" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="quiniela/details" />
-        <Stack.Screen name="admin/index" />
-        <Stack.Screen name="admin/create" />
-        <Stack.Screen name="wallet/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-        <Stack.Screen name="pago/exito" />
-        <Stack.Screen name="pago/fallo" />
-        <Stack.Screen name="pago/pendiente" />
-      </Stack>
-    </DeporteProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <DeporteProvider>
+        <StatusBar barStyle="light-content" backgroundColor="#0A0C10" />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="auth/login" />
+          <Stack.Screen name="auth/register" />
+          <Stack.Screen name="auth/forgot-password" />
+          <Stack.Screen name="auth/reset-password" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="quiniela/details" />
+          <Stack.Screen name="admin/index" />
+          <Stack.Screen name="admin/create" />
+          <Stack.Screen name="wallet/index" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="pago/exito" />
+          <Stack.Screen name="pago/fallo" />
+          <Stack.Screen name="pago/pendiente" />
+        </Stack>
+      </DeporteProvider>
+    </GestureHandlerRootView>
   );
 }

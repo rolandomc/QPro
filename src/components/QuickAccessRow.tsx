@@ -5,7 +5,7 @@ export default function QuickAccessRow() {
   return (
     <View style={styles.row}>
       <View style={[styles.card, styles.neonCardPink]}>
-        <Text style={styles.title}>TODAY'S ACCA</Text>
+        <Text style={styles.title}>TODAY&apos;S ACCA</Text>
         <Text style={styles.flags}>🇵🇹 🏴󠁧󠁢󠁥󠁮󠁧󠁿</Text>
         <Text style={styles.subtitle}>4 Legs @ 3.31</Text>
       </View>

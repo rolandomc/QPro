@@ -1,19 +1,29 @@
-import React, { useState, useCallback, useRef } from 'react';
-import {
-  StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator, RefreshControl, Modal, FlatList, Linking,
-  Platform, Image, KeyboardAvoidingView, TouchableWithoutFeedback,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
-import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
-import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
-import { AdminService } from '../../src/services/admin.service';
-import { QuinielasService } from '../../src/services/quinielas.service';
-import { supabase } from '../../src/config/supabase';
+import * as ImagePicker from 'expo-image-picker';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image, KeyboardAvoidingView,
+    Linking,
+    Modal,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet, Text,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
+} from 'react-native';
+import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '../../src/components/DateTimePicker';
 import { SlidingTabs } from '../../src/components/SlidingTabs';
+import { supabase } from '../../src/config/supabase';
+import { AdminService } from '../../src/services/admin.service';
+import { QuinielasService } from '../../src/services/quinielas.service';
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
 function formatDisplay(iso: string) {
@@ -617,13 +627,20 @@ export default function AdminDashboardScreen() {
           <View style={styles.speiList}>
             {/* SlidingTabs filtro SPEI */}
             <View style={styles.slidingTabsWrapper}>
-              <SlidingTabs
-                tabs={TABS_SPEI}
-                activeKey={filtroSPEI}
-                onChange={(key) => setFiltroSPEI(key as FiltroSPEI)}
-                barColor="#0D1117"
-                pillColor="#1C1F26"
-              />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                nestedScrollEnabled
+                contentContainerStyle={styles.speiTabsScrollContent}
+              >
+                <SlidingTabs
+                  tabs={TABS_SPEI}
+                  activeKey={filtroSPEI}
+                  onChange={(key) => setFiltroSPEI(key as FiltroSPEI)}
+                  barColor="#0D1117"
+                  pillColor="#1C1F26"
+                />
+              </ScrollView>
             </View>
 
             {speiFiltrados.length === 0 ? (
@@ -632,7 +649,7 @@ export default function AdminDashboardScreen() {
               speiFiltrados.map((item) => {
                 let ocrData: Record<string, any> | null = null;
                 if (item.spei_datos_ocr) {
-                  try { ocrData = typeof item.spei_datos_ocr === 'string' ? JSON.parse(item.spei_datos_ocr) : item.spei_datos_ocr; } catch (_) {}
+                  try { ocrData = typeof item.spei_datos_ocr === 'string' ? JSON.parse(item.spei_datos_ocr) : item.spei_datos_ocr; } catch {}
                 }
                 const yaAprobado  = item.estado === 'pagado';
                 const ocrAbierto  = expandedOcrId === item.id;
@@ -839,102 +856,106 @@ export default function AdminDashboardScreen() {
         </TouchableOpacity>
 
         {/* ── Sección Quinielas con filtros estado + deporte ── */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Quinielas</Text>
-          <Text style={styles.sectionCount}>
-            {quinielasFiltradas.length}{(filtroEstado !== 'todas' || filtroDeporte !== 'todos') ? ` / ${quinielas.length}` : ''}
-          </Text>
-        </View>
-
-        {/* SlidingTabs filtro por estado */}
-        <View style={[styles.slidingTabsWrapper, { marginBottom: 10 }]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <SlidingTabs
-              tabs={TABS_ESTADO}
-              activeKey={filtroEstado}
-              onChange={(key) => setFiltroEstado(key as FiltroEstado)}
-              barColor="#15181F"
-              pillColor="#2A2D35"
-            />
-          </ScrollView>
-        </View>
-
-        {/* SlidingTabs filtro por deporte */}
-        <View style={styles.slidingTabsWrapper}>
-          <SlidingTabs
-            tabs={TABS_DEPORTE}
-            activeKey={filtroDeporte}
-            onChange={(key) => setFiltroDeporte(key as FiltroDeporte)}
-            barColor="#15181F"
-            pillColor="#2A2D35"
-          />
-        </View>
-
-        {quinielasFiltradas.length === 0 && (
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>
-              {quinielas.length === 0
-                ? 'No hay quinielas creadas aún.'
-                : `No hay quinielas${filtroDeporte !== 'todos' ? ` de ${filtroDeporte}` : ''} con estado "${filtroEstado}".`}
+        <View style={styles.quinielasPanel}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Quinielas</Text>
+            <Text style={styles.sectionCount}>
+              {quinielasFiltradas.length}{(filtroEstado !== 'todas' || filtroDeporte !== 'todos') ? ` / ${quinielas.length}` : ''}
             </Text>
           </View>
-        )}
 
-        {quinielasFiltradas.map((q) => {
-          const esBeisbol = (q.deporte ?? 'futbol') === 'beisbol';
-          return (
-            <Swipeable
-              key={q.id}
-              ref={ref => { swipeableRefs.current[q.id] = ref; }}
-              friction={2}
-              rightThreshold={60}
-              renderRightActions={() => renderDeleteAction(q.id, q.titulo)}
-              overshootRight={false}
-            >
-              <TouchableOpacity style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
-                <View style={styles.cardHeader}>
-                  <Text style={styles.cardDeporteBadge}>{esBeisbol ? '⚾' : '⚽'}</Text>
-                  <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
-                  <View style={[styles.estadoBadge, { borderColor: getEstadoColor(q.estado) }]}>
-                    <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado?.toUpperCase() ?? 'NULA'}</Text>
+          {/* SlidingTabs filtro por estado */}
+          <View style={[styles.slidingTabsWrapper, { marginBottom: 10 }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quinielasTabsScrollContent}>
+              <SlidingTabs
+                tabs={TABS_ESTADO}
+                activeKey={filtroEstado}
+                onChange={(key) => setFiltroEstado(key as FiltroEstado)}
+                barColor="#1C1F26"
+                pillColor="#2A2D35"
+              />
+            </ScrollView>
+          </View>
+
+          {/* SlidingTabs filtro por deporte */}
+          <View style={styles.slidingTabsWrapper}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quinielasTabsScrollContent}>
+              <SlidingTabs
+                tabs={TABS_DEPORTE}
+                activeKey={filtroDeporte}
+                onChange={(key) => setFiltroDeporte(key as FiltroDeporte)}
+                barColor="#1C1F26"
+                pillColor="#2A2D35"
+              />
+            </ScrollView>
+          </View>
+
+          {quinielasFiltradas.length === 0 && (
+            <View style={styles.quinielasEmptyBox}>
+              <Text style={styles.quinielasEmptyText}>
+                {quinielas.length === 0
+                  ? 'No hay quinielas creadas aun.'
+                  : `No hay quinielas${filtroDeporte !== 'todos' ? ` de ${filtroDeporte}` : ''} con estado "${filtroEstado}".`}
+              </Text>
+            </View>
+          )}
+
+          {quinielasFiltradas.map((q) => {
+            const esBeisbol = (q.deporte ?? 'futbol') === 'beisbol';
+            return (
+              <Swipeable
+                key={q.id}
+                ref={ref => { swipeableRefs.current[q.id] = ref; }}
+                friction={2}
+                rightThreshold={60}
+                renderRightActions={() => renderDeleteAction(q.id, q.titulo)}
+                overshootRight={false}
+              >
+                <TouchableOpacity style={styles.card} onPress={() => router.push(`/admin/quiniela/${q.id}`)} activeOpacity={0.75}>
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.cardDeporteBadge}>{esBeisbol ? '⚾' : '⚽'}</Text>
+                    <Text style={styles.cardTitle} numberOfLines={1}>{q.titulo}</Text>
+                    <View style={[styles.estadoBadge, { borderColor: getEstadoColor(q.estado) }]}>
+                      <Text style={[styles.estadoBadgeText, { color: getEstadoColor(q.estado) }]}>{q.estado?.toUpperCase() ?? 'NULA'}</Text>
+                    </View>
+                    <Text style={styles.cardArrow}>›</Text>
                   </View>
-                  <Text style={styles.cardArrow}>›</Text>
-                </View>
-                <View style={styles.cardInfo}>
-                  <Text style={styles.infoText}>🎦 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
-                  <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada}</Text></Text>
-                </View>
-                <View style={styles.cardInfo}>
-                  <Text style={styles.infoText}>👥 Mín: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0}</Text></Text>
-                  <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
-                </View>
-                <View style={styles.cardActions}>
-                  <TouchableOpacity style={styles.actionBtn} onPress={(e) => { e.stopPropagation?.(); handleVerUsuarios(q.id, q.titulo); }}>
-                    <Text style={styles.actionText}>👥 Usuarios</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.actionBtn, q.estado !== 'abierta' && styles.disabledBtn]}
-                    disabled={q.estado !== 'abierta' || actionLoading === q.id + '_cerrar'}
-                    onPress={(e) => { e.stopPropagation?.(); handleCerrarApuestas(q.id, q.titulo); }}
-                  >
-                    {actionLoading === q.id + '_cerrar'
-                      ? <ActivityIndicator size="small" color="#3498DB" />
-                      : <Text style={[styles.actionText, q.estado !== 'abierta' && { color: '#505050' }]}>🔒 Cerrar</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.actionBtn, styles.dangerBtn, q.estado === 'finalizada' && styles.disabledBtn]}
-                    disabled={q.estado === 'finalizada' || actionLoading === q.id + '_cancelar'}
-                    onPress={(e) => { e.stopPropagation?.(); handleCancelar(q.id, q.titulo); }}
-                  >
-                    {actionLoading === q.id + '_cancelar'
-                      ? <ActivityIndicator size="small" color="#E91E63" />
-                      : <Text style={[styles.dangerText, q.estado === 'finalizada' && { color: '#505050' }]}>❌ Cancelar</Text>}
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-            </Swipeable>
-          );
-        })}
+                  <View style={styles.cardInfo}>
+                    <Text style={styles.infoText}>🎦 Partidos: {q.partidos?.[0]?.count ?? 0}</Text>
+                    <Text style={styles.infoText}>💰 Entrada: <Text style={{ color: '#2ECC71', fontWeight: 'bold' }}>${q.precio_entrada}</Text></Text>
+                  </View>
+                  <View style={styles.cardInfo}>
+                    <Text style={styles.infoText}>👥 Mín: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0}</Text></Text>
+                    <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
+                  </View>
+                  <View style={styles.cardActions}>
+                    <TouchableOpacity style={styles.actionBtn} onPress={(e) => { e.stopPropagation?.(); handleVerUsuarios(q.id, q.titulo); }}>
+                      <Text style={styles.actionText}>👥 Usuarios</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.actionBtn, q.estado !== 'abierta' && styles.disabledBtn]}
+                      disabled={q.estado !== 'abierta' || actionLoading === q.id + '_cerrar'}
+                      onPress={(e) => { e.stopPropagation?.(); handleCerrarApuestas(q.id, q.titulo); }}
+                    >
+                      {actionLoading === q.id + '_cerrar'
+                        ? <ActivityIndicator size="small" color="#3498DB" />
+                        : <Text style={[styles.actionText, q.estado !== 'abierta' && { color: '#505050' }]}>🔒 Cerrar</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.actionBtn, styles.dangerBtn, q.estado === 'finalizada' && styles.disabledBtn]}
+                      disabled={q.estado === 'finalizada' || actionLoading === q.id + '_cancelar'}
+                      onPress={(e) => { e.stopPropagation?.(); handleCancelar(q.id, q.titulo); }}
+                    >
+                      {actionLoading === q.id + '_cancelar'
+                        ? <ActivityIndicator size="small" color="#E91E63" />
+                        : <Text style={[styles.dangerText, q.estado === 'finalizada' && { color: '#505050' }]}>❌ Cancelar</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              </Swipeable>
+            );
+          })}
+        </View>
       </ScrollView>
 
       <DateTimePicker
@@ -1164,8 +1185,13 @@ const styles = StyleSheet.create({
   sectionHeaderRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   sectionTitle:         { color: '#A0A0A0', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   sectionCount:         { color: '#505050', fontSize: 12 },
+  quinielasPanel:       { backgroundColor: '#15181F', borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
 
   slidingTabsWrapper:   { marginBottom: 14, marginTop: 2 },
+  speiTabsScrollContent:{ paddingRight: 8 },
+  quinielasTabsScrollContent: { paddingRight: 8 },
+  quinielasEmptyBox:    { backgroundColor: '#1C1F26', borderRadius: 10, borderWidth: 1, borderColor: '#2A2D35', paddingVertical: 18, paddingHorizontal: 12, alignItems: 'center', marginTop: 2 },
+  quinielasEmptyText:   { color: '#808080', fontSize: 13, textAlign: 'center' },
 
   emptyBox:             { padding: 30, alignItems: 'center' },
   emptyText:            { color: '#505050', fontSize: 14 },

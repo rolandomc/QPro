@@ -4,6 +4,142 @@ export type CompetitionCode = 'PD' | 'PL' | 'MX1' | 'CL' | 'WC' | 'BL1' | 'SA' |
 export type MatchStatus = 'SCHEDULED' | 'FINISHED' | 'LIVE' | 'ALL';
 
 const FOOTBALL_API_BASE = 'https://api.football-data.org/v4';
+const THESPORTSDB_API_BASE = 'https://www.thesportsdb.com/api/v1/json';
+
+const THESPORTSDB_LEAGUE_BY_COMP: Partial<Record<CompetitionCode, string>> = {
+  PD: '4335',
+  PL: '4328',
+  CL: '4480',
+  WC: '4429',
+  BL1: '4331',
+  SA: '4332',
+  FL1: '4334',
+  BSA: '4351',
+  MLS: '4346',
+};
+
+function buildSportsDbUrl(apiKey: string, path: string): string {
+  return `${THESPORTSDB_API_BASE}/${apiKey}/${path}`;
+}
+
+function inferSeason(dateRef: string): string {
+  const d = new Date(dateRef);
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() + 1;
+  // Temporada típica fútbol: inicia aprox. en agosto.
+  if (month >= 8) return `${year}-${year + 1}`;
+  return `${year - 1}-${year}`;
+}
+
+function normalizeSportsDbStatus(raw: string | null | undefined): MatchStatus {
+  const s = String(raw ?? '').toLowerCase();
+  if (s.includes('final')) return 'FINISHED';
+  if (s.includes('postponed') || s.includes('canceled') || s.includes('cancelled')) return 'ALL';
+  if (s.includes('live') || s.includes('in progress') || s.includes('2nd half') || s.includes('1st half')) return 'LIVE';
+  return 'SCHEDULED';
+}
+
+function shouldIncludeByStatus(normalized: MatchStatus, requested: MatchStatus | undefined): boolean {
+  const rq = requested ?? 'SCHEDULED';
+  if (rq === 'ALL') return true;
+  return normalized === rq;
+}
+
+async function fetchSportsDbTeamBadge(
+  apiKey: string,
+  teamId: string | undefined,
+  cache: Record<string, string | null>,
+): Promise<string | null> {
+  if (!teamId) return null;
+  if (Object.prototype.hasOwnProperty.call(cache, teamId)) return cache[teamId];
+  try {
+    const res = await fetch(buildSportsDbUrl(apiKey, `lookupteam.php?id=${teamId}`));
+    if (!res.ok) {
+      cache[teamId] = null;
+      return null;
+    }
+    const json = await res.json();
+    const badge = json?.teams?.[0]?.strBadge ?? null;
+    cache[teamId] = badge;
+    return badge;
+  } catch {
+    cache[teamId] = null;
+    return null;
+  }
+}
+
+async function fetchMatchesFromSportsDb(
+  competition: CompetitionCode,
+  options?: {
+    matchday?: number;
+    status?: MatchStatus;
+    dateFrom?: string;
+    dateTo?: string;
+  }
+) {
+  const leagueId = THESPORTSDB_LEAGUE_BY_COMP[competition];
+  if (!leagueId) return [];
+
+  const apiKey = process.env.EXPO_PUBLIC_THESPORTSDB_API_KEY || '3';
+  const seasonRef = options?.dateFrom || options?.dateTo || new Date().toISOString();
+  const candidateSeasons = [
+    inferSeason(seasonRef),
+    inferSeason(new Date().toISOString()),
+  ];
+
+  const events: any[] = [];
+  for (const season of candidateSeasons) {
+    const res = await fetch(buildSportsDbUrl(apiKey, `eventsseason.php?id=${leagueId}&s=${season}`));
+    if (!res.ok) continue;
+    const json = await res.json();
+    if (Array.isArray(json?.events) && json.events.length > 0) {
+      events.push(...json.events);
+    }
+  }
+
+  if (events.length === 0) return [];
+
+  const badgeCache: Record<string, string | null> = {};
+  const fromTs = options?.dateFrom ? new Date(options.dateFrom).getTime() : null;
+  const toTs = options?.dateTo ? new Date(options.dateTo).getTime() : null;
+
+  const mapped = await Promise.all(
+    events.map(async (ev: any) => {
+      const dt = ev?.strTimestamp || (ev?.dateEvent ? `${ev.dateEvent}T00:00:00Z` : null);
+      if (!dt) return null;
+      const when = new Date(dt).getTime();
+      if (Number.isNaN(when)) return null;
+      if (fromTs !== null && when < fromTs) return null;
+      if (toTs !== null && when > toTs + 86_399_999) return null;
+
+      const status = normalizeSportsDbStatus(ev?.strStatus);
+      if (!shouldIncludeByStatus(status, options?.status)) return null;
+
+      const homeBadge =
+        ev?.strHomeTeamBadge ??
+        await fetchSportsDbTeamBadge(apiKey, ev?.idHomeTeam, badgeCache);
+      const awayBadge =
+        ev?.strAwayTeamBadge ??
+        await fetchSportsDbTeamBadge(apiKey, ev?.idAwayTeam, badgeCache);
+
+      return {
+        external_id:      String(ev?.idEvent ?? ''),
+        equipo_local:     ev?.strHomeTeam ?? '?',
+        equipo_visitante: ev?.strAwayTeam ?? '?',
+        fecha_partido:    dt,
+        status,
+        marcador: {
+          home: ev?.intHomeScore !== null && ev?.intHomeScore !== undefined ? Number(ev.intHomeScore) : null,
+          away: ev?.intAwayScore !== null && ev?.intAwayScore !== undefined ? Number(ev.intAwayScore) : null,
+        },
+        logo_local: homeBadge,
+        logo_visitante: awayBadge,
+      };
+    })
+  );
+
+  return mapped.filter(Boolean);
+}
 
 function getMatchesUrl(competition: string, params: URLSearchParams): string {
   const query = params.toString();
@@ -66,37 +202,61 @@ export class AdminService {
       headers['X-Auth-Token'] = apiKey;
     }
 
-    const res = await fetch(url, { headers });
-    if (!res.ok) {
-      const json = await res.json().catch(() => null);
-      const msg = json?.message ?? await res.text();
-      throw new Error(`Error de la API (${res.status}): ${msg}`);
+    let primaryError = '';
+    try {
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        const msg = json?.message ?? await res.text();
+        throw new Error(`Error de la API (${res.status}): ${msg}`);
+      }
+
+      const data = await res.json();
+      const matches = (data.matches ?? []).map((m: any) => ({
+        external_id:      String(m.id),
+        equipo_local:     m.homeTeam?.shortName ?? m.homeTeam?.name ?? '?',
+        equipo_visitante: m.awayTeam?.shortName ?? m.awayTeam?.name ?? '?',
+        fecha_partido:    m.utcDate,
+        status:           m.status,
+        marcador:         m.score?.fullTime ?? null,
+        logo_local:       m.homeTeam?.crest ?? null,
+        logo_visitante:   m.awayTeam?.crest ?? null,
+      }));
+
+      if (matches.length > 0) {
+        return { matches, source: 'football-data' as const, fallbackUsed: false };
+      }
+    } catch (e: any) {
+      primaryError = e?.message ?? 'Fallo en API primaria';
     }
 
-    const data = await res.json();
-    const matches = (data.matches ?? []).map((m: any) => ({
-      external_id:      String(m.id),
-      equipo_local:     m.homeTeam?.shortName ?? m.homeTeam?.name ?? '?',
-      equipo_visitante: m.awayTeam?.shortName ?? m.awayTeam?.name ?? '?',
-      fecha_partido:    m.utcDate,
-      status:           m.status,
-      marcador:         m.score?.fullTime ?? null,
-    }));
-    return { matches };
+    const fallbackMatches = await fetchMatchesFromSportsDb(competition, options);
+    if (fallbackMatches.length > 0) {
+      return {
+        matches: fallbackMatches,
+        source: 'thesportsdb' as const,
+        fallbackUsed: true,
+        fallbackReason: primaryError || 'Sin resultados en API primaria',
+      };
+    }
+
+    if (primaryError) throw new Error(primaryError);
+    return { matches: [], source: 'football-data' as const, fallbackUsed: false };
   }
 
   // ─── Crear quiniela con partidos ──────────────────────────────────────────────
   static async createQuinielaConPartidos(
     titulo: string,
     descripcion: string,
+    liga: string,
     precioEntrada: number,
     fechaCierre: string,
-    partidos: Array<{
+    partidos: {
       external_id: string;
       equipo_local: string;
       equipo_visitante: string;
       fecha_partido: string;
-    }>,
+    }[],
     jugadoresMinimos: number = 5,
     porcentajeAdmin: number = 10,
     cierreAutomatico: boolean = true,
@@ -105,6 +265,8 @@ export class AdminService {
     const insertPayloadFull = {
       titulo,
       descripcion,
+      liga,
+      deporte:           'futbol',
       precio_entrada:     precioEntrada,
       premio_total:       0,
       estado:             'abierta',
@@ -127,7 +289,9 @@ export class AdminService {
       const missingCol = errFull.message?.includes('cierre_automatico') ||
                          errFull.message?.includes('primer_partido') ||
                          errFull.message?.includes('jugadores_minimos') ||
-                         errFull.message?.includes('porcentaje_admin');
+                         errFull.message?.includes('porcentaje_admin') ||
+                         errFull.message?.includes('liga') ||
+                         errFull.message?.includes('deporte');
       if (!missingCol) throw errFull;
 
       const { data: dataBasic, error: errBasic } = await supabase
@@ -166,7 +330,7 @@ export class AdminService {
   static async getQuinielas() {
     const { data, error } = await supabase
       .from('quinielas')
-      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, deporte, auto_resultados, jugadores_minimos, porcentaje_admin, cierre_automatico, primer_partido, created_at, partidos(count)')
+      .select('id, titulo, descripcion, liga, precio_entrada, premio_total, estado, deporte, auto_resultados, jugadores_minimos, porcentaje_admin, cierre_automatico, primer_partido, created_at, partidos(count)')
       .order('created_at', { ascending: false });
 
     if (!error) return data;
@@ -176,7 +340,8 @@ export class AdminService {
                        error.message?.includes('primer_partido') ||
                        error.message?.includes('jugadores_minimos') ||
                        error.message?.includes('porcentaje_admin') ||
-                       error.message?.includes('deporte');
+                       error.message?.includes('deporte') ||
+                       error.message?.includes('liga');
 
     if (!missingCol) throw error;
 

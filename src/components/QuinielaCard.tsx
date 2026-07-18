@@ -1,14 +1,17 @@
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../config/supabase';
-import { common, layout } from '../styles';
+import { common } from '../styles';
 import { colors, radii, shadows, spacing, text } from '../theme';
 
 interface Props {
   id: string;
   titulo: string;
   descripcion?: string;
+  headerLabel?: string;
+  headerDetail?: string;
+  tagColor?: string;
   precioEntrada: number;
   premioTotal: number;
   estado: 'abierta' | 'cerrada' | 'finalizada';
@@ -39,42 +42,14 @@ function SkeletonBlock({ width, height = 18, style }: { width: number | string; 
   );
 }
 
-// ─── Countdown hook ────────────────────────────────────────────
-function useCountdown(fechaPrimerPartido?: string, estado?: string) {
-  const [label, setLabel] = useState<string | null>(null);
-  useEffect(() => {
-    if (!fechaPrimerPartido || estado !== 'abierta') { setLabel(null); return; }
-    const calc = () => {
-      const diff = new Date(fechaPrimerPartido).getTime() - Date.now();
-      if (diff <= 0) { setLabel(null); return; }
-      const totalSecs = Math.floor(diff / 1000);
-      const days  = Math.floor(totalSecs / 86400);
-      const hours = Math.floor((totalSecs % 86400) / 3600);
-      const mins  = Math.floor((totalSecs % 3600) / 60);
-      const secs  = totalSecs % 60;
-      if (days > 0) {
-        setLabel(`⏱ Primer partido en ${days}d ${hours}h`);
-      } else if (hours > 0) {
-        setLabel(`⏱ Primer partido en ${hours}h ${String(mins).padStart(2,'0')}m`);
-      } else {
-        setLabel(`⚠️ ¡Últimos ${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')} para participar!`);
-      }
-    };
-    calc();
-    const interval = setInterval(calc, 1000);
-    return () => clearInterval(interval);
-  }, [fechaPrimerPartido, estado]);
-  return label;
-}
-
 // ─── Componente principal ────────────────────────────────────────────
 export function QuinielaCard({
-  id, titulo, descripcion, precioEntrada, premioTotal, estado,
-  totalPartidos, fechaCierre, jugadoresMinimos = 0, porcentajeAdmin = 0,
+  id, titulo, headerLabel, headerDetail, tagColor,
+  precioEntrada, premioTotal, estado,
+  totalPartidos, jugadoresMinimos = 0, porcentajeAdmin = 0,
   modoResultados = false, jugadoresCount, yaParticipo: yaParticipoInit,
 }: Props) {
   const router   = useRouter();
-  const countdown = useCountdown(fechaCierre, estado);
 
   const [jugadoresPagados, setJugadoresPagados] = useState<number | null>(
     jugadoresCount !== undefined ? jugadoresCount : null
@@ -147,133 +122,83 @@ export function QuinielaCard({
   const premioVisible   = !tieneMinimo || minimoAlcanzado;
   const isLoading       = jugadoresPagados === null || yaParticipo === null;
 
-  const estadoColor = estado === 'abierta' ? colors.success : estado === 'cerrada' ? colors.warning : colors.notifCerrada;
-  const estadoLabel = estado === 'abierta' ? '🟢 Abierta' : estado === 'cerrada' ? '🟡 Cerrada' : '✅ Finalizada';
-
   const handlePress = () => {
     if (modoResultados) { router.push(`/quiniela/${id}`); return; }
     if (estado === 'abierta') { router.push(`/quiniela/details?id=${id}`); return; }
     router.push(`/quiniela/${id}`);
   };
   const handleReintentarPago = () => router.push(`/quiniela/details?id=${id}`);
-  const handleShare = async () => {
-    const premioTexto   = premioVisible && premioCalculado > 0 ? `$${premioCalculado.toFixed(0)} en juego` : `Entrada $${precioEntrada}`;
-    const countdownTexto = countdown ? `\n${countdown}` : '';
-    try {
-      await Share.share({
-        title: `🏆 ${titulo} — QPro`,
-        message: `🏆 ${titulo}\n${premioTexto} · ${totalPartidos} partidos${countdownTexto}\n\n¡Únete y demuestra que sabes de fútbol! 👇\nqpro://quiniela/${id}`,
-      });
-    } catch {
-    }
-  };
 
   const botonLabel  = modoResultados
     ? (estado === 'finalizada' ? 'Ver resultado →' : 'Ver mis picks →')
     : estado === 'abierta'
-      ? (yaParticipo ? '✏️ Ver / Editar picks →' : 'Participar →')
+      ? (yaParticipo ? '✏️ Ver / Editar picks →' : 'JOIN POOL')
       : 'Ver detalle →';
   const botonActivo = modoResultados || estado === 'abierta';
-
+  const progreso = tieneMinimo && jugadoresMinimos > 0
+    ? Math.min((jug / jugadoresMinimos) * 100, 100)
+    : Math.min(jug > 0 ? (jug / Math.max(totalPartidos, 1)) * 100 : 0, 100);
+  const estadoEtiqueta = estado === 'abierta'
+    ? 'Abierta'
+    : estado === 'cerrada'
+      ? 'Cerrada'
+      : 'Finalizada';
   return (
     <TouchableOpacity style={styles.card} onPress={handlePress} activeOpacity={0.85}>
-
-      {/* Header */}
-      <View style={[layout.rowBetween, { marginBottom: spacing.sm }]}>
-        <Text style={styles.title}>🏆 {titulo}</Text>
-        <View style={[layout.row, layout.gapSm]}>
-          <View style={[common.badge, { borderWidth: 1, borderColor: estadoColor }]}>
-            <Text style={[common.badgeText, { color: estadoColor }]}>{estadoLabel}</Text>
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <View style={[styles.tag, { backgroundColor: tagColor ?? colors.primaryDim, borderColor: tagColor ?? colors.primary }]}>
+            <Text style={styles.tagText}>{headerLabel ?? estadoEtiqueta}</Text>
           </View>
-          <TouchableOpacity onPress={handleShare} style={styles.shareBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={{ fontSize: 16 }}>⬆️</Text>
-          </TouchableOpacity>
+          <View style={styles.headerDetail}>
+            <Text style={styles.headerDot}>{headerDetail === 'Béisbol' ? '⚾' : '⚽'}</Text>
+            <Text style={styles.headerDetailText}>{headerDetail ?? 'Football'}</Text>
+          </View>
+        </View>
+        <View style={styles.prizeContainer}>
+          <Text style={styles.prizeLabel}>PRIZE POOL</Text>
+          <Text style={styles.prizeAmount}>
+            {isLoading ? <SkeletonBlock width={72} height={20} /> : `$${premioVisible ? premioCalculado.toFixed(0) : '---'}`}
+          </Text>
         </View>
       </View>
 
-      {descripcion ? <Text style={[text.body, common.textMuted, { marginBottom: spacing.md }]}>{descripcion}</Text> : null}
+      <Text style={styles.title}>{titulo}</Text>
 
-      {/* Countdown */}
-      {countdown && (
-        <View style={styles.countdownRow}>
-          <Text style={styles.countdownText}>{countdown}</Text>
-        </View>
-      )}
-
-      {/* Stats */}
       <View style={styles.statsRow}>
-        <View style={styles.stat}>
-          <Text style={styles.statValue}>{totalPartidos}</Text>
-          <Text style={[text.label, common.textMuted]}>Partidos</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.stat}>
+        <View style={styles.statColumn}>
+          <Text style={styles.statLabel}>ENTRY</Text>
           <Text style={styles.statValue}>${precioEntrada}</Text>
-          <Text style={[text.label, common.textMuted]}>Entrada</Text>
         </View>
-        <View style={styles.statDivider} />
-        <View style={styles.stat}>
-          {isLoading ? (
-            <SkeletonBlock width={52} height={20} style={{ marginBottom: spacing.xs }} />
-          ) : premioVisible ? (
-            <Text style={[styles.statValue, { color: colors.success }]}>
-              ${premioCalculado > 0 ? premioCalculado.toFixed(0) : '---'}
-            </Text>
-          ) : (
-            <Text style={[styles.statValue, { color: colors.textFaint }]}>🔒 Oculto</Text>
-          )}
-          <Text style={[text.label, common.textMuted]}>Premio</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.stat}>
-          {isLoading ? (
-            <SkeletonBlock width={32} height={20} style={{ marginBottom: spacing.xs }} />
-          ) : (
-            <Text style={[styles.statValue, { color: colors.info }]}>{jug}</Text>
-          )}
-          <Text style={[text.label, common.textMuted]}>Jugadores</Text>
-        </View>
-      </View>
 
-      {/* Barra de mínimo */}
-      {tieneMinimo && (
-        <View style={styles.pozoBox}>
-          {isLoading ? (
-            <SkeletonBlock width="70%" height={12} style={{ marginBottom: spacing.sm }} />
-          ) : !minimoAlcanzado ? (
-            <Text style={[text.label, common.textWarning]}>
-              ⏳ Faltan {faltanJugadores} jugador{faltanJugadores !== 1 ? 'es' : ''} para activar el pozo
-            </Text>
-          ) : (
-            <Text style={[text.label, common.textSuccess]}>✅ Pozo activo — aumentando en tiempo real</Text>
-          )}
-          <View style={[layout.row, { gap: spacing.sm, marginTop: spacing.xs }]}>
-            <View style={styles.progressTrack}>
-              {isLoading ? (
-                <SkeletonBlock width="40%" height={5} style={{ borderRadius: radii.xs }} />
-              ) : (
-                <View style={[
-                  styles.progressFill,
-                  { width: `${Math.min((jug / jugadoresMinimos) * 100, 100)}%` },
-                  minimoAlcanzado && { backgroundColor: colors.success },
-                ]} />
-              )}
-            </View>
+        <View style={styles.progressSection}>
+          <View style={styles.statHeader}>
+            <Text style={styles.statLabel}>Players</Text>
+            <Text style={styles.statValue}>{isLoading ? '...' : `${jug} / ${Math.max(jugadoresMinimos || totalPartidos, 1)}`}</Text>
+          </View>
+          <View style={styles.progressBarBg}>
             {isLoading ? (
-              <SkeletonBlock width={28} height={10} />
+              <View style={styles.progressBarFillLoading} />
             ) : (
-              <Text style={[text.caption, common.textFaint]}>{jug}/{jugadoresMinimos}</Text>
+              <View style={[styles.progressBarFill, { width: `${progreso}%` }]} />
             )}
           </View>
         </View>
+      </View>
+
+      {tieneMinimo && !isLoading && (
+        <Text style={[text.caption, common.textFaint, { marginBottom: spacing.md }]}>
+          {minimoAlcanzado
+            ? 'Pozo activo — aumentando en tiempo real'
+            : `Faltan ${faltanJugadores} jugador${faltanJugadores !== 1 ? 'es' : ''} para activar el pozo`}
+        </Text>
       )}
 
-      {/* Botón principal */}
       <TouchableOpacity
-        style={[common.btnPrimary, !botonActivo && styles.buttonDisabled]}
+        style={[styles.actionButton, !botonActivo && styles.actionButtonDisabled]}
         onPress={handlePress}
       >
-        <Text style={[common.btnPrimaryText, !botonActivo && common.textFaint]}>
+        <Text style={[styles.actionButtonText, !botonActivo && styles.actionButtonTextDisabled]}>
           {botonLabel}
         </Text>
       </TouchableOpacity>
@@ -293,19 +218,31 @@ export default QuinielaCard;
 
 // Solo estilos MUY específicos de este componente que no existen en common/layout
 const styles = StyleSheet.create({
-  card:           { backgroundColor: colors.card, borderRadius: radii.xl, padding: spacing.xl, marginBottom: spacing.md, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', ...shadows.md },
-  title:          { ...text.sectionTitle, color: colors.text, flex: 1, marginRight: spacing.sm, lineHeight: 24 },
-  shareBtn:       { padding: spacing.xxs },
-  countdownRow:   { backgroundColor: 'rgba(243,156,18,0.12)', borderWidth: 1, borderColor: 'rgba(243,156,18,0.3)', borderRadius: radii.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginBottom: spacing.md, alignSelf: 'flex-start' },
-  countdownText:  { ...text.bodySmallBold, color: colors.warning, letterSpacing: 0.3 },
-  statsRow:       { flexDirection: 'row', backgroundColor: colors.backgroundDeep, borderRadius: radii.lg, padding: spacing.md, marginBottom: spacing.md, alignItems: 'center', borderWidth: 1, borderColor: colors.borderSubtle },
-  stat:           { flex: 1, alignItems: 'center', minHeight: 40, justifyContent: 'center' },
-  statValue:      { ...text.sectionTitle, color: colors.text },
-  statDivider:    { width: 1, height: 30, backgroundColor: colors.border },
-  pozoBox:        { backgroundColor: colors.backgroundDeep, borderRadius: radii.md, padding: spacing.sm, marginBottom: spacing.md, borderWidth: 1, borderColor: colors.borderSubtle },
-  progressTrack:  { flex: 1, height: 5, backgroundColor: colors.border, borderRadius: radii.xs, overflow: 'hidden' },
-  progressFill:   { height: '100%', backgroundColor: colors.warning, borderRadius: radii.xs },
-  buttonDisabled: { backgroundColor: colors.backgroundDeep, borderWidth: 1, borderColor: colors.border },
-  reintentarBtn:     { backgroundColor: colors.error, paddingVertical: 11, borderRadius: radii.md, alignItems: 'center', marginTop: spacing.sm },
+  card: { backgroundColor: colors.card, borderRadius: radii.xl, padding: spacing.lg, marginBottom: spacing.md, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', ...shadows.md },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1, flexWrap: 'wrap' },
+  tag: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radii.xs, minWidth: 72, borderWidth: 1 },
+  tagText: { color: '#fff', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'center' },
+  headerDetail: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  headerDot: { fontSize: 12 },
+  headerDetailText: { color: colors.textMuted, fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
+  prizeContainer: { alignItems: 'flex-end' },
+  prizeLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  prizeAmount: { color: colors.primary, fontSize: 18, fontWeight: '800' },
+  title: { color: colors.text, fontSize: 18, fontWeight: '800', marginTop: -5, marginBottom: spacing.sm, lineHeight: 24 },
+  statsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.lg, backgroundColor: colors.backgroundDeep, borderRadius: radii.md, padding: spacing.md },
+  statColumn: { minWidth: 88 },
+  statLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 },
+  statValue: { color: colors.text, fontSize: 16, fontWeight: '800' },
+  progressSection: { flex: 1, marginLeft: spacing.md },
+  statHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 6 },
+  progressBarBg: { height: 6, backgroundColor: colors.surface, borderRadius: 3, overflow: 'hidden' },
+  progressBarFill: { height: '100%', backgroundColor: colors.primary },
+  progressBarFillLoading: { width: '45%', height: '100%', backgroundColor: colors.cardElevated },
+  actionButton: { backgroundColor: colors.primary, borderRadius: radii.md, paddingVertical: spacing.md, alignItems: 'center' },
+  actionButtonDisabled: { backgroundColor: colors.backgroundDeep, borderWidth: 1, borderColor: colors.border },
+  actionButtonText: { color: '#08110D', fontSize: 14, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  actionButtonTextDisabled: { color: colors.textFaint },
+  reintentarBtn: { backgroundColor: colors.error, paddingVertical: 11, borderRadius: radii.md, alignItems: 'center', marginTop: spacing.sm },
   reintentarBtnText: { ...text.itemTitle, color: '#FFF' },
 });

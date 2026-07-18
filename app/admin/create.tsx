@@ -1,13 +1,21 @@
-import React, { useState, useMemo } from 'react';
+import { useRouter } from 'expo-router';
+import React, { useMemo, useState } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Switch,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import CustomDropdown from '../../src/components/CustomDropdown';
 import { AdminService, CompetitionCode, MatchStatus } from '../../src/services/admin.service';
-import { MLBAdminService, MLBPartidoInput }            from '../../src/services/mlbAdmin.service';
+import { MLBAdminService, MLBPartidoInput } from '../../src/services/mlbAdmin.service';
 
 // ─── Ligas fútbol ─────────────────────────────────────────────────────────────
 const LIGAS_MAP: Record<string, CompetitionCode | null> = {
@@ -55,7 +63,7 @@ export default function CreateQuinielaScreen() {
   // ─── Campos comunes ─────────────────────────────────────────────────────────
   const [titulo,         setTitulo]        = useState('');
   const [precio,         setPrecio]        = useState('50');
-  const [fechaCierre,    setFechaCierre]   = useState('');
+  const [fechaCierre]    = useState('');
   const [jugMinimos,     setJugMinimos]    = useState('5');
   const [pctAdmin,       setPctAdmin]      = useState('10');
   const [cierreAuto,     setCierreAuto]    = useState(true);
@@ -150,6 +158,9 @@ export default function CreateQuinielaScreen() {
         Alert.alert('⚠️ Sin resultados', 'No se encontraron partidos.');
       } else {
         setPartidosApi(result.matches);
+        if (result.fallbackUsed) {
+          Alert.alert('ℹ️ Respaldo activo', 'Se usó TheSportsDB porque la API principal no devolvió partidos.');
+        }
       }
     } catch (e: any) {
       Alert.alert('Error API', e.message);
@@ -184,7 +195,8 @@ export default function CreateQuinielaScreen() {
   const toggleMlbJuego = (pk: number) => {
     setMlbSelec(prev => {
       const next = new Set(prev);
-      next.has(pk) ? next.delete(pk) : next.add(pk);
+      if (next.has(pk)) next.delete(pk);
+      else next.add(pk);
       return next;
     });
   };
@@ -220,7 +232,8 @@ export default function CreateQuinielaScreen() {
   const togglePartido = (id: string) => {
     setSeleccionados(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -277,6 +290,7 @@ export default function CreateQuinielaScreen() {
         await AdminService.createQuinielaConPartidos(
           titulo,
           `Quiniela de ${liga}`,
+          liga,
           precioNum || 50,
           fechaCierre || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
           partidosElegidos,
@@ -640,6 +654,8 @@ export default function CreateQuinielaScreen() {
                 {partidosApi.map((partido) => {
                   const pid        = String(partido.external_id);
                   const isSelected = seleccionados.has(pid);
+                  const logoLocal = partido.logo_local ?? null;
+                  const logoVisitante = partido.logo_visitante ?? null;
                   const fecha      = partido.fecha_partido
                     ? new Date(partido.fecha_partido).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })
                     : '---';
@@ -657,7 +673,25 @@ export default function CreateQuinielaScreen() {
                       </View>
                       <View style={{ flex: 1 }}>
                         <View style={styles.matchRow}>
-                          <Text style={styles.matchTeams} numberOfLines={1}>{partido.equipo_local} vs {partido.equipo_visitante}</Text>
+                          <View style={styles.matchTeamsWithLogos}>
+                            <View style={styles.teamWithLogo}>
+                              {logoLocal ? (
+                                <Image source={{ uri: logoLocal }} style={styles.teamLogo} resizeMode="contain" />
+                              ) : (
+                                <View style={styles.teamLogoFallback}><Text style={styles.teamLogoFallbackTxt}>L</Text></View>
+                              )}
+                              <Text style={styles.matchTeams} numberOfLines={1}>{partido.equipo_local}</Text>
+                            </View>
+                            <Text style={styles.vsText}>vs</Text>
+                            <View style={styles.teamWithLogo}>
+                              {logoVisitante ? (
+                                <Image source={{ uri: logoVisitante }} style={styles.teamLogo} resizeMode="contain" />
+                              ) : (
+                                <View style={styles.teamLogoFallback}><Text style={styles.teamLogoFallbackTxt}>V</Text></View>
+                              )}
+                              <Text style={styles.matchTeams} numberOfLines={1}>{partido.equipo_visitante}</Text>
+                            </View>
+                          </View>
                           {marcador && <Text style={styles.marcadorText}>{marcador}</Text>}
                         </View>
                         <View style={styles.matchMeta}>
@@ -774,6 +808,12 @@ const styles = StyleSheet.create({
   checkboxSelectedMLB:    { backgroundColor: '#E8534A', borderColor: '#E8534A' },
   checkmark:              { color: '#000', fontWeight: 'bold', fontSize: 14 },
   matchRow:               { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  matchTeamsWithLogos:    { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8, marginRight: 8 },
+  teamWithLogo:           { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0, gap: 6 },
+  teamLogo:               { width: 20, height: 20, borderRadius: 10 },
+  teamLogoFallback:       { width: 20, height: 20, borderRadius: 10, backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#2A2D35', alignItems: 'center', justifyContent: 'center' },
+  teamLogoFallbackTxt:    { color: '#707070', fontSize: 10, fontWeight: '700' },
+  vsText:                 { color: '#707070', fontSize: 12, fontWeight: '700' },
   matchTeams:             { color: '#FFF', fontSize: 14, fontWeight: 'bold', flex: 1 },
   marcadorText:           { color: '#2ECC71', fontWeight: 'bold', fontSize: 14, marginLeft: 8 },
   matchMeta:              { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },

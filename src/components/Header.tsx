@@ -1,12 +1,16 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  StyleSheet, Text, View, Pressable,
-  Modal, TouchableOpacity, TouchableWithoutFeedback,
-  ScrollView, ActivityIndicator, Animated,
+  ActivityIndicator, Alert, Animated,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet, Text,
+  TouchableOpacity, TouchableWithoutFeedback,
+  View,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { WalletService } from '../services/wallet.service';
 import { supabase } from '../config/supabase';
+import { WalletService } from '../services/wallet.service';
 import { colors } from '../theme/colors';
 
 export type Deporte = 'futbol' | 'beisbol' | 'basquet';
@@ -163,11 +167,11 @@ interface Props {
 export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRefresh }: Props) {
   const router = useRouter();
   const [notifVisible,  setNotifVisible]  = useState(false);
+  const [showReadNotifs, setShowReadNotifs] = useState(false);
   const [saldo,         setSaldo]         = useState<number | null>(null);
   const [notifs,        setNotifs]        = useState<any[]>([]);
   const [loadingNotifs, setLoadingNotifs] = useState(false);
   const [userId,        setUserId]        = useState<string>('');
-  const [hiddenIds,     setHiddenIds]     = useState<Set<string>>(new Set());
   const [spinning,      setSpinning]      = useState(false);
   const cachedSaldo = useRef<number | null>(null);
   const spinAnim    = useRef(new Animated.Value(0)).current;
@@ -199,6 +203,7 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
 
   const handleOpenNotifs = useCallback(async () => {
     setNotifVisible(true);
+    setShowReadNotifs(false);
     if (!userId) return;
     setLoadingNotifs(true);
     try {
@@ -209,31 +214,66 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
         .order('created_at', { ascending: false })
         .limit(50);
       setNotifs(data || []);
-      const noLeidas = (data || []).filter((n: any) => !n.leida);
-      if (noLeidas.length > 0) {
-        await supabase
-          .from('notificaciones')
-          .update({ leida: true })
-          .eq('user_id', userId)
-          .eq('leida', false);
-        setNotifs(prev => prev.map(n => ({ ...n, leida: true })));
-      }
     } finally {
       setLoadingNotifs(false);
     }
   }, [userId]);
 
-  const handleHide = useCallback((id: string) => {
-    setHiddenIds(prev => { const next = new Set(prev); next.add(id); return next; });
-  }, []);
+  const handleMarkAsRead = useCallback(async (id: string, isRead: boolean) => {
+    if (isRead || !userId) return;
+    await supabase
+      .from('notificaciones')
+      .update({ leida: true })
+      .eq('id', id)
+      .eq('user_id', userId);
+    setNotifs(prev => prev.map(n => (n.id === id ? { ...n, leida: true } : n)));
+  }, [userId]);
 
-  const handleHideAllRead = useCallback(() => {
-    setHiddenIds(prev => {
-      const next = new Set(prev);
-      notifs.filter(n => n.leida).forEach(n => next.add(n.id));
-      return next;
-    });
-  }, [notifs]);
+  const handleDeleteNotif = useCallback(async (id: string) => {
+    if (!userId) {
+      Alert.alert('Error', 'No se pudo identificar al usuario. Intenta de nuevo.');
+      return;
+    }
+
+    Alert.alert(
+      'Eliminar notificación',
+      '¿Deseas eliminar esta notificación permanentemente?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { data: deletedById, error: errById } = await supabase
+                .from('notificaciones')
+                .delete()
+                .eq('id', id)
+                .select('id');
+              if (errById) throw errById;
+
+              if (!deletedById || deletedById.length === 0) {
+                const { data: deletedByOwner, error: errByOwner } = await supabase
+                  .from('notificaciones')
+                  .delete()
+                  .eq('id', id)
+                  .eq('user_id', userId)
+                  .select('id');
+                if (errByOwner) throw errByOwner;
+                if (!deletedByOwner || deletedByOwner.length === 0) {
+                  throw new Error('No se pudo eliminar la notificación (permisos o registro inexistente).');
+                }
+              }
+
+              setNotifs(prev => prev.filter(n => n.id !== id));
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'No se pudo eliminar la notificación.');
+            }
+          },
+        },
+      ]
+    );
+  }, [userId]);
 
   const handleRefreshPress = useCallback(async () => {
     if (!onRefresh || spinning) return;
@@ -254,9 +294,11 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
 
   const spin = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
-  const visibleNotifs = notifs.filter(n => !hiddenIds.has(n.id));
-  const noLeidas  = visibleNotifs.filter(n => !n.leida).length;
-  const hayLeidas = visibleNotifs.some(n => n.leida);
+  const noLeidas = notifs.filter(n => !n.leida).length;
+  const leidas = notifs.filter(n => n.leida).length;
+  const visibleNotifs = showReadNotifs
+    ? notifs.filter(n => n.leida)
+    : notifs.filter(n => !n.leida);
 
   const saldoLabel = saldo === null
     ? '...'
@@ -323,9 +365,12 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
                       </View>
                     )}
                   </View>
-                  {hayLeidas && (
-                    <TouchableOpacity onPress={handleHideAllRead} style={styles.clearAllBtn}>
-                      <Text style={styles.clearAllTxt}>✕ Ocultar leídas</Text>
+                  {leidas > 0 && (
+                    <TouchableOpacity
+                      onPress={() => setShowReadNotifs(v => !v)}
+                      style={styles.clearAllBtn}
+                    >
+                      <Text style={styles.clearAllTxt}>{showReadNotifs ? 'Ver no leídas' : 'Ver leídas'}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -347,10 +392,14 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
                           day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
                         });
                         return (
-                          <View key={n.id} style={[
+                          <Pressable
+                            key={n.id}
+                            onPress={() => handleMarkAsRead(n.id, !!n.leida)}
+                            style={[
                             styles.notifItem,
                             n.leida ? styles.notifItemRead : [styles.notifItemUnread, { borderLeftColor: color }],
-                          ]}>
+                            ]}
+                          >
                             <View style={[styles.notifIconWrap, { backgroundColor: color + '28' }]}>
                               <Text style={styles.notifIconText}>{icon}</Text>
                             </View>
@@ -359,12 +408,17 @@ export default function Header({ deporteActivo = 'futbol', onDeporteChange, onRe
                               <Text style={n.leida ? styles.notifMsgRead   : styles.notifMsgUnread}>{n.mensaje}</Text>
                               <Text style={styles.notifFecha}>{fecha}</Text>
                             </View>
-                            {n.leida && (
-                              <TouchableOpacity onPress={() => handleHide(n.id)} style={styles.hideBtn} hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}>
-                                <Text style={styles.hideBtnTxt}>✕</Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
+                            <TouchableOpacity
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                handleDeleteNotif(n.id);
+                              }}
+                              style={styles.hideBtn}
+                              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                            >
+                              <Text style={styles.hideBtnTxt}>🗑</Text>
+                            </TouchableOpacity>
+                          </Pressable>
                         );
                       })
                     )}

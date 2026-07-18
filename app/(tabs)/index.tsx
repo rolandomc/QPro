@@ -159,7 +159,9 @@ export default function QuinielasScreen() {
           <QuinielaCard
             id={item.id}
             titulo={item.titulo}
-            descripcion={item.descripcion}
+            headerLabel={(item.liga ?? item.league ?? item.descripcion?.replace(/^Quiniela de\s*/i, '') ?? item.deporte ?? 'QPRO').toString()}
+            headerDetail={item.deporte === 'beisbol' ? 'Béisbol' : 'Fútbol'}
+            tagColor={colors.primary}
             precioEntrada={item.precio_entrada}
             premioTotal={item.premio_total}
             estado={item.estado}

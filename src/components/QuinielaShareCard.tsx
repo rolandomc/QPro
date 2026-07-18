@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 
 const PICK_LABEL: Record<string, string> = { local: '1', empate: 'X', visitante: '2' };
 const PICK_EMOJI: Record<string, string> = { local: '🏠', empate: '🤝', visitante: '✈️' };
@@ -118,6 +118,8 @@ const QuinielaShareCard = forwardRef<View, Props>((
     </View>
   );
 });
+
+QuinielaShareCard.displayName = 'QuinielaShareCard';
 
 export default QuinielaShareCard;
 

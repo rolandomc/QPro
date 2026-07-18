@@ -1,10 +1,12 @@
-import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
-  StyleSheet, Text, View, FlatList,
-  ActivityIndicator, RefreshControl,
+    ActivityIndicator,
+    FlatList,
+    RefreshControl,
+    StyleSheet, Text, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
 import Header from '../../src/components/Header';
 import { QuinielaCard } from '../../src/components/QuinielaCard';
 import SegmentedControl from '../../src/components/SegmentedControl';
@@ -37,21 +39,52 @@ export default function ResultsScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
+      const selectWithLiga = `
+        id, aciertos, estado, premio_ganado, monto_pagado, created_at,
+        quinielas (
+          id, titulo, descripcion, liga, precio_entrada, premio_total, estado,
+          fecha_cierre, jugadores_minimos, porcentaje_admin, deporte,
+          partidos ( id ),
+          participaciones ( count )
+        )
+      `;
+
+      const selectWithoutLiga = `
+        id, aciertos, estado, premio_ganado, monto_pagado, created_at,
+        quinielas (
+          id, titulo, descripcion, precio_entrada, premio_total, estado,
+          fecha_cierre, jugadores_minimos, porcentaje_admin, deporte,
+          partidos ( id ),
+          participaciones ( count )
+        )
+      `;
+
+      let data: any[] | null = null;
+
+      const { data: dataWithLiga, error: errorWithLiga } = await supabase
         .from('participaciones')
-        .select(`
-          id, aciertos, estado, premio_ganado, monto_pagado, created_at,
-          quinielas (
-            id, titulo, descripcion, precio_entrada, premio_total, estado,
-            fecha_cierre, jugadores_minimos, porcentaje_admin, deporte,
-            partidos ( id ),
-            participaciones ( count )
-          )
-        `)
+        .select(selectWithLiga)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (errorWithLiga) {
+        const ligaMissing =
+          errorWithLiga.message?.includes('liga does not exist') ||
+          errorWithLiga.message?.includes('quinielas_1.liga');
+
+        if (!ligaMissing) throw errorWithLiga;
+
+        const { data: dataFallback, error: errorFallback } = await supabase
+          .from('participaciones')
+          .select(selectWithoutLiga)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (errorFallback) throw errorFallback;
+        data = dataFallback;
+      } else {
+        data = dataWithLiga;
+      }
 
       const quinielaIds = [...new Set(
         (data || []).map((item: any) => item.quinielas?.id).filter(Boolean)
@@ -87,7 +120,7 @@ export default function ResultsScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, []));
+  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -219,7 +252,9 @@ export default function ResultsScreen() {
               <QuinielaCard
                 id={q.id}
                 titulo={q.titulo}
-                descripcion={q.descripcion}
+                headerLabel={(q.liga ?? q.league ?? q.descripcion?.replace(/^Quiniela de\s*/i, '') ?? q.deporte ?? 'QPRO').toString()}
+                headerDetail={q.deporte === 'beisbol' ? 'Béisbol' : 'Fútbol'}
+                tagColor="#35D07F"
                 precioEntrada={Number(q.precio_entrada)}
                 premioTotal={Number(q.premio_total)}
                 estado={q.estado}

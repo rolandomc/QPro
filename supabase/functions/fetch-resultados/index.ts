@@ -9,12 +9,124 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
  *  2. Automático (pg_cron cada 5 min): POST sin body → procesa todas las
  *     quinielas cerradas con auto_resultados = true
  *
- * Usa la API de API-Football (api-football.com) para obtener resultados.
- * Configura FOOTBALL_API_KEY en los secrets de Supabase:
- *   supabase secrets set FOOTBALL_API_KEY=tu_key
+ * Usa fallback de proveedores para resultados:
+ *  1) football-data.org
+ *  2) API-Football (api-sports)
+ *  3) TheSportsDB
+ *
+ * Secrets recomendados:
+ *   FOOTBALL_DATA_API_KEY
+ *   APISPORTS_API_KEY
+ *   THESPORTSDB_API_KEY (opcional, default "3")
+ *
+ * Compatibilidad:
+ *   FOOTBALL_API_KEY se toma como respaldo para APISPORTS_API_KEY.
  */
 
-const FOOTBALL_API_BASE = 'https://v3.football.api-sports.io';
+const FOOTBALL_DATA_BASE = 'https://api.football-data.org/v4';
+const APISPORTS_BASE = 'https://v3.football.api-sports.io';
+const THESPORTSDB_BASE = 'https://www.thesportsdb.com/api/v1/json';
+
+function parseFootballDataResult(match: any): 'local' | 'empate' | 'visitante' | null {
+  if (!match) return null;
+  if (!['FINISHED', 'AWARDED'].includes(match.status)) return null;
+
+  const home = match?.score?.fullTime?.home ?? match?.score?.fullTime?.homeTeam ?? null;
+  const away = match?.score?.fullTime?.away ?? match?.score?.fullTime?.awayTeam ?? null;
+  if (home === null || away === null) return null;
+
+  if (home > away) return 'local';
+  if (home === away) return 'empate';
+  return 'visitante';
+}
+
+function parseApiSportsResult(fixture: any): 'local' | 'empate' | 'visitante' | null {
+  if (!fixture) return null;
+  const status = fixture?.fixture?.status?.short;
+  if (!['FT', 'AET', 'PEN'].includes(status)) return null;
+
+  const home = fixture?.goals?.home ?? null;
+  const away = fixture?.goals?.away ?? null;
+  if (home === null || away === null) return null;
+
+  if (home > away) return 'local';
+  if (home === away) return 'empate';
+  return 'visitante';
+}
+
+function parseSportsDbResult(event: any): 'local' | 'empate' | 'visitante' | null {
+  if (!event) return null;
+  const status = String(event?.strStatus ?? '').toLowerCase();
+  if (!status.includes('final')) return null;
+
+  const home = event?.intHomeScore;
+  const away = event?.intAwayScore;
+  if (home === null || home === undefined || away === null || away === undefined) return null;
+
+  const h = Number(home);
+  const a = Number(away);
+  if (Number.isNaN(h) || Number.isNaN(a)) return null;
+
+  if (h > a) return 'local';
+  if (h === a) return 'empate';
+  return 'visitante';
+}
+
+async function resolveResultadoByProviders(
+  fixtureId: string | number,
+  keys: {
+    footballDataKey: string;
+    apiSportsKey: string;
+    sportsDbKey: string;
+  }
+): Promise<'local' | 'empate' | 'visitante' | null> {
+  const id = String(fixtureId);
+
+  if (keys.footballDataKey) {
+    try {
+      const res = await fetch(`${FOOTBALL_DATA_BASE}/matches/${id}`, {
+        headers: { 'X-Auth-Token': keys.footballDataKey, 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const parsed = parseFootballDataResult(json?.match ?? json);
+        if (parsed) return parsed;
+      }
+    } catch {
+      // Continúa con fallback
+    }
+  }
+
+  if (keys.apiSportsKey) {
+    try {
+      const res = await fetch(`${APISPORTS_BASE}/fixtures?id=${id}`, {
+        headers: { 'x-apisports-key': keys.apiSportsKey, 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const parsed = parseApiSportsResult(json?.response?.[0]);
+        if (parsed) return parsed;
+      }
+    } catch {
+      // Continúa con fallback
+    }
+  }
+
+  if (keys.sportsDbKey) {
+    try {
+      const res = await fetch(`${THESPORTSDB_BASE}/${keys.sportsDbKey}/lookupevent.php?id=${id}`);
+      if (res.ok) {
+        const json = await res.json();
+        const parsed = parseSportsDbResult(json?.events?.[0]);
+        if (parsed) return parsed;
+      }
+    } catch {
+      // Sin más proveedores
+    }
+  }
+
+  return null;
+}
 
 Deno.serve(async (req: Request) => {
   try {
@@ -23,10 +135,13 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const apiKey = Deno.env.get('FOOTBALL_API_KEY');
-    if (!apiKey) {
+    const footballDataKey = Deno.env.get('FOOTBALL_DATA_API_KEY') ?? '';
+    const apiSportsKey = Deno.env.get('APISPORTS_API_KEY') ?? Deno.env.get('FOOTBALL_API_KEY') ?? '';
+    const sportsDbKey = Deno.env.get('THESPORTSDB_API_KEY') ?? '3';
+
+    if (!footballDataKey && !apiSportsKey && !sportsDbKey) {
       return Response.json(
-        { error: 'FOOTBALL_API_KEY no configurada. Ejecuta: supabase secrets set FOOTBALL_API_KEY=tu_key' },
+        { error: 'No hay keys configuradas para providers de resultados.' },
         { status: 500 }
       );
     }
@@ -68,33 +183,15 @@ Deno.serve(async (req: Request) => {
       const pendientes = partidos.filter((p: any) => !p.resultado);
       if (pendientes.length === 0) continue;
 
-      // Fetch resultados de la API para cada partido pendiente
+      // Fetch resultados con fallback de proveedores
       for (const partido of pendientes) {
-        const res = await fetch(
-          `${FOOTBALL_API_BASE}/fixtures?id=${partido.fixture_id}`,
-          {
-            headers: {
-              'x-apisports-key': apiKey,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
+        const resultado = await resolveResultadoByProviders(partido.fixture_id, {
+          footballDataKey,
+          apiSportsKey,
+          sportsDbKey,
+        });
 
-        const json = await res.json();
-        const fixture = json.response?.[0];
-        if (!fixture) continue;
-
-        const status = fixture.fixture?.status?.short;
-        // Solo procesar partidos terminados (FT, AET, PEN)
-        if (!['FT', 'AET', 'PEN'].includes(status)) continue;
-
-        const goalsHome = fixture.goals?.home ?? 0;
-        const goalsAway = fixture.goals?.away ?? 0;
-
-        let resultado: 'local' | 'empate' | 'visitante';
-        if (goalsHome > goalsAway) resultado = 'local';
-        else if (goalsHome === goalsAway) resultado = 'empate';
-        else resultado = 'visitante';
+        if (!resultado) continue;
 
         await supabaseClient
           .from('partidos')

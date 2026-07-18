@@ -36,8 +36,8 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const { monto, metodo, clabe, alias_mp } = body;
 
-    if (!monto || monto <= 0)                               return json({ error: 'Monto inválido' }, 400);
-    if (!metodo || !['spei','mercadopago'].includes(metodo)) return json({ error: 'Método inválido' }, 400);
+    if (!monto || monto <= 0)                               return json({ error: 'Monto inv\u00e1lido' }, 400);
+    if (!metodo || !['spei','mercadopago'].includes(metodo)) return json({ error: 'M\u00e9todo inv\u00e1lido' }, 400);
     if (metodo === 'spei' && !clabe)                        return json({ error: 'CLABE requerida' }, 400);
     if (metodo === 'mercadopago' && !alias_mp)              return json({ error: 'Alias MP requerido' }, 400);
 
@@ -81,7 +81,18 @@ Deno.serve(async (req: Request) => {
     // Email admin
     if (RESEND_API_KEY && ADMIN_EMAIL) {
       const destinatario = metodo === 'spei' ? `CLABE: ${clabe}` : `Alias MP: ${alias_mp}`;
-      const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single();
+
+      // Traer username Y nombre completo del perfil
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('username, full_name')
+        .eq('id', user.id)
+        .single();
+
+      const username   = profile?.username   ?? user.email;
+      const fullName   = profile?.full_name  ?? null;
+      const fechaStr   = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' });
+
       try {
         const emailRes = await fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -89,16 +100,49 @@ Deno.serve(async (req: Request) => {
           body: JSON.stringify({
             from:    'QPro <onboarding@resend.dev>',
             to:      [ADMIN_EMAIL],
-            subject: `💰 Solicitud de retiro — $${monto} MXN`,
-            html: `<h2>Nueva solicitud de retiro</h2>
-              <table style="font-family:sans-serif;font-size:14px">
-                <tr><td><b>Usuario:</b></td><td>${profile?.username ?? user.email}</td></tr>
-                <tr><td><b>Email:</b></td><td>${user.email}</td></tr>
-                <tr><td><b>Monto:</b></td><td><b style="color:#27ae60">$${monto} MXN</b></td></tr>
-                <tr><td><b>Método:</b></td><td>${metodo.toUpperCase()}</td></tr>
-                <tr><td><b>Destino:</b></td><td>${destinatario}</td></tr>
-                <tr><td><b>ID:</b></td><td><code>${solicitud.id}</code></td></tr>
-              </table>`,
+            subject: `\ud83d\udcb0 Solicitud de retiro \u2014 $${monto} MXN`,
+            html: `
+              <div style="font-family:sans-serif;max-width:520px;margin:auto;background:#0f1116;color:#fff;border-radius:12px;padding:28px;border:1px solid #1e2128">
+                <h2 style="margin:0 0 20px;color:#2ecc71">\ud83d\udcb8 Nueva solicitud de retiro</h2>
+                <table style="width:100%;border-collapse:collapse;font-size:14px">
+                  <tr style="border-bottom:1px solid #1e2128">
+                    <td style="padding:10px 6px;color:#a0a0a0;width:140px"><b>Usuario</b></td>
+                    <td style="padding:10px 6px">@${username}</td>
+                  </tr>
+                  ${fullName ? `
+                  <tr style="border-bottom:1px solid #1e2128">
+                    <td style="padding:10px 6px;color:#a0a0a0"><b>Nombre completo</b></td>
+                    <td style="padding:10px 6px">${fullName}</td>
+                  </tr>` : ''}
+                  <tr style="border-bottom:1px solid #1e2128">
+                    <td style="padding:10px 6px;color:#a0a0a0"><b>Email</b></td>
+                    <td style="padding:10px 6px">${user.email}</td>
+                  </tr>
+                  <tr style="border-bottom:1px solid #1e2128">
+                    <td style="padding:10px 6px;color:#a0a0a0"><b>Monto</b></td>
+                    <td style="padding:10px 6px"><b style="color:#2ecc71;font-size:16px">$${monto} MXN</b></td>
+                  </tr>
+                  <tr style="border-bottom:1px solid #1e2128">
+                    <td style="padding:10px 6px;color:#a0a0a0"><b>M\u00e9todo</b></td>
+                    <td style="padding:10px 6px">${metodo.toUpperCase()}</td>
+                  </tr>
+                  <tr style="border-bottom:1px solid #1e2128">
+                    <td style="padding:10px 6px;color:#a0a0a0"><b>Destino</b></td>
+                    <td style="padding:10px 6px"><code style="background:#1c1f28;padding:3px 8px;border-radius:6px">${destinatario}</code></td>
+                  </tr>
+                  <tr style="border-bottom:1px solid #1e2128">
+                    <td style="padding:10px 6px;color:#a0a0a0"><b>Solicitud ID</b></td>
+                    <td style="padding:10px 6px"><code style="background:#1c1f28;padding:3px 8px;border-radius:6px;font-size:12px">${solicitud.id}</code></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:10px 6px;color:#a0a0a0"><b>Fecha</b></td>
+                    <td style="padding:10px 6px">${fechaStr}</td>
+                  </tr>
+                </table>
+                <div style="margin-top:24px;padding:14px;background:#1c1f28;border-radius:10px;text-align:center">
+                  <p style="margin:0;color:#a0a0a0;font-size:13px">Accede al panel admin para procesar o rechazar este retiro.</p>
+                </div>
+              </div>`,
           }),
         });
         if (!emailRes.ok) console.error('Resend error:', await emailRes.json().catch(() => ({})));

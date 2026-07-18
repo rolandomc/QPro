@@ -1,11 +1,19 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  StyleSheet, Text, View, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator, RefreshControl, Switch,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { Platform } from 'react-native';
 import { supabase } from '../../../src/config/supabase';
 import { AdminService } from '../../../src/services/admin.service';
 
@@ -392,7 +400,21 @@ export default function AdminQuinielaDetailScreen() {
             <View style={styles.partidoHeader}>
               <Text style={styles.partidoNum}>#{index + 1}</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.partidoEquipos}>{partido.equipo_local}  vs  {partido.equipo_visitante}</Text>
+                <View style={styles.equiposWithLogos}>
+                  <View style={styles.equipoBlock}>
+                    {partido.logo_local
+                      ? <Image source={{ uri: partido.logo_local }} style={styles.teamLogo} resizeMode="contain" />
+                      : <View style={styles.teamLogoFallback}><Text style={styles.teamLogoFallbackTxt}>L</Text></View>}
+                    <Text style={styles.partidoEquipos}>{partido.equipo_local}</Text>
+                  </View>
+                  <Text style={styles.vsTxt}>vs</Text>
+                  <View style={styles.equipoBlock}>
+                    {partido.logo_visitante
+                      ? <Image source={{ uri: partido.logo_visitante }} style={styles.teamLogo} resizeMode="contain" />
+                      : <View style={styles.teamLogoFallback}><Text style={styles.teamLogoFallbackTxt}>V</Text></View>}
+                    <Text style={styles.partidoEquipos}>{partido.equipo_visitante}</Text>
+                  </View>
+                </View>
                 {partido.fecha_partido && (
                   <Text style={styles.partidoFecha}>
                     📅 {new Date(partido.fecha_partido).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}
@@ -498,6 +520,12 @@ const styles = StyleSheet.create({
   partidoCard:          { backgroundColor: '#15181F', borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#2A2D35' },
   partidoHeader:        { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   partidoNum:           { color: '#505050', fontSize: 12, width: 22 },
+  equiposWithLogos:     { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  equipoBlock:          { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '42%' },
+  teamLogo:             { width: 20, height: 20, borderRadius: 10 },
+  teamLogoFallback:     { width: 20, height: 20, borderRadius: 10, backgroundColor: '#1A1D24', borderWidth: 1, borderColor: '#2A2D35', alignItems: 'center', justifyContent: 'center' },
+  teamLogoFallbackTxt:  { color: '#505050', fontSize: 9, fontWeight: '700' },
+  vsTxt:                { color: '#505050', fontSize: 12, fontWeight: '700' },
   partidoEquipos:       { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
   partidoFecha:         { color: '#707070', fontSize: 11, marginTop: 2 },
   fixtureId:            { color: '#404040', fontSize: 10, marginTop: 2 },

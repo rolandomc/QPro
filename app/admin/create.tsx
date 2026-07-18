@@ -27,7 +27,7 @@ const LIGAS_MAP: Record<string, CompetitionCode | null> = {
   '🇮🇹 Serie A':            'SA',
   '🇫🇷 Ligue 1':            'FL1',
   '🇧🇷 Brasileirão':        'BSA',
-  '🇲🇽 Liga MX (manual)':  null,
+  '🇲🇽 Liga MX':           'MX1',
 };
 const LIGAS_DISPONIBLES   = Object.keys(LIGAS_MAP);
 const LIGAS_NO_SOPORTADAS = Object.keys(LIGAS_MAP).filter(k => LIGAS_MAP[k] === null);
@@ -100,6 +100,8 @@ export default function CreateQuinielaScreen() {
   const jugMinNum       = parseInt(jugMinimos) || 0;
   const toggleDropdown  = (name: OpenDropdown) =>
     setOpenDropdown(prev => prev === name ? null : name);
+  const getPartidoKey = (p: { external_id: string; fecha_partido?: string | null }) =>
+    `${String(p.external_id)}_${String(p.fecha_partido ?? '')}`;
 
   // Primer partido (para cierre automático)
   const primerPartidoISO = useMemo(() => {
@@ -112,7 +114,7 @@ export default function CreateQuinielaScreen() {
     const partidos = ligaEsManual
       ? partidosManuales.map(p => p.fecha).filter(Boolean)
       : partidosApi
-          .filter(p => seleccionados.has(String(p.external_id)) && p.fecha_partido)
+          .filter(p => seleccionados.has(getPartidoKey(p)) && p.fecha_partido)
           .map(p => p.fecha_partido as string);
     return partidos.length ? partidos.sort()[0] : null;
   }, [deporte, mlbSelec, mlbJuegos, ligaEsManual, partidosManuales, partidosApi, seleccionados]);
@@ -241,7 +243,7 @@ export default function CreateQuinielaScreen() {
     setSeleccionados(
       seleccionados.size === partidosApi.length
         ? new Set()
-        : new Set(partidosApi.map(p => String(p.external_id)))
+        : new Set(partidosApi.map(getPartidoKey))
     );
   };
 
@@ -283,7 +285,7 @@ export default function CreateQuinielaScreen() {
               fecha_partido:    p.fecha,
               status:           'SCHEDULED',
             }))
-          : partidosApi.filter(p => seleccionados.has(String(p.external_id)));
+          : partidosApi.filter(p => seleccionados.has(getPartidoKey(p)));
 
         if (partidosElegidos.length === 0) { Alert.alert('Sin partidos', 'Selecciona al menos uno.'); return; }
 
@@ -652,7 +654,7 @@ export default function CreateQuinielaScreen() {
                   </TouchableOpacity>
                 </View>
                 {partidosApi.map((partido) => {
-                  const pid        = String(partido.external_id);
+                  const pid        = getPartidoKey(partido);
                   const isSelected = seleccionados.has(pid);
                   const logoLocal = partido.logo_local ?? null;
                   const logoVisitante = partido.logo_visitante ?? null;

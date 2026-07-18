@@ -1,8 +1,11 @@
+import * as Haptics from 'expo-haptics';
 import React from 'react';
 import {
-  StyleSheet, Text, View, TouchableOpacity,
+    Image,
+    StyleSheet, Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
 
 export interface SeleccionConGoles {
   prediccion: 'local' | 'empate' | 'visitante';
@@ -15,6 +18,8 @@ interface Partido {
   equipo_local: string;
   equipo_visitante: string;
   fecha_partido: string;
+  logo_local?: string | null;
+  logo_visitante?: string | null;
 }
 
 interface Props {
@@ -112,6 +117,11 @@ export default function MatchSelectionCard({
           activeOpacity={esBeisbol ? 0.75 : 1}
           disabled={!esBeisbol || disabled}
         >
+          {partido.logo_local ? (
+            <Image source={{ uri: partido.logo_local }} style={styles.teamLogo} resizeMode="contain" />
+          ) : (
+            <View style={styles.teamLogoFallback}><Text style={styles.teamLogoFallbackTxt}>L</Text></View>
+          )}
           <Text style={[styles.teamName, localSelected && styles.teamNameWinner]} numberOfLines={2}>
             {partido.equipo_local}
           </Text>
@@ -168,6 +178,11 @@ export default function MatchSelectionCard({
           activeOpacity={esBeisbol ? 0.75 : 1}
           disabled={!esBeisbol || disabled}
         >
+          {partido.logo_visitante ? (
+            <Image source={{ uri: partido.logo_visitante }} style={styles.teamLogo} resizeMode="contain" />
+          ) : (
+            <View style={styles.teamLogoFallback}><Text style={styles.teamLogoFallbackTxt}>V</Text></View>
+          )}
           <Text style={[styles.teamName, styles.teamNameRight, visitanteSelected && styles.teamNameWinner]} numberOfLines={2}>
             {partido.equipo_visitante}
           </Text>
@@ -235,6 +250,9 @@ const styles = StyleSheet.create({
   teamBlock:       { flex: 1, alignItems: 'center', gap: 8, paddingVertical: 8, borderRadius: 10 },
   teamBlockRight:  {},
   teamBlockWinner: { backgroundColor: 'rgba(46,204,113,0.06)' },
+  teamLogo:        { width: 28, height: 28, borderRadius: 14 },
+  teamLogoFallback:{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#1A1D24', borderWidth: 1, borderColor: '#2A2D35', alignItems: 'center', justifyContent: 'center' },
+  teamLogoFallbackTxt: { color: '#505050', fontSize: 10, fontWeight: '700' },
   teamName:        { color: '#808080', fontSize: 12, fontWeight: '600', textAlign: 'center', lineHeight: 16 },
   teamNameRight:   { textAlign: 'center' },
   teamNameWinner:  { color: '#E0E0E0' },

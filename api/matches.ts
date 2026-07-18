@@ -9,6 +9,7 @@ const LEAGUE_BY_COMP: Record<string, string> = {
   BL1: '4331',
   SA: '4332',
   FL1: '4334',
+  MX1: '4350',
   BSA: '4351',
   MLS: '4346',
 };
@@ -21,11 +22,23 @@ function inferSeason(dateRef: string): string {
   return `${year - 1}-${year}`;
 }
 
-function normalizeSportsDbStatus(raw: string | null | undefined): string {
-  const s = String(raw ?? '').toLowerCase();
+function normalizeSportsDbStatus(ev: any): string {
+  const s = String(ev?.strStatus ?? '').toLowerCase();
+  const hasScores = ev?.intHomeScore !== null && ev?.intHomeScore !== undefined &&
+                    ev?.intAwayScore !== null && ev?.intAwayScore !== undefined;
+  if (hasScores) return 'FINISHED';
   if (s.includes('final')) return 'FINISHED';
   if (s.includes('live') || s.includes('in progress') || s.includes('2nd half') || s.includes('1st half')) return 'LIVE';
   return 'SCHEDULED';
+}
+
+function dedupeByIdAndDate(matches: any[]) {
+  const map = new Map<string, any>();
+  for (const m of matches) {
+    const key = `${m.id}_${m.utcDate}`;
+    if (!map.has(key)) map.set(key, m);
+  }
+  return Array.from(map.values()).sort((a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime());
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -65,7 +78,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const sportsKey = process.env.THESPORTSDB_API_KEY || '3';
   const seasonRef = String(dateFrom || dateTo || new Date().toISOString());
-  const seasons = [inferSeason(seasonRef), inferSeason(new Date().toISOString())];
+  const futureRef = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString();
+  const seasons = Array.from(new Set([
+    inferSeason(seasonRef),
+    inferSeason(new Date().toISOString()),
+    inferSeason(futureRef),
+  ]));
 
   let events: any[] = [];
   for (const season of seasons) {
@@ -82,11 +100,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(response.status).json(data);
   }
 
-  const fromTs = dateFrom ? new Date(String(dateFrom)).getTime() : null;
-  const toTs = dateTo ? new Date(String(dateTo)).getTime() : null;
+  const hasDateRange = !!(dateFrom || dateTo);
   const requested = String(status || 'SCHEDULED');
+  const fromTs = dateFrom
+    ? new Date(String(dateFrom)).getTime()
+    : (!hasDateRange && requested === 'SCHEDULED' ? Date.now() - 60 * 60 * 1000 : null);
+  const toTs = dateTo ? new Date(String(dateTo)).getTime() : null;
 
-  const fallbackMatches = events
+  const fallbackMatches = dedupeByIdAndDate(events
     .map((ev: any) => {
       const utcDate = ev?.strTimestamp || (ev?.dateEvent ? `${ev.dateEvent}T00:00:00Z` : null);
       if (!utcDate) return null;
@@ -95,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (fromTs !== null && ts < fromTs) return null;
       if (toTs !== null && ts > toTs + 86_399_999) return null;
 
-      const st = normalizeSportsDbStatus(ev?.strStatus);
+      const st = normalizeSportsDbStatus(ev);
       if (requested !== 'ALL' && st !== requested) return null;
 
       return {
@@ -120,7 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
       };
     })
-    .filter(Boolean);
+    .filter(Boolean));
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   return res.status(200).json({

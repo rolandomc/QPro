@@ -1,13 +1,21 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import {
-  View, Text, ScrollView, StyleSheet, ActivityIndicator,
-  TouchableOpacity, RefreshControl, Animated, Alert, Modal, Platform,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { supabase } from '../../src/config/supabase';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Image,
+    Modal, Platform,
+    RefreshControl,
+    ScrollView, StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import QuinielaShareCard from '../../src/components/QuinielaShareCard';
+import { supabase } from '../../src/config/supabase';
 import { captureView } from '../../src/utils/captureView';
 
 // ─── Etiquetas según deporte ──────────────────────────────────────────────────
@@ -371,13 +379,37 @@ export default function QuinielaDetailScreen() {
                     <View style={{ flex: 1 }}>
                       {/* Béisbol: visitante @ local (convención MLB) */}
                       {esBeisbol ? (
-                        <Text style={s.partidoEquipos}>
-                          {p.equipo_visitante} <Text style={s.vsText}>@</Text> {p.equipo_local}
-                        </Text>
+                        <View style={s.equiposWithLogos}>
+                          <View style={s.equipoBlock}>
+                            {p.logo_visitante
+                              ? <Image source={{ uri: p.logo_visitante }} style={s.teamLogo} resizeMode="contain" />
+                              : <View style={s.teamLogoFallback}><Text style={s.teamLogoFallbackTxt}>V</Text></View>}
+                            <Text style={s.partidoEquipos}>{p.equipo_visitante}</Text>
+                          </View>
+                          <Text style={s.vsText}>@</Text>
+                          <View style={s.equipoBlock}>
+                            {p.logo_local
+                              ? <Image source={{ uri: p.logo_local }} style={s.teamLogo} resizeMode="contain" />
+                              : <View style={s.teamLogoFallback}><Text style={s.teamLogoFallbackTxt}>L</Text></View>}
+                            <Text style={s.partidoEquipos}>{p.equipo_local}</Text>
+                          </View>
+                        </View>
                       ) : (
-                        <Text style={s.partidoEquipos}>
-                          {p.equipo_local} <Text style={s.vsText}>vs</Text> {p.equipo_visitante}
-                        </Text>
+                        <View style={s.equiposWithLogos}>
+                          <View style={s.equipoBlock}>
+                            {p.logo_local
+                              ? <Image source={{ uri: p.logo_local }} style={s.teamLogo} resizeMode="contain" />
+                              : <View style={s.teamLogoFallback}><Text style={s.teamLogoFallbackTxt}>L</Text></View>}
+                            <Text style={s.partidoEquipos}>{p.equipo_local}</Text>
+                          </View>
+                          <Text style={s.vsText}>vs</Text>
+                          <View style={s.equipoBlock}>
+                            {p.logo_visitante
+                              ? <Image source={{ uri: p.logo_visitante }} style={s.teamLogo} resizeMode="contain" />
+                              : <View style={s.teamLogoFallback}><Text style={s.teamLogoFallbackTxt}>V</Text></View>}
+                            <Text style={s.partidoEquipos}>{p.equipo_visitante}</Text>
+                          </View>
+                        </View>
                       )}
                       {tieneRes && (
                         <Text style={[s.resultadoTxt, { color: '#606060' }]}>
@@ -492,6 +524,11 @@ const s = StyleSheet.create({
   partidoCard:        { backgroundColor: '#0D1117', borderRadius: 14, borderWidth: 1, borderColor: '#1E2330', borderLeftWidth: 3, padding: 14, shadowOpacity: 0.15, shadowRadius: 8, elevation: 3 },
   partidoTop:         { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   partidoNum:         { color: '#303030', fontSize: 11, width: 18, textAlign: 'center' },
+  equiposWithLogos:   { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  equipoBlock:        { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '42%' },
+  teamLogo:           { width: 20, height: 20, borderRadius: 10 },
+  teamLogoFallback:   { width: 20, height: 20, borderRadius: 10, backgroundColor: '#1A1D24', borderWidth: 1, borderColor: '#2A2D35', alignItems: 'center', justifyContent: 'center' },
+  teamLogoFallbackTxt:{ color: '#505050', fontSize: 9, fontWeight: '700' },
   partidoEquipos:     { color: '#FFF', fontSize: 13, fontWeight: '600' },
   vsText:             { color: '#303030', fontWeight: 'normal' },
   resultadoTxt:       { fontSize: 11, marginTop: 3 },

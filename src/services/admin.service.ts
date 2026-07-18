@@ -14,6 +14,7 @@ const THESPORTSDB_LEAGUE_BY_COMP: Partial<Record<CompetitionCode, string>> = {
   BL1: '4331',
   SA: '4332',
   FL1: '4334',
+  MX1: '4350',
   BSA: '4351',
   MLS: '4346',
 };
@@ -31,12 +32,24 @@ function inferSeason(dateRef: string): string {
   return `${year - 1}-${year}`;
 }
 
-function normalizeSportsDbStatus(raw: string | null | undefined): MatchStatus {
-  const s = String(raw ?? '').toLowerCase();
+function normalizeSportsDbStatus(ev: any): MatchStatus {
+  const s = String(ev?.strStatus ?? '').toLowerCase();
+  const hasScores = ev?.intHomeScore !== null && ev?.intHomeScore !== undefined &&
+                    ev?.intAwayScore !== null && ev?.intAwayScore !== undefined;
+  if (hasScores) return 'FINISHED';
   if (s.includes('final')) return 'FINISHED';
   if (s.includes('postponed') || s.includes('canceled') || s.includes('cancelled')) return 'ALL';
   if (s.includes('live') || s.includes('in progress') || s.includes('2nd half') || s.includes('1st half')) return 'LIVE';
   return 'SCHEDULED';
+}
+
+function dedupeMatches<T extends { external_id: string; fecha_partido: string }>(matches: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const m of matches) {
+    const key = `${m.external_id}_${m.fecha_partido}`;
+    if (!map.has(key)) map.set(key, m);
+  }
+  return Array.from(map.values()).sort((a, b) => new Date(a.fecha_partido).getTime() - new Date(b.fecha_partido).getTime());
 }
 
 function shouldIncludeByStatus(normalized: MatchStatus, requested: MatchStatus | undefined): boolean {
@@ -82,10 +95,12 @@ async function fetchMatchesFromSportsDb(
 
   const apiKey = process.env.EXPO_PUBLIC_THESPORTSDB_API_KEY || '3';
   const seasonRef = options?.dateFrom || options?.dateTo || new Date().toISOString();
-  const candidateSeasons = [
+  const futureRef = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString();
+  const candidateSeasons = Array.from(new Set([
     inferSeason(seasonRef),
     inferSeason(new Date().toISOString()),
-  ];
+    inferSeason(futureRef),
+  ]));
 
   const events: any[] = [];
   for (const season of candidateSeasons) {
@@ -100,7 +115,11 @@ async function fetchMatchesFromSportsDb(
   if (events.length === 0) return [];
 
   const badgeCache: Record<string, string | null> = {};
-  const fromTs = options?.dateFrom ? new Date(options.dateFrom).getTime() : null;
+  const requestedStatus = options?.status ?? 'SCHEDULED';
+  const hasDateRange = !!(options?.dateFrom || options?.dateTo);
+  const fromTs = options?.dateFrom
+    ? new Date(options.dateFrom).getTime()
+    : (!hasDateRange && requestedStatus === 'SCHEDULED' ? Date.now() - 60 * 60 * 1000 : null);
   const toTs = options?.dateTo ? new Date(options.dateTo).getTime() : null;
 
   const mapped = await Promise.all(
@@ -112,7 +131,7 @@ async function fetchMatchesFromSportsDb(
       if (fromTs !== null && when < fromTs) return null;
       if (toTs !== null && when > toTs + 86_399_999) return null;
 
-      const status = normalizeSportsDbStatus(ev?.strStatus);
+      const status = normalizeSportsDbStatus(ev);
       if (!shouldIncludeByStatus(status, options?.status)) return null;
 
       const homeBadge =
@@ -138,7 +157,7 @@ async function fetchMatchesFromSportsDb(
     })
   );
 
-  return mapped.filter(Boolean);
+  return dedupeMatches(mapped.filter(Boolean));
 }
 
 function getMatchesUrl(competition: string, params: URLSearchParams): string {
@@ -212,7 +231,7 @@ export class AdminService {
       }
 
       const data = await res.json();
-      const matches = (data.matches ?? []).map((m: any) => ({
+      const matches = dedupeMatches((data.matches ?? []).map((m: any) => ({
         external_id:      String(m.id),
         equipo_local:     m.homeTeam?.shortName ?? m.homeTeam?.name ?? '?',
         equipo_visitante: m.awayTeam?.shortName ?? m.awayTeam?.name ?? '?',
@@ -221,7 +240,7 @@ export class AdminService {
         marcador:         m.score?.fullTime ?? null,
         logo_local:       m.homeTeam?.crest ?? null,
         logo_visitante:   m.awayTeam?.crest ?? null,
-      }));
+      })));
 
       if (matches.length > 0) {
         return { matches, source: 'football-data' as const, fallbackUsed: false };
@@ -256,6 +275,8 @@ export class AdminService {
       equipo_local: string;
       equipo_visitante: string;
       fecha_partido: string;
+      logo_local?: string | null;
+      logo_visitante?: string | null;
     }[],
     jugadoresMinimos: number = 5,
     porcentajeAdmin: number = 10,
@@ -312,17 +333,33 @@ export class AdminService {
       quiniela = dataFull;
     }
 
-    const rows = partidos.map((p, i) => ({
+    const rowsFull = partidos.map((p, i) => ({
       quiniela_id:      quiniela.id,
       equipo_local:     p.equipo_local,
       equipo_visitante: p.equipo_visitante,
       fecha_partido:    p.fecha_partido,
       fixture_id:       parseInt(p.external_id) || null,
+      logo_local:       p.logo_local ?? null,
+      logo_visitante:   p.logo_visitante ?? null,
       orden:            i + 1,
     }));
 
-    const { error: errP } = await supabase.from('partidos').insert(rows);
-    if (errP) throw errP;
+    const { error: errPFull } = await supabase.from('partidos').insert(rowsFull);
+    if (errPFull) {
+      const missingLogoCols = errPFull.message?.includes('logo_local') || errPFull.message?.includes('logo_visitante');
+      if (!missingLogoCols) throw errPFull;
+
+      const rowsBasic = partidos.map((p, i) => ({
+        quiniela_id:      quiniela.id,
+        equipo_local:     p.equipo_local,
+        equipo_visitante: p.equipo_visitante,
+        fecha_partido:    p.fecha_partido,
+        fixture_id:       parseInt(p.external_id) || null,
+        orden:            i + 1,
+      }));
+      const { error: errPBasic } = await supabase.from('partidos').insert(rowsBasic);
+      if (errPBasic) throw errPBasic;
+    }
     return quiniela;
   }
 

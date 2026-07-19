@@ -6,8 +6,12 @@ const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 Deno.serve(async (req: Request) => {
-  // MP hace GET para verificar que el endpoint existe
-  if (req.method === "GET") {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { status: 200 });
+  }
+
+  // MP puede hacer GET de verificación sin datos
+  if (req.method === "GET" && !new URL(req.url).searchParams.toString()) {
     return new Response("OK", { status: 200 });
   }
 
@@ -16,14 +20,34 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-    const body = await req.json();
 
-    // MP envia: { type: "payment", action: "payment.updated", data: { id: "..." } }
-    if (body.type !== "payment" || !body.data?.id) {
+    const url = new URL(req.url);
+    const qsType = url.searchParams.get('type') ?? url.searchParams.get('topic') ?? '';
+    const qsId = url.searchParams.get('id') ?? url.searchParams.get('data.id') ?? '';
+
+    let body: any = {};
+    const raw = await req.text();
+    if (raw) {
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        const form = new URLSearchParams(raw);
+        body = {
+          type: form.get('type') ?? form.get('topic') ?? undefined,
+          data: { id: form.get('id') ?? form.get('data.id') ?? undefined },
+        };
+      }
+    }
+
+    const eventType = String(body?.type ?? qsType ?? '').toLowerCase();
+    const incomingId = body?.data?.id ?? body?.id ?? qsId;
+
+    // MP envia JSON o query params con topic/type + id
+    if (eventType !== "payment" || !incomingId) {
       return new Response("ignored", { status: 200 });
     }
 
-    paymentId = String(body.data.id);
+    paymentId = String(incomingId);
 
     // Consultar el pago a la API de MP para verificarlo
     const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {

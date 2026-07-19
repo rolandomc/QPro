@@ -394,7 +394,7 @@ export class AdminService {
 
     const { data: dataBasic, error: errBasic } = await supabase
       .from('quinielas')
-      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, created_at, partidos(count)')
+      .select('*, partidos(count)')
       .order('created_at', { ascending: false });
 
     if (errBasic) throw errBasic;
@@ -402,8 +402,8 @@ export class AdminService {
     return (dataBasic ?? []).map((q: any) => ({
       ...q,
       deporte:            q.deporte            ?? 'futbol',
-      jugadores_minimos:  q.jugadores_minimos  ?? 5,
-      porcentaje_admin:   q.porcentaje_admin   ?? 10,
+      jugadores_minimos:  Number(q.jugadores_minimos ?? 0),
+      porcentaje_admin:   Number(q.porcentaje_admin ?? 0),
       cierre_automatico:  q.cierre_automatico  ?? false,
       primer_partido:     q.primer_partido     ?? null,
     }));

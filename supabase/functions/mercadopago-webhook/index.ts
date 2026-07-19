@@ -42,12 +42,25 @@ Deno.serve(async (req: Request) => {
     const eventType = String(body?.type ?? qsType ?? '').toLowerCase();
     const incomingId = body?.data?.id ?? body?.id ?? qsId;
 
-    // MP envia JSON o query params con topic/type + id
-    if (eventType !== "payment" || !incomingId) {
+    // MP puede enviar topic=payment o topic=merchant_order
+    if (!incomingId || (eventType !== 'payment' && eventType !== 'merchant_order')) {
       return new Response("ignored", { status: 200 });
     }
 
-    paymentId = String(incomingId);
+    if (eventType === 'payment') {
+      paymentId = String(incomingId);
+    } else {
+      const merchantOrderId = String(incomingId);
+      const moRes = await fetch(`https://api.mercadopago.com/merchant_orders/${merchantOrderId}`, {
+        headers: { "Authorization": `Bearer ${MP_ACCESS_TOKEN}` },
+      });
+      if (!moRes.ok) throw new Error(`MP merchant_order fetch failed: ${moRes.status}`);
+      const mo = await moRes.json();
+      const payments = Array.isArray(mo?.payments) ? mo.payments : [];
+      const preferred = payments.find((p: any) => p?.status === 'approved') ?? payments[0];
+      if (!preferred?.id) return new Response('ignored', { status: 200 });
+      paymentId = String(preferred.id);
+    }
 
     // Consultar el pago a la API de MP para verificarlo
     const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {

@@ -3,6 +3,24 @@ import { supabase } from '../config/supabase';
 
 export const QuinielasService = {
 
+  async getQuinielasStatsPublic(quinielaIds: string[]) {
+    if (!quinielaIds.length) return [];
+    const { data, error } = await supabase.rpc('get_quinielas_stats_public', {
+      p_quiniela_ids: quinielaIds,
+    });
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async getQuinielaRankingPublic(quinielaId: string, limit = 5000) {
+    const { data, error } = await supabase.rpc('get_quiniela_ranking_public', {
+      p_quiniela_id: quinielaId,
+      p_limit: limit,
+    });
+    if (error) throw error;
+    return data ?? [];
+  },
+
   async getQuinielasAbiertas() {
     const rpc = await supabase.rpc('get_quinielas_abiertas_public');
     if (!rpc.error) {
@@ -19,7 +37,7 @@ export const QuinielasService = {
     const { data: { user } } = await supabase.auth.getUser();
     const { data, error } = await supabase
       .from('quinielas')
-      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, fecha_cierre, created_at, partidos(count)')
+      .select('id, titulo, descripcion, liga, deporte, precio_entrada, premio_total, estado, fecha_cierre, jugadores_minimos, porcentaje_admin, cierre_automatico, primer_partido, created_at, partidos(count)')
       .eq('estado', 'abierta')
       .order('created_at', { ascending: false });
     if (error) throw rpc.error;
@@ -39,12 +57,12 @@ export const QuinielasService = {
 
     return (data ?? []).map((q: any) => ({
       ...q,
-      liga: null,
-      deporte: 'futbol',
-      jugadores_minimos: 5,
-      porcentaje_admin: 10,
-      cierre_automatico: false,
-      primer_partido: null,
+      liga: q.liga ?? null,
+      deporte: q.deporte ?? 'futbol',
+      jugadores_minimos: Number(q.jugadores_minimos ?? 0),
+      porcentaje_admin: Number(q.porcentaje_admin ?? 0),
+      cierre_automatico: !!q.cierre_automatico,
+      primer_partido: q.primer_partido ?? null,
       jugadores_count: 0,
       ya_participo: yaParticipo.has(q.id),
       fecha_primer_partido: q.fecha_cierre ?? null,

@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import QuinielaShareCard from '../../src/components/QuinielaShareCard';
 import { supabase } from '../../src/config/supabase';
+import { QuinielasService } from '../../src/services/quinielas.service';
 import { captureView } from '../../src/utils/captureView';
 
 // ─── Etiquetas según deporte ──────────────────────────────────────────────────
@@ -160,33 +161,39 @@ export default function QuinielaDetailScreen() {
   }, [quiniela, partidos.length]);
 
   const loadRanking = useCallback(async (userId: string, _n: number) => {
-    const { count } = await supabase.from('participaciones').select('id', { count: 'exact', head: true }).eq('quiniela_id', id!);
-    setTotalParts(count ?? 0);
-    const { data: rank } = await supabase
-      .from('participaciones')
-      .select('user_id, aciertos, estado')
-      .eq('quiniela_id', id!)
-      .order('aciertos', { ascending: false })
-      .limit(20);
-    if (!rank || rank.length === 0) { setRanking([]); return; }
-    const uids = rank.map((r: any) => r.user_id);
-    const { data: profs } = await supabase.from('profiles').select('id, username').in('id', uids);
-    const pm: Record<string, string> = {};
-    (profs || []).forEach((p: any) => { pm[p.id] = p.username; });
-    const rows = rank.map((r: any, i: number) => ({ ...r, username: pm[r.user_id] ?? 'usuario', pos: i + 1, isMe: r.user_id === userId }));
-    const yoEnTop = rows.find((r: any) => r.isMe);
-    if (!yoEnTop) {
-      const { data: miRow } = await supabase.from('participaciones').select('user_id, aciertos, estado').eq('quiniela_id', id!).eq('user_id', userId).single();
-      if (miRow) {
-        const { count: porDelante } = await supabase.from('participaciones').select('id', { count: 'exact', head: true }).eq('quiniela_id', id!).gt('aciertos', miRow.aciertos ?? 0);
-        const miPos = (porDelante ?? 0) + 1;
-        setMiPosicion(miPos);
-        rows.push({ ...miRow, username: pm[userId] ?? 'usuario', pos: miPos, isMe: true, separador: true });
-      }
-    } else {
-      setMiPosicion(yoEnTop.pos);
+    let rank: any[] = [];
+    try {
+      rank = await QuinielasService.getQuinielaRankingPublic(id!, 5000);
+    } catch {
+      rank = [];
     }
-    setRanking(rows);
+    if (!rank || rank.length === 0) {
+      setTotalParts(0);
+      setMiPosicion(null);
+      setRanking([]);
+      return;
+    }
+
+    const total = Number(rank[0]?.total_participants ?? rank.length);
+    setTotalParts(total);
+
+    const allRows = rank.map((r: any) => ({
+      ...r,
+      pos: Number(r.pos ?? 0),
+      isMe: r.user_id === userId,
+    }));
+
+    const topRows = allRows.slice(0, 20);
+    const yoEnAll = allRows.find((r: any) => r.isMe);
+    if (yoEnAll) setMiPosicion(yoEnAll.pos);
+    else setMiPosicion(null);
+
+    if (yoEnAll && yoEnAll.pos > 20) {
+      setRanking([...topRows, { ...yoEnAll, separador: true }]);
+    } else {
+      setRanking(topRows);
+    }
+
     setLivePulse(true);
     setTimeout(() => setLivePulse(false), 800);
   }, [id]);
@@ -207,11 +214,16 @@ export default function QuinielaDetailScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       myUserId.current = user?.id ?? null;
-      const [{ data: q }, { data: pts }] = await Promise.all([
+      const [{ data: q }, { data: pts }, stats] = await Promise.all([
         supabase.from('quinielas').select('*').eq('id', id!).single(),
         supabase.from('partidos').select('*').eq('quiniela_id', id!).order('orden', { ascending: true }),
+        QuinielasService.getQuinielasStatsPublic([id!]).catch(() => []),
       ]);
-      setQuiniela(q);
+      const stat = (stats ?? [])[0];
+      setQuiniela({
+        ...q,
+        ...(stat ?? {}),
+      });
       setPartidos(pts || []);
       if (!user) return;
       const { data: myProf } = await supabase.from('profiles').select('username').eq('id', user.id).single();
@@ -236,7 +248,7 @@ export default function QuinielaDetailScreen() {
     load();
     const channel = supabase
       .channel(`ranking-${id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` }, () => { if (myUserId.current) loadRanking(myUserId.current, 0); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` }, () => { if (myUserId.current) loadRanking(myUserId.current, 0); })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'partidos', filter: `quiniela_id=eq.${id}` }, () => { reloadPartidos(); })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -248,8 +260,8 @@ export default function QuinielaDetailScreen() {
   const pendientes     = totalPartidos - conResultado.length;
   const pct            = conResultado.length > 0 ? Math.round((misAciertos / conResultado.length) * 100) : 0;
   const pctColor       = pct >= 70 ? '#2ECC71' : pct >= 40 ? '#F39C12' : '#E91E63';
-  const comision       = quiniela?.comision ?? 0.10;
-  const premioCalculado = Math.floor(totalParts * Number(quiniela?.precio_entrada ?? 0) * (1 - comision));
+  const adminPct       = Number(quiniela?.porcentaje_admin ?? 0);
+  const premioCalculado = Math.floor(totalParts * Number(quiniela?.precio_entrada ?? 0) * (1 - adminPct / 100));
   const bolsa          = (quiniela?.estado === 'finalizada' && Number(quiniela?.premio_total) > 0)
     ? Number(quiniela.premio_total)
     : premioCalculado;

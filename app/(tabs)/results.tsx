@@ -12,6 +12,7 @@ import { QuinielaCard } from '../../src/components/QuinielaCard';
 import SegmentedControl from '../../src/components/SegmentedControl';
 import { supabase } from '../../src/config/supabase';
 import { useDeporte } from '../../src/context/DeporteContext';
+import { QuinielasService } from '../../src/services/quinielas.service';
 
 function StatBox({ valor, label, color = '#FFF', glow = false }: {
   valor: string; label: string; color?: string; glow?: boolean;
@@ -44,8 +45,7 @@ export default function ResultsScreen() {
         quinielas (
           id, titulo, descripcion, liga, precio_entrada, premio_total, estado,
           fecha_cierre, jugadores_minimos, porcentaje_admin, deporte,
-          partidos ( id ),
-          participaciones ( count )
+            partidos ( count )
         )
       `;
 
@@ -54,8 +54,7 @@ export default function ResultsScreen() {
         quinielas (
           id, titulo, descripcion, precio_entrada, premio_total, estado,
           fecha_cierre, jugadores_minimos, porcentaje_admin, deporte,
-          partidos ( id ),
-          participaciones ( count )
+            partidos ( count )
         )
       `;
 
@@ -90,25 +89,25 @@ export default function ResultsScreen() {
         (data || []).map((item: any) => item.quinielas?.id).filter(Boolean)
       )] as string[];
 
-      const primerPartidoMap: Record<string, string> = {};
+      let stats: any[] = [];
       if (quinielaIds.length > 0) {
-        const { data: primerosPartidos } = await supabase
-          .from('partidos')
-          .select('quiniela_id, fecha_partido')
-          .in('quiniela_id', quinielaIds)
-          .order('orden', { ascending: true });
-
-        for (const p of (primerosPartidos || [])) {
-          if (!primerPartidoMap[p.quiniela_id] && p.fecha_partido) {
-            primerPartidoMap[p.quiniela_id] = p.fecha_partido;
-          }
+        try {
+          stats = await QuinielasService.getQuinielasStatsPublic(quinielaIds);
+        } catch {
+          stats = [];
         }
       }
+      const statsMap = new Map((stats ?? []).map((s: any) => [s.id, s]));
 
       const enriquecido = (data || []).map((item: any) => ({
         ...item,
-        jugadores_count:      item.quinielas?.participaciones?.[0]?.count ?? 0,
-        fecha_primer_partido: primerPartidoMap[item.quinielas?.id] ?? item.quinielas?.fecha_cierre ?? null,
+        quinielas: {
+          ...item.quinielas,
+          ...(statsMap.get(item.quinielas?.id) ?? {}),
+        },
+        total_partidos: Number(statsMap.get(item.quinielas?.id)?.total_partidos ?? item.quinielas?.partidos?.[0]?.count ?? 0),
+        jugadores_count: Number(statsMap.get(item.quinielas?.id)?.jugadores_count ?? 0),
+        fecha_primer_partido: statsMap.get(item.quinielas?.id)?.fecha_primer_partido ?? item.quinielas?.fecha_cierre ?? null,
       }));
 
       setParticipaciones(enriquecido);
@@ -258,7 +257,7 @@ export default function ResultsScreen() {
                 precioEntrada={Number(q.precio_entrada)}
                 premioTotal={Number(q.premio_total)}
                 estado={q.estado}
-                totalPartidos={q.partidos?.length ?? 0}
+                totalPartidos={item.total_partidos ?? 0}
                 fechaCierre={item.fecha_primer_partido}
                 jugadoresMinimos={q.jugadores_minimos ?? 0}
                 porcentajeAdmin={q.porcentaje_admin ?? 0}

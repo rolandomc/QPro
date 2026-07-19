@@ -99,6 +99,19 @@ export default function ResultsScreen() {
       }
       const statsMap = new Map((stats ?? []).map((s: any) => [s.id, s]));
 
+      const missingIds = quinielaIds.filter((qid) => !statsMap.has(qid));
+      const rankingCountMap = new Map<string, number>();
+      if (missingIds.length > 0) {
+        await Promise.all(missingIds.map(async (qid) => {
+          try {
+            const rank = await QuinielasService.getQuinielaRankingPublic(qid, 1);
+            rankingCountMap.set(qid, Number(rank?.[0]?.total_participants ?? 0));
+          } catch {
+            rankingCountMap.set(qid, 0);
+          }
+        }));
+      }
+
       const enriquecido = (data || []).map((item: any) => ({
         ...item,
         quinielas: {
@@ -106,7 +119,7 @@ export default function ResultsScreen() {
           ...(statsMap.get(item.quinielas?.id) ?? {}),
         },
         total_partidos: Number(statsMap.get(item.quinielas?.id)?.total_partidos ?? item.quinielas?.partidos?.[0]?.count ?? 0),
-        jugadores_count: Number(statsMap.get(item.quinielas?.id)?.jugadores_count ?? 0),
+        jugadores_count: Number(statsMap.get(item.quinielas?.id)?.jugadores_count ?? rankingCountMap.get(item.quinielas?.id) ?? 0),
         fecha_primer_partido: statsMap.get(item.quinielas?.id)?.fecha_primer_partido ?? item.quinielas?.fecha_cierre ?? null,
       }));
 

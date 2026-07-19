@@ -37,12 +37,22 @@ export const QuinielasService = {
     const { data: { user } } = await supabase.auth.getUser();
     const { data, error } = await supabase
       .from('quinielas')
-      .select('id, titulo, descripcion, liga, deporte, precio_entrada, premio_total, estado, fecha_cierre, jugadores_minimos, porcentaje_admin, cierre_automatico, primer_partido, created_at, partidos(count)')
+      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, fecha_cierre, created_at, partidos(count)')
       .eq('estado', 'abierta')
       .order('created_at', { ascending: false });
-    if (error) throw rpc.error;
+    if (error) throw error;
 
     const ids = (data ?? []).map((q: any) => q.id);
+    let statsMap = new Map<string, any>();
+    if (ids.length > 0) {
+      try {
+        const stats = await this.getQuinielasStatsPublic(ids);
+        statsMap = new Map((stats ?? []).map((s: any) => [s.id, s]));
+      } catch {
+        statsMap = new Map();
+      }
+    }
+
     const [misParticipacionesRes] = await Promise.all([
       user && ids.length > 0
         ? supabase
@@ -57,15 +67,16 @@ export const QuinielasService = {
 
     return (data ?? []).map((q: any) => ({
       ...q,
-      liga: q.liga ?? null,
-      deporte: q.deporte ?? 'futbol',
-      jugadores_minimos: Number(q.jugadores_minimos ?? 0),
-      porcentaje_admin: Number(q.porcentaje_admin ?? 0),
-      cierre_automatico: !!q.cierre_automatico,
-      primer_partido: q.primer_partido ?? null,
-      jugadores_count: 0,
+      ...(statsMap.get(q.id) ?? {}),
+      liga: statsMap.get(q.id)?.liga ?? null,
+      deporte: statsMap.get(q.id)?.deporte ?? 'futbol',
+      jugadores_minimos: Number(statsMap.get(q.id)?.jugadores_minimos ?? 0),
+      porcentaje_admin: Number(statsMap.get(q.id)?.porcentaje_admin ?? 0),
+      cierre_automatico: !!statsMap.get(q.id)?.cierre_automatico,
+      primer_partido: statsMap.get(q.id)?.primer_partido ?? null,
+      jugadores_count: Number(statsMap.get(q.id)?.jugadores_count ?? 0),
       ya_participo: yaParticipo.has(q.id),
-      fecha_primer_partido: q.fecha_cierre ?? null,
+      fecha_primer_partido: statsMap.get(q.id)?.fecha_primer_partido ?? q.fecha_cierre ?? null,
     }));
   },
 

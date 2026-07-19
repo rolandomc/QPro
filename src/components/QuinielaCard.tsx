@@ -114,7 +114,7 @@ export function QuinielaCard({
     ? pozoActual * (1 - porcentajeAdmin / 100) : premioTotal;
   const minimoAlcanzado = tieneMinimo ? jug >= jugadoresMinimos : true;
   const faltanJugadores = Math.max(0, jugadoresMinimos - jug);
-  const premioVisible   = !tieneMinimo || minimoAlcanzado;
+  const premioVisible   = estado !== 'abierta' || !tieneMinimo || minimoAlcanzado;
   const isLoading       = jugadoresPagados === null || yaParticipo === null;
 
   const handlePress = () => {

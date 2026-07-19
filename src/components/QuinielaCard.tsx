@@ -60,6 +60,18 @@ export function QuinielaCard({
   const [pagoPendiente, setPagoPendiente] = useState(false);
 
   useEffect(() => {
+    if (jugadoresCount !== undefined) {
+      setJugadoresPagados(jugadoresCount);
+    }
+  }, [jugadoresCount, id]);
+
+  useEffect(() => {
+    if (yaParticipoInit !== undefined) {
+      setYaParticipo(yaParticipoInit);
+    }
+  }, [yaParticipoInit, id]);
+
+  useEffect(() => {
     if (!id) return;
     const needsCount     = jugadoresCount === undefined;
     const needsParticipo = yaParticipoInit === undefined;

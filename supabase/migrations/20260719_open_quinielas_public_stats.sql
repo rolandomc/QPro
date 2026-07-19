@@ -88,7 +88,7 @@ BEGIN
   ) INTO has_primer_partido;
 
   liga_expr = CASE WHEN has_liga THEN 'q.liga' ELSE 'NULL::text' END;
-  deporte_expr = CASE WHEN has_deporte THEN 'q.deporte' ELSE 'NULL::text' END;
+  deporte_expr = CASE WHEN has_deporte THEN 'q.deporte::text' ELSE 'NULL::text' END;
   jugadores_minimos_expr = CASE WHEN has_jugadores_minimos THEN 'q.jugadores_minimos' ELSE '5::integer' END;
   porcentaje_admin_expr = CASE WHEN has_porcentaje_admin THEN 'q.porcentaje_admin' ELSE '10::numeric' END;
   cierre_automatico_expr = CASE WHEN has_cierre_automatico THEN 'q.cierre_automatico' ELSE 'false::boolean' END;
@@ -103,7 +103,7 @@ BEGIN
       %s AS deporte,
       q.precio_entrada,
       q.premio_total,
-      q.estado,
+      q.estado::text,
       q.fecha_cierre,
       %s AS jugadores_minimos,
       %s AS porcentaje_admin,

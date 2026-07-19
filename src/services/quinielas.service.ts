@@ -1,53 +1,17 @@
-import { supabase } from '../config/supabase';
 import type { SeleccionConGoles } from '../components/MatchSelectionCard';
+import { supabase } from '../config/supabase';
 
 export const QuinielasService = {
 
   async getQuinielasAbiertas() {
-    const { data: { user } } = await supabase.auth.getUser();
-
-    const { data, error } = await supabase
-      .from('quinielas')
-      .select('*, partidos(count), participaciones(count)')
-      .eq('estado', 'abierta')
-      .order('created_at', { ascending: false });
+    const { data, error } = await supabase.rpc('get_quinielas_abiertas_public');
     if (error) throw error;
-
-    if (!data) return data;
-
-    const ids = data.map((q: any) => q.id);
-
-    const [misParticipacionesRes, primerPartidoRes] = await Promise.all([
-      user
-        ? supabase
-            .from('participaciones')
-            .select('quiniela_id')
-            .eq('user_id', user.id)
-            .in('quiniela_id', ids)
-        : Promise.resolve({ data: [] }),
-      supabase
-        .from('partidos')
-        .select('quiniela_id, fecha_partido')
-        .in('quiniela_id', ids)
-        .order('orden', { ascending: true }),
-    ]);
-
-    const primerPartidoMap: Record<string, string> = {};
-    for (const p of (primerPartidoRes.data || [])) {
-      if (!primerPartidoMap[p.quiniela_id] && p.fecha_partido) {
-        primerPartidoMap[p.quiniela_id] = p.fecha_partido;
-      }
-    }
-
-    const yaParticipo = new Set(
-      ((misParticipacionesRes as any).data || []).map((p: any) => p.quiniela_id)
-    );
-
-    return data.map((q: any) => ({
+    return (data ?? []).map((q: any) => ({
       ...q,
-      jugadores_count:      q.participaciones?.[0]?.count ?? 0,
-      ya_participo:         yaParticipo.has(q.id),
-      fecha_primer_partido: primerPartidoMap[q.id] ?? q.fecha_cierre ?? null,
+      partidos: [{ count: Number(q.total_partidos ?? 0) }],
+      jugadores_count: Number(q.jugadores_count ?? 0),
+      ya_participo: !!q.ya_participo,
+      fecha_primer_partido: q.fecha_primer_partido ?? q.fecha_cierre ?? null,
     }));
   },
 

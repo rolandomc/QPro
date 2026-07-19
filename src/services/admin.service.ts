@@ -307,28 +307,38 @@ export class AdminService {
       .single();
 
     if (errFull) {
-      const missingCol = errFull.message?.includes('cierre_automatico') ||
-                         errFull.message?.includes('primer_partido') ||
-                         errFull.message?.includes('jugadores_minimos') ||
-                         errFull.message?.includes('porcentaje_admin') ||
-                         errFull.message?.includes('liga') ||
-                         errFull.message?.includes('deporte');
-      if (!missingCol) throw errFull;
+      const msg = errFull.message ?? '';
+      const missingCoreConfig = msg.includes('jugadores_minimos') ||
+                                msg.includes('porcentaje_admin') ||
+                                msg.includes('cierre_automatico') ||
+                                msg.includes('primer_partido');
+      if (missingCoreConfig) {
+        throw new Error('Faltan columnas clave en la tabla quinielas (jugadores_minimos/porcentaje_admin/cierre_automatico/primer_partido). Ejecuta migraciones con supabase db push.');
+      }
 
-      const { data: dataBasic, error: errBasic } = await supabase
-        .from('quinielas')
-        .insert({
-          titulo,
-          descripcion,
-          precio_entrada: precioEntrada,
-          premio_total:   0,
-          estado:         'abierta',
-          fecha_cierre:   fechaCierre,
-        })
-        .select('id')
-        .single();
-      if (errBasic) throw errBasic;
-      quiniela = dataBasic;
+      const missingLigaOrDeporte = msg.includes('liga') || msg.includes('deporte');
+      if (missingLigaOrDeporte) {
+        const { data: dataPartial, error: errPartial } = await supabase
+          .from('quinielas')
+          .insert({
+            titulo,
+            descripcion,
+            precio_entrada:    precioEntrada,
+            premio_total:      0,
+            estado:            'abierta',
+            fecha_cierre:      fechaCierre,
+            jugadores_minimos: jugadoresMinimos,
+            porcentaje_admin:  porcentajeAdmin,
+            cierre_automatico: cierreAutomatico,
+            primer_partido:    primerPartido,
+          })
+          .select('id')
+          .single();
+        if (errPartial) throw errPartial;
+        quiniela = dataPartial;
+      } else {
+        throw errFull;
+      }
     } else {
       quiniela = dataFull;
     }

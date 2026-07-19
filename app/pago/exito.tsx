@@ -1,10 +1,22 @@
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function PagoExito() {
   const router = useRouter();
   const params = useLocalSearchParams();
+
+  useEffect(() => {
+    const paymentId = String(params.payment_id ?? params.collection_id ?? '');
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    if (!paymentId || !supabaseUrl) return;
+
+    fetch(`${supabaseUrl}/functions/v1/mercadopago-webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'payment', data: { id: paymentId } }),
+    }).catch(() => null);
+  }, [params.collection_id, params.payment_id]);
 
   return (
     <View style={styles.container}>

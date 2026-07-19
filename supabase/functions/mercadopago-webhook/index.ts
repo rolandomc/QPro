@@ -40,13 +40,26 @@ Deno.serve(async (req: Request) => {
       return new Response("no external_reference", { status: 200 });
     }
 
+    const { data: currentPart } = await supabase
+      .from('participaciones')
+      .select('estado, mp_payment_id')
+      .eq('id', participacionId)
+      .maybeSingle();
+
     const event = await claimPaymentEvent(supabase, {
       source: 'mercadopago-webhook',
       externalId: paymentId,
       payload: payment,
     });
 
-    if (event === 'processed' || event === 'processing') {
+    const alreadyPaid = currentPart?.estado === 'pagado';
+    const canReconcileApproved = status === 'approved' && !alreadyPaid;
+
+    if (event === 'processing') {
+      return new Response("ok", { status: 200 });
+    }
+
+    if (event === 'processed' && !canReconcileApproved) {
       return new Response("ok", { status: 200 });
     }
 

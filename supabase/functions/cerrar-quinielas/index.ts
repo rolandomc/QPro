@@ -42,13 +42,34 @@ serve(async (req) => {
   }
 
   // Helper: insertar notificación para un usuario
-  async function notificar(user_id: string, titulo: string, mensaje: string, tipo: string) {
+  async function notificar(
+    user_id: string,
+    titulo: string,
+    mensaje: string,
+    tipo: string,
+    referencia_id?: string,
+    referencia_tipo?: string,
+  ) {
+    if (referencia_id && referencia_tipo) {
+      const { data: existe } = await supabase
+        .from('notificaciones')
+        .select('id')
+        .eq('user_id', user_id)
+        .eq('tipo', tipo)
+        .eq('referencia_id', referencia_id)
+        .eq('referencia_tipo', referencia_tipo)
+        .maybeSingle();
+      if (existe) return;
+    }
+
     const { error } = await supabase.from('notificaciones').insert({
       user_id,
       titulo,
       mensaje,
       tipo,
       leida: false,
+      referencia_id: referencia_id ?? null,
+      referencia_tipo: referencia_tipo ?? null,
     });
     if (error) console.error(`Error notificando ${user_id}:`, error.message);
   }
@@ -106,14 +127,23 @@ serve(async (req) => {
             p_monto:   monto,
           });
 
-          // Registrar movimiento en wallet
-          await supabase.from('wallet_movimientos').insert({
-            user_id:     p.user_id,
-            tipo:        'reembolso',
-            monto,
-            descripcion: `Reembolso: "${q.titulo}" anulada (${jugadoresPagados}/${q.jugadores_minimos} jugadores mínimos)`,
-            quiniela_id: q.id,
-          });
+          // Registrar movimiento en wallet (tabla consumida por wallet del usuario)
+          const { data: txExiste } = await supabase
+            .from('wallet_transactions')
+            .select('id')
+            .in('tipo', ['reembolso', 'ajuste_admin'])
+            .eq('referencia_id', p.id)
+            .maybeSingle();
+
+          if (!txExiste) {
+            await supabase.from('wallet_transactions').insert({
+              user_id: p.user_id,
+              tipo: 'ajuste_admin',
+              monto,
+              descripcion: `Reembolso: "${q.titulo}" anulada (${jugadoresPagados}/${q.jugadores_minimos} jugadores mínimos)`,
+              referencia_id: p.id,
+            });
+          }
 
           // Marcar participación como reembolsado
           await supabase
@@ -127,6 +157,8 @@ serve(async (req) => {
             '💸 Reembolso acreditado',
             `La quiniela "${q.titulo}" fue anulada por no alcanzar el mínimo de jugadores. Se te reembolsaron $${monto} MXN a tu wallet.`,
             'reembolso',
+            p.id,
+            'participacion_reembolso',
           );
 
           reembolsados++;
@@ -140,6 +172,8 @@ serve(async (req) => {
             '❌ Quiniela anulada',
             `La quiniela "${q.titulo}" fue anulada por no alcanzar el mínimo de ${q.jugadores_minimos} jugadores. No se realizó ningún cargo.`,
             'quiniela_anulada',
+            p.id,
+            'participacion_anulada',
           );
         }
 

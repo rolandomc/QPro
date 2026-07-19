@@ -77,12 +77,7 @@ export function QuinielaCard({
       fetchPendingStatus();
       const channel = supabase.channel(`pozo-${id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'participaciones', filter: `quiniela_id=eq.${id}` },
-          async () => {
-            const { count } = await supabase.from('participaciones')
-              .select('*', { count: 'exact', head: true })
-              .eq('quiniela_id', id).in('estado', ['pagado', 'ganador', 'perdedor', 'pendiente']);
-            setJugadoresPagados(count ?? 0);
-          }
+          async () => { await fetchPendingStatus(); }
         ).subscribe();
       return () => { supabase.removeChannel(channel); };
     }
@@ -91,7 +86,7 @@ export function QuinielaCard({
     const cargar = async () => {
       const { count } = await supabase.from('participaciones')
         .select('*', { count: 'exact', head: true })
-        .eq('quiniela_id', id).in('estado', ['pagado', 'ganador', 'perdedor', 'pendiente']);
+        .eq('quiniela_id', id).in('estado', ['pagado', 'ganador', 'perdedor']);
       setJugadoresPagados(count ?? 0);
 
       const { data: { user } } = await supabase.auth.getUser();

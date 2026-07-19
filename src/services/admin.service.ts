@@ -445,18 +445,48 @@ export class AdminService {
           p_monto:   monto,
         });
 
-        await supabase.from('wallet_movimientos').insert({
-          user_id:     p.user_id,
-          tipo:        'reembolso',
-          monto:       monto,
-          descripcion: `Reembolso: quiniela "${q.titulo}" anulada por no alcanzar el mínimo de jugadores`,
-          quiniela_id: quinielaId,
-        });
+        const { data: txExiste } = await supabase
+          .from('wallet_transactions')
+          .select('id')
+          .in('tipo', ['reembolso', 'ajuste_admin'])
+          .eq('referencia_id', p.id)
+          .maybeSingle();
+
+        if (!txExiste) {
+          await supabase.from('wallet_transactions').insert({
+            user_id:       p.user_id,
+            tipo:          'ajuste_admin',
+            monto:         monto,
+            descripcion:   `Reembolso: quiniela "${q.titulo}" anulada por no alcanzar el mínimo de jugadores`,
+            referencia_id: p.id,
+          });
+        }
 
         await supabase
           .from('participaciones')
           .update({ estado: 'reembolsado' })
           .eq('id', p.id);
+
+        const { data: notifExiste } = await supabase
+          .from('notificaciones')
+          .select('id')
+          .eq('user_id', p.user_id)
+          .eq('tipo', 'reembolso')
+          .eq('referencia_id', p.id)
+          .eq('referencia_tipo', 'participacion_reembolso')
+          .maybeSingle();
+
+        if (!notifExiste) {
+          await supabase.from('notificaciones').insert({
+            user_id: p.user_id,
+            tipo: 'reembolso',
+            titulo: '💸 Reembolso acreditado',
+            mensaje: `La quiniela "${q.titulo}" fue anulada por no alcanzar el mínimo de jugadores. Se te reembolsaron $${monto} MXN a tu wallet.`,
+            leida: false,
+            referencia_id: p.id,
+            referencia_tipo: 'participacion_reembolso',
+          });
+        }
       }
     }
 

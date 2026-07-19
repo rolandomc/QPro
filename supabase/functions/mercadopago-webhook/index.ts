@@ -50,6 +50,18 @@ Deno.serve(async (req: Request) => {
       return new Response("ok", { status: 200 });
     }
 
+    const isTerminalStatus = status === 'approved' || status === 'rejected' || status === 'cancelled';
+    if (!isTerminalStatus) {
+      await markPaymentEventFailed(
+        supabase,
+        'mercadopago-webhook',
+        paymentId,
+        participacionId,
+        `Estado no terminal: ${status}`,
+      );
+      return new Response("ok", { status: 200 });
+    }
+
     if (status === "approved") {
       // 1. Actualizar participacion a pagado
       const { data: part, error: partErr } = await supabase
@@ -60,7 +72,8 @@ Deno.serve(async (req: Request) => {
           mp_payment_id:  paymentId,
         })
         .eq("id", participacionId)
-        .is("mp_payment_id", null)
+        .neq("estado", "pagado")
+        .or(`mp_payment_id.is.null,mp_payment_id.eq.${paymentId}`)
         .select("quiniela_id, user_id")
         .maybeSingle();
 

@@ -108,10 +108,10 @@ export default function QuinielasScreen() {
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.heroTitle}>Una vista más clara para seguir cada quiniela.</Text>
-              <Text style={styles.heroSubtitle}>
-                Explora abiertas, revisa el pozo y participa antes del cierre.
-              </Text>
+              <View style={styles.heroHeadlineRow}>
+                <Text style={styles.heroTitle}>{emoji} {titulo}</Text>
+                <Text style={styles.heroSubtitle}>{estadoTitulo}</Text>
+              </View>
 
               <View style={styles.metricRow}>
                 <View style={styles.metricCard}>
@@ -169,6 +169,8 @@ export default function QuinielasScreen() {
             fechaCierre={item.fecha_primer_partido}
             jugadoresMinimos={item.jugadores_minimos ?? 0}
             porcentajeAdmin={item.porcentaje_admin ?? 0}
+            numGanadores={item.num_ganadores ?? 1}
+            porcentajesPremios={item.porcentajes_premios ?? [100]}
             jugadoresCount={item.jugadores_count ?? 0}
             yaParticipo={item.ya_participo ?? false}
           />
@@ -187,7 +189,8 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    padding: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
     overflow: 'hidden',
     ...shadows.lg,
   },
@@ -209,7 +212,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(91,155,213,0.14)',
   },
-  heroTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
+  heroTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
   heroBadge: {
     backgroundColor: 'rgba(53,208,127,0.14)',
     borderColor: 'rgba(53,208,127,0.35)',
@@ -228,21 +231,23 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   heroActionText: { ...text.label, color: colors.text },
-  heroTitle: { ...text.display, color: colors.text, lineHeight: 34, marginBottom: spacing.sm },
-  heroSubtitle: { ...text.body, color: colors.textMuted, lineHeight: 20, marginBottom: spacing.lg },
+  heroHeadlineRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm, gap: spacing.sm },
+  heroTitle: { ...text.itemTitle, color: colors.text, flex: 1 },
+  heroSubtitle: { ...text.caption, color: colors.textMuted },
   metricRow: { flexDirection: 'row', gap: spacing.sm },
   metricCard: {
     flex: 1,
-    minHeight: 78,
+    minHeight: 58,
     borderRadius: radii.lg,
     backgroundColor: 'rgba(8,12,20,0.52)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
-    padding: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
     justifyContent: 'space-between',
   },
-  metricValue: { ...text.itemTitle, color: colors.text },
-  metricLabel: { ...text.caption, color: colors.textMuted, marginTop: spacing.xs },
+  metricValue: { ...text.body, color: colors.text, fontWeight: '700' },
+  metricLabel: { ...text.caption, color: colors.textMuted },
   sectionTitle: { ...text.sectionTitle, color: colors.text, marginBottom: spacing.xs, marginTop: spacing.xs },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 15 },
   loadingText: { color: colors.textMuted, fontSize: 14 },

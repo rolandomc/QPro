@@ -3,13 +3,36 @@ import { supabase } from '../config/supabase';
 
 export const QuinielasService = {
 
+  async getQuinielasPrizeConfig(quinielaIds: string[]) {
+    if (!quinielaIds.length) return new Map<string, any>();
+    const { data, error } = await supabase
+      .from('quinielas')
+      .select('id, num_ganadores, porcentajes_premios')
+      .in('id', quinielaIds);
+    if (error) return new Map<string, any>();
+    return new Map((data ?? []).map((q: any) => [q.id, q]));
+  },
+
   async getQuinielasStatsPublic(quinielaIds: string[]) {
     if (!quinielaIds.length) return [];
     const { data, error } = await supabase.rpc('get_quinielas_stats_public', {
       p_quiniela_ids: quinielaIds,
     });
     if (error) throw error;
-    return data ?? [];
+
+    const rows = data ?? [];
+    const missingCfgIds = rows
+      .filter((q: any) => q.num_ganadores == null || q.porcentajes_premios == null)
+      .map((q: any) => q.id);
+
+    if (!missingCfgIds.length) return rows;
+
+    const cfgMap = await this.getQuinielasPrizeConfig(missingCfgIds);
+    return rows.map((q: any) => ({
+      ...q,
+      num_ganadores: Number(q.num_ganadores ?? cfgMap.get(q.id)?.num_ganadores ?? 1),
+      porcentajes_premios: q.porcentajes_premios ?? cfgMap.get(q.id)?.porcentajes_premios ?? [100],
+    }));
   },
 
   async getQuinielaRankingPublic(quinielaId: string, limit = 5000) {
@@ -24,10 +47,18 @@ export const QuinielasService = {
   async getQuinielasAbiertas() {
     const rpc = await supabase.rpc('get_quinielas_abiertas_public');
     if (!rpc.error) {
-      return (rpc.data ?? []).map((q: any) => ({
+      const rows = rpc.data ?? [];
+      const missingCfgIds = rows
+        .filter((q: any) => q.num_ganadores == null || q.porcentajes_premios == null)
+        .map((q: any) => q.id);
+      const cfgMap = await this.getQuinielasPrizeConfig(missingCfgIds);
+
+      return rows.map((q: any) => ({
         ...q,
         partidos: [{ count: Number(q.total_partidos ?? 0) }],
         jugadores_count: Number(q.jugadores_count ?? 0),
+        num_ganadores: Number(q.num_ganadores ?? cfgMap.get(q.id)?.num_ganadores ?? 1),
+        porcentajes_premios: q.porcentajes_premios ?? cfgMap.get(q.id)?.porcentajes_premios ?? [100],
         ya_participo: !!q.ya_participo,
         fecha_primer_partido: q.fecha_primer_partido ?? q.fecha_cierre ?? null,
       }));
@@ -37,7 +68,7 @@ export const QuinielasService = {
     const { data: { user } } = await supabase.auth.getUser();
     const { data, error } = await supabase
       .from('quinielas')
-      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, fecha_cierre, created_at, partidos(count)')
+      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, fecha_cierre, created_at, num_ganadores, porcentajes_premios, partidos(count)')
       .eq('estado', 'abierta')
       .order('created_at', { ascending: false });
     if (error) throw error;
@@ -72,6 +103,8 @@ export const QuinielasService = {
       deporte: statsMap.get(q.id)?.deporte ?? 'futbol',
       jugadores_minimos: Number(statsMap.get(q.id)?.jugadores_minimos ?? 0),
       porcentaje_admin: Number(statsMap.get(q.id)?.porcentaje_admin ?? 0),
+      num_ganadores: Number(statsMap.get(q.id)?.num_ganadores ?? q.num_ganadores ?? 1),
+      porcentajes_premios: statsMap.get(q.id)?.porcentajes_premios ?? q.porcentajes_premios ?? [100],
       cierre_automatico: !!statsMap.get(q.id)?.cierre_automatico,
       primer_partido: statsMap.get(q.id)?.primer_partido ?? null,
       jugadores_count: Number(statsMap.get(q.id)?.jugadores_count ?? 0),

@@ -22,6 +22,8 @@ interface Props {
   modoResultados?: boolean;
   jugadoresCount?: number;
   yaParticipo?: boolean;
+  numGanadores?: number;
+  porcentajesPremios?: number[] | null;
 }
 
 // ─── Skeleton ────────────────────────────────────────────────
@@ -48,6 +50,7 @@ export function QuinielaCard({
   precioEntrada, premioTotal, estado,
   totalPartidos, jugadoresMinimos = 0, porcentajeAdmin = 0,
   modoResultados = false, jugadoresCount, yaParticipo: yaParticipoInit,
+  numGanadores = 1, porcentajesPremios = [100],
 }: Props) {
   const router   = useRouter();
 
@@ -128,6 +131,13 @@ export function QuinielaCard({
   const faltanJugadores = Math.max(0, jugadoresMinimos - jug);
   const premioVisible   = estado !== 'abierta' || !tieneMinimo || minimoAlcanzado;
   const isLoading       = jugadoresPagados === null || yaParticipo === null;
+  const topN = Number(numGanadores ?? 1) === 3 ? 3 : 1;
+  const pcts = Array.isArray(porcentajesPremios)
+    ? (topN === 3 ? porcentajesPremios.slice(0, 3) : porcentajesPremios.slice(0, 1))
+    : (topN === 3 ? [60, 25, 15] : [100]);
+  const distLabel = topN === 3
+    ? `Top 3 • ${pcts.map((p) => `${Number(p)}%`).join(' / ')}`
+    : 'Top 1 • 100%';
 
   const handlePress = () => {
     if (modoResultados) { router.push(`/quiniela/${id}`); return; }
@@ -171,6 +181,7 @@ export function QuinielaCard({
       </View>
 
       <Text style={styles.title}>{titulo}</Text>
+      <Text style={styles.distLabel}>{distLabel}</Text>
 
       <View style={styles.statsRow}>
         <View style={styles.statColumn}>
@@ -237,6 +248,7 @@ const styles = StyleSheet.create({
   prizeLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
   prizeAmount: { color: colors.primary, fontSize: 18, fontWeight: '800' },
   title: { color: colors.text, fontSize: 18, fontWeight: '800', marginTop: -5, marginBottom: spacing.sm, lineHeight: 24 },
+  distLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '700', marginTop: -4, marginBottom: spacing.sm },
   statsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.lg, backgroundColor: colors.backgroundDeep, borderRadius: radii.md, padding: spacing.md },
   statColumn: { minWidth: 88 },
   statLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 },

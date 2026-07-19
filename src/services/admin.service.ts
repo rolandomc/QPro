@@ -282,7 +282,18 @@ export class AdminService {
     porcentajeAdmin: number = 10,
     cierreAutomatico: boolean = true,
     primerPartido: string | null = null,
+    numGanadores: 1 | 3 = 3,
+    porcentajesPremios: number[] = [60, 25, 15],
   ) {
+    const numGanadoresSafe: 1 | 3 = Number(numGanadores) === 1 ? 1 : 3;
+    const porcentajesSafe = numGanadoresSafe === 1
+      ? [100]
+      : [
+          Number(porcentajesPremios?.[0] ?? 60) || 60,
+          Number(porcentajesPremios?.[1] ?? 25) || 25,
+          Number(porcentajesPremios?.[2] ?? 15) || 15,
+        ];
+
     const insertPayloadFull = {
       titulo,
       descripcion,
@@ -296,6 +307,8 @@ export class AdminService {
       porcentaje_admin:   porcentajeAdmin,
       cierre_automatico:  cierreAutomatico,
       primer_partido:     primerPartido,
+      num_ganadores:      numGanadoresSafe,
+      porcentajes_premios: porcentajesSafe,
     };
 
     let quiniela: any;
@@ -331,6 +344,8 @@ export class AdminService {
             porcentaje_admin:  porcentajeAdmin,
             cierre_automatico: cierreAutomatico,
             primer_partido:    primerPartido,
+            num_ganadores:     numGanadoresSafe,
+            porcentajes_premios: porcentajesSafe,
           })
           .select('id')
           .single();
@@ -341,6 +356,18 @@ export class AdminService {
       }
     } else {
       quiniela = dataFull;
+    }
+
+    // Garantiza que la configuración de premios quede persistida
+    const { error: cfgErr } = await supabase
+      .from('quinielas')
+      .update({
+        num_ganadores: numGanadoresSafe,
+        porcentajes_premios: porcentajesSafe,
+      })
+      .eq('id', quiniela.id);
+    if (cfgErr) {
+      throw new Error(`No se pudo guardar la configuración de ganadores (Top ${numGanadoresSafe}). ${cfgErr.message}`);
     }
 
     const rowsFull = partidos.map((p, i) => ({

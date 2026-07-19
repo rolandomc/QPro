@@ -3,8 +3,8 @@
 // Crea y gestiona quinielas de béisbol usando la MLB Stats API
 // Sigue el mismo patrón que admin.service.ts
 // ============================================================
-import { supabase }              from '../config/supabase';
-import { MLBService, MLBGame }   from './mlb.service';
+import { supabase } from '../config/supabase';
+import { MLBService } from './mlb.service';
 
 export interface MLBPartidoInput {
   gamePk:           number;
@@ -46,8 +46,19 @@ export class MLBAdminService {
     jugadoresMinimos: number  = 5,
     porcentajeAdmin:  number  = 10,
     cierreAutomatico: boolean = true,
+    numGanadores:     1 | 3   = 3,
+    porcentajesPremios: number[] = [60, 25, 15],
   ): Promise<{ id: string }> {
     if (partidos.length === 0) throw new Error('Debes seleccionar al menos 1 juego');
+
+    const numGanadoresSafe: 1 | 3 = Number(numGanadores) === 1 ? 1 : 3;
+    const porcentajesSafe = numGanadoresSafe === 1
+      ? [100]
+      : [
+          Number(porcentajesPremios?.[0] ?? 60) || 60,
+          Number(porcentajesPremios?.[1] ?? 25) || 25,
+          Number(porcentajesPremios?.[2] ?? 15) || 15,
+        ];
 
     // Primer juego (fecha más temprana) como referencia de cierre
     const primerPartido = partidos
@@ -69,11 +80,24 @@ export class MLBAdminService {
         cierre_automatico: cierreAutomatico,
         primer_partido:    primerPartido,
         deporte:           'beisbol',       // ← distingue de fútbol
+        num_ganadores:     numGanadoresSafe,
+        porcentajes_premios: porcentajesSafe,
       })
       .select('id')
       .single();
 
     if (errQ) throw errQ;
+
+    const { error: cfgErr } = await supabase
+      .from('quinielas')
+      .update({
+        num_ganadores: numGanadoresSafe,
+        porcentajes_premios: porcentajesSafe,
+      })
+      .eq('id', quiniela.id);
+    if (cfgErr) {
+      throw new Error(`No se pudo guardar la configuración de ganadores (Top ${numGanadoresSafe}). ${cfgErr.message}`);
+    }
 
     // ─ Insertar partidos (juegos MLB) ────────────────────────────────
     const rows = partidos.map((p, i) => ({

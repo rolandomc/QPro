@@ -30,9 +30,11 @@ export default function GanadoresScreen() {
       const [{ data: q, error: errQ }, { data: parts, error: errP }, { count }] = await Promise.all([
         supabase.from('quinielas').select('*').eq('id', id).single(),
         supabase.from('participaciones')
-          .select('id, aciertos, monto_pagado, estado, premio_ganado, user_id')
+          .select('id, aciertos, total_goles_predichos, created_at, monto_pagado, estado, premio_ganado, user_id')
           .eq('quiniela_id', id)
-          .order('aciertos', { ascending: false, nullsFirst: false }),
+          .order('aciertos', { ascending: false, nullsFirst: false })
+          .order('total_goles_predichos', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: true }),
         supabase.from('partidos').select('*', { count: 'exact', head: true }).eq('quiniela_id', id),
       ]);
       if (errQ) throw errQ;
@@ -49,6 +51,7 @@ export default function GanadoresScreen() {
       setParticipantes((parts || []).map((p: any) => ({
         ...p,
         aciertos:      p.aciertos ?? 0,
+        total_goles_predichos: p.total_goles_predichos ?? 0,
         premio_ganado: p.premio_ganado ?? 0,
         username:      usernameMap[p.user_id] ?? 'usuario',
       })));
@@ -101,16 +104,70 @@ export default function GanadoresScreen() {
       return;
     }
 
-    const maxAciertos     = participantes[0].aciertos;
-    const ganadores       = participantes.filter((p: any) => p.aciertos === maxAciertos);
-    const montoPorGanador = Math.round(premioReal / ganadores.length);
+    const numGanadoresCfg = Number(quiniela.num_ganadores ?? 1) === 3 ? 3 : 1;
+    const porcentajesCfgRaw = Array.isArray(quiniela.porcentajes_premios)
+      ? quiniela.porcentajes_premios
+      : (numGanadoresCfg === 3 ? [60, 25, 15] : [100]);
+    const porcentajesCfg = (numGanadoresCfg === 3
+      ? porcentajesCfgRaw.slice(0, 3)
+      : porcentajesCfgRaw.slice(0, 1)
+    ).map((v: any) => Number(v) || 0);
 
-    const msg = ganadores.length === 1
-      ? `🏆 @${ganadores[0].username} — ${maxAciertos} aciertos\nPremio: $${montoPorGanador.toLocaleString()} (100% del pozo)`
-      : `🥇 Empate entre ${ganadores.length} jugadores con ${maxAciertos} aciertos\nPremio: $${montoPorGanador.toLocaleString()} c/u`;
+    const ranking = [...participantes]
+      .sort((a: any, b: any) => {
+        const aciertosDiff = Number(b.aciertos ?? 0) - Number(a.aciertos ?? 0);
+        if (aciertosDiff !== 0) return aciertosDiff;
+
+        const golesDiff = Number(b.total_goles_predichos ?? 0) - Number(a.total_goles_predichos ?? 0);
+        if (golesDiff !== 0) return golesDiff;
+
+        const timeA = new Date(a.created_at ?? 0).getTime();
+        const timeB = new Date(b.created_at ?? 0).getTime();
+        if (timeA !== timeB) return timeA - timeB;
+
+        return String(a.id).localeCompare(String(b.id));
+      });
+
+    const ganadoresRanking = ranking.slice(0, Math.min(numGanadoresCfg, ranking.length));
+
+    const montosPorParticipacion = new Map<string, number>();
+    const ganadoresIds: string[] = [];
+    const lineasResumen: string[] = [];
+    let totalAsignado = 0;
+
+    for (let i = 0; i < ganadoresRanking.length; i++) {
+      const ganador = ganadoresRanking[i];
+      const pct = porcentajesCfg[i] ?? 0;
+      const bolsaPosicion = Math.round((premioReal * pct) / 100);
+      if (bolsaPosicion <= 0) continue;
+
+      const etiqueta = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
+      lineasResumen.push(`${etiqueta} ${i + 1}° lugar (${pct}%): @${ganador.username} · $${bolsaPosicion.toLocaleString()} · ${ganador.aciertos} aciertos / ${ganador.total_goles_predichos} goles`);
+
+      ganadoresIds.push(ganador.id);
+      montosPorParticipacion.set(ganador.id, bolsaPosicion);
+      totalAsignado += bolsaPosicion;
+    }
+
+    if (ganadoresIds.length === 0) {
+      Alert.alert('⚠️ Sin ganadores', 'No se pudo determinar ganadores para la configuración actual.');
+      return;
+    }
+
+    const sobrante = premioReal - totalAsignado;
+    if (sobrante !== 0) {
+      const firstId = ganadoresIds[0];
+      montosPorParticipacion.set(firstId, (montosPorParticipacion.get(firstId) ?? 0) + sobrante);
+      totalAsignado += sobrante;
+    }
+
+    const montosGanador = ganadoresIds.map((pid) => Math.max(0, Math.round(montosPorParticipacion.get(pid) ?? 0)));
+    const maxAciertos = Number(participantes[0]?.aciertos ?? 0);
+
+    const msg = lineasResumen.join('\n');
 
     Alert.alert('💰 Distribuir Premio',
-      `Premio total: $${premioReal.toLocaleString()}\n\n${msg}\n\n¿Confirmar?`,
+      `Premio total: $${premioReal.toLocaleString()}\nAsignado: $${totalAsignado.toLocaleString()}\n\n${msg}\n\n¿Confirmar?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -118,14 +175,10 @@ export default function GanadoresScreen() {
           onPress: async () => {
             setDistribuyendo(true);
             try {
-              const ganadoresIds: string[]      = [];
-
-              ganadores.forEach((g: any) => ganadoresIds.push(g.id));
-
               const { error: errorRPC } = await supabase.rpc('distribuir_premios_quiniela', {
                 p_quiniela_id: id,
                 p_ganador_ids: ganadoresIds,
-                p_monto_por_ganador: montoPorGanador,
+                p_montos_ganador: montosGanador,
                 p_premio_total: premioReal,
                 p_max_aciertos: maxAciertos,
               });
@@ -134,9 +187,7 @@ export default function GanadoresScreen() {
               await cargarDatos();
               Alert.alert(
                 '🎉 ¡Premio distribuido!',
-                ganadores.length === 1
-                  ? `@${ganadores[0].username} recibe $${montoPorGanador.toLocaleString()} en su billetera.`
-                  : `${ganadores.length} ganadores reciben $${montoPorGanador.toLocaleString()} c/u en su billetera.`,
+                `${ganadoresIds.length} ganador(es) acreditados con la distribución configurada.`,
               );
             } catch (e: any) {
               Alert.alert('Error', e.message);
@@ -278,8 +329,8 @@ export default function GanadoresScreen() {
 
         <View style={styles.reglaBox}>
           <Text style={styles.reglaTitle}>Regla</Text>
-          <Text style={styles.reglaItem}>🏆 El jugador con más aciertos gana el 100% del pozo</Text>
-          <Text style={styles.reglaNote}>En caso de empate, el pozo se divide entre los empatados</Text>
+          <Text style={styles.reglaItem}>🏆 Se premia exactamente Top 1 o Top 3 según configuración</Text>
+          <Text style={styles.reglaNote}>Desempate: aciertos DESC, luego total_goles_predichos DESC</Text>
         </View>
 
         <Text style={styles.sectionTitle}>Tabla de Posiciones</Text>
@@ -300,7 +351,7 @@ export default function GanadoresScreen() {
                 <Text style={styles.rankPos}>{MEDALS[index] ?? `#${index + 1}`}</Text>
                 <View>
                   <Text style={styles.rankUsername}>@{part.username}</Text>
-                  <Text style={styles.rankSub}>{aciertos}/{totalPartidos} aciertos · {porcentaje}%</Text>
+                  <Text style={styles.rankSub}>{aciertos}/{totalPartidos} aciertos · {porcentaje}% · goles: {part.total_goles_predichos ?? 0}</Text>
                 </View>
               </View>
               <View style={styles.rankRight}>

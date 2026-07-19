@@ -4,7 +4,9 @@ import {
     ActivityIndicator,
     FlatList,
     RefreshControl,
-    StyleSheet, Text, View,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Header from '../../src/components/Header';
@@ -14,24 +16,32 @@ import { supabase } from '../../src/config/supabase';
 import { useDeporte } from '../../src/context/DeporteContext';
 import { QuinielasService } from '../../src/services/quinielas.service';
 
-function StatBox({ valor, label, color = '#FFF', glow = false }: {
-  valor: string; label: string; color?: string; glow?: boolean;
+function StatBox({ valor, label, tone = 'neutral' }: {
+  valor: string;
+  label: string;
+  tone?: 'neutral' | 'good' | 'warn' | 'accent';
 }) {
+  const toneMap = {
+    neutral: { color: '#EAF0FA', border: '#253247' },
+    good: { color: '#35D07F', border: 'rgba(53,208,127,0.4)' },
+    warn: { color: '#F7B955', border: 'rgba(247,185,85,0.4)' },
+    accent: { color: '#67BAFF', border: 'rgba(103,186,255,0.45)' },
+  } as const;
+  const cfg = toneMap[tone];
+
   return (
-    <View style={sb.box}>
-      <Text style={[sb.valor, { color }, glow && { textShadowColor: color, textShadowRadius: 10 }]}>
-        {valor}
-      </Text>
-      <Text style={sb.label}>{label}</Text>
+    <View style={[s.kpiTile, { borderColor: cfg.border }]}>
+      <Text style={[s.kpiValue, { color: cfg.color }]}>{valor}</Text>
+      <Text style={s.kpiLabel}>{label}</Text>
     </View>
   );
 }
 
 export default function ResultsScreen() {
-  const [tab,             setTab]             = useState('En Juego');
+  const [tab, setTab] = useState('En Juego');
   const [participaciones, setParticipaciones] = useState<any[]>([]);
-  const [loading,         setLoading]         = useState(true);
-  const [refreshing,      setRefreshing]      = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const { deporteActivo, setDeporteActivo } = useDeporte();
 
@@ -44,8 +54,8 @@ export default function ResultsScreen() {
         id, aciertos, estado, premio_ganado, monto_pagado, created_at,
         quinielas (
           id, titulo, descripcion, liga, precio_entrada, premio_total, estado,
-          fecha_cierre, jugadores_minimos, porcentaje_admin, deporte,
-            partidos ( count )
+          fecha_cierre, jugadores_minimos, porcentaje_admin, deporte, num_ganadores, porcentajes_premios,
+          partidos ( count )
         )
       `;
 
@@ -53,8 +63,8 @@ export default function ResultsScreen() {
         id, aciertos, estado, premio_ganado, monto_pagado, created_at,
         quinielas (
           id, titulo, descripcion, precio_entrada, premio_total, estado,
-          fecha_cierre, jugadores_minimos, porcentaje_admin, deporte,
-            partidos ( count )
+          fecha_cierre, jugadores_minimos, porcentaje_admin, deporte, num_ganadores, porcentajes_premios,
+          partidos ( count )
         )
       `;
 
@@ -85,9 +95,7 @@ export default function ResultsScreen() {
         data = dataWithLiga;
       }
 
-      const quinielaIds = [...new Set(
-        (data || []).map((item: any) => item.quinielas?.id).filter(Boolean)
-      )] as string[];
+      const quinielaIds = [...new Set((data || []).map((item: any) => item.quinielas?.id).filter(Boolean))] as string[];
 
       let stats: any[] = [];
       if (quinielaIds.length > 0) {
@@ -97,7 +105,7 @@ export default function ResultsScreen() {
           stats = [];
         }
       }
-      const statsMap = new Map((stats ?? []).map((s: any) => [s.id, s]));
+      const statsMap = new Map((stats ?? []).map((row: any) => [row.id, row]));
 
       const missingIds = quinielaIds.filter((qid) => !statsMap.has(qid));
       const rankingCountMap = new Map<string, number>();
@@ -112,7 +120,7 @@ export default function ResultsScreen() {
         }));
       }
 
-      const enriquecido = (data || []).map((item: any) => ({
+      const enriched = (data || []).map((item: any) => ({
         ...item,
         quinielas: {
           ...item.quinielas,
@@ -123,7 +131,7 @@ export default function ResultsScreen() {
         fecha_primer_partido: statsMap.get(item.quinielas?.id)?.fecha_primer_partido ?? item.quinielas?.fecha_cierre ?? null,
       }));
 
-      setParticipaciones(enriquecido);
+      setParticipaciones(enriched);
     } catch (e: any) {
       console.error(e.message);
     } finally {
@@ -132,111 +140,142 @@ export default function ResultsScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { setLoading(true); loadData(); }, [loadData]));
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    loadData();
+  }, [loadData]));
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
   }, [loadData]);
 
-  // Filtrar por deporte activo (viene del context global)
   const participacionesFiltradas = participaciones.filter((p: any) => {
     const dep = p.quinielas?.deporte;
     if (deporteActivo === 'futbol') return !dep || dep === 'futbol';
     return dep === deporteActivo;
   });
 
-  const enJuego  = participacionesFiltradas.filter((p: any) =>
-    ['abierta', 'cerrada'].includes(p.quinielas?.estado)
-  );
+  const enJuego = participacionesFiltradas.filter((p: any) => ['abierta', 'cerrada'].includes(p.quinielas?.estado));
   const historial = participacionesFiltradas.filter((p: any) =>
-    p.quinielas?.estado === 'finalizada' ||
-    p.estado === 'ganador' ||
-    p.estado === 'perdedor'
+    p.quinielas?.estado === 'finalizada' || p.estado === 'ganador' || p.estado === 'perdedor'
   );
   const lista = tab === 'En Juego' ? enJuego : historial;
 
-  const totalJugadas   = historial.length;
-  const totalGanadas   = historial.filter((p: any) => p.estado === 'ganador').length;
-  const totalInvertido = historial.reduce((acc: number, p: any) =>
-    acc + Number(p.monto_pagado ?? p.quinielas?.precio_entrada ?? 0), 0);
-  const totalGanado    = historial.reduce((acc: number, p: any) =>
-    acc + Number(p.premio_ganado ?? 0), 0);
-  const roi            = totalInvertido > 0
-    ? (((totalGanado - totalInvertido) / totalInvertido) * 100).toFixed(0)
-    : '0';
-  const roiNum     = Number(roi);
+  const totalJugadas = historial.length;
+  const totalGanadas = historial.filter((p: any) => p.estado === 'ganador').length;
+  const totalInvertido = historial.reduce((acc: number, p: any) => acc + Number(p.monto_pagado ?? p.quinielas?.precio_entrada ?? 0), 0);
+  const totalGanado = historial.reduce((acc: number, p: any) => acc + Number(p.premio_ganado ?? 0), 0);
+  const totalPerdidas = Math.max(0, totalJugadas - totalGanadas);
   const pctAcierto = totalJugadas > 0 ? Math.round((totalGanadas / totalJugadas) * 100) : 0;
 
-  const deporteEmoji = deporteActivo === 'beisbol' ? '\u26be' : deporteActivo === 'basquet' ? '\ud83c\udfc0' : '\u26bd';
+  const roi = totalInvertido > 0
+    ? (((totalGanado - totalInvertido) / totalInvertido) * 100).toFixed(0)
+    : '0';
+  const roiNum = Number(roi);
+
+  const abiertasEnJuego = enJuego.filter((p: any) => p.quinielas?.estado === 'abierta').length;
+  const cerradasEnJuego = enJuego.filter((p: any) => p.quinielas?.estado === 'cerrada').length;
+
+  const deporteEmoji = deporteActivo === 'beisbol' ? '⚾' : deporteActivo === 'basquet' ? '🏀' : '⚽';
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
       <Header deporteActivo={deporteActivo} onDeporteChange={setDeporteActivo} onRefresh={handleRefresh} />
-      <SegmentedControl options={['En Juego', 'Historial']} selectedOption={tab} onSelect={setTab} />
+      <SegmentedControl options={['En Juego', 'Historial']} selectedOption={tab} onSelect={setTab} accentColor="#35D07F" />
 
       {loading ? (
         <View style={s.centered}>
-          <ActivityIndicator size="large" color="#9B59B6" />
+          <ActivityIndicator size="large" color="#35D07F" />
           <Text style={s.loadingTxt}>Cargando...</Text>
         </View>
       ) : (
         <FlatList
           data={lista}
-          keyExtractor={item => item.id}
+          keyExtractor={(item) => item.id}
           style={{ flex: 1 }}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
-          bounces={true}
-          alwaysBounceVertical={true}
+          bounces
+          alwaysBounceVertical
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor="#9B59B6"
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#67BAFF" colors={["#35D07F"]} />
           }
           ListHeaderComponent={
             <>
-              {tab === 'Historial' && totalJugadas > 0 && (
-                <View style={s.statsCard}>
-                  <View style={s.statsNeonLine} />
-                  <Text style={s.statsTitle}>TUS ESTAD\u00cdSTICAS</Text>
-                  <View style={s.statsGrid}>
-                    <StatBox valor={String(totalJugadas)} label="Jugadas"  color="#00E5FF" glow />
-                    <View style={s.statsDiv} />
-                    <StatBox valor={String(totalGanadas)} label="Ganadas"  color="#FFD700" glow />
-                    <View style={s.statsDiv} />
-                    <StatBox valor={`${pctAcierto}%`}     label="Win Rate" color="#9B59B6" glow />
-                    <View style={s.statsDiv} />
-                    <StatBox
-                      valor={`${roiNum >= 0 ? '+' : ''}${roi}%`}
-                      label="ROI"
-                      color={roiNum >= 0 ? '#2ECC71' : '#E91E63'}
-                      glow
-                    />
+              <View style={s.overviewCard}>
+                <View style={s.overviewTop}>
+                  <Text style={s.overviewTag}>{tab === 'En Juego' ? 'LIVE TRACKER' : 'RESUMEN HISTORIAL'}</Text>
+                  <View style={s.overviewCountPill}>
+                    <Text style={s.overviewCountText}>{lista.length}</Text>
                   </View>
-                  <View style={s.statsFinRow}>
-                    <View style={s.statsFinBox}>
-                      <Text style={s.statsFinLbl}>INVERTIDO</Text>
-                      <Text style={s.statsFinVal}>${totalInvertido.toLocaleString()}</Text>
+                </View>
+
+                {tab === 'En Juego' ? (
+                  <>
+                    <Text style={s.overviewTitle}>{deporteEmoji} Tus quinielas activas</Text>
+                    <Text style={s.overviewSub}>Sigue el estado de tus picks y entra antes del cierre.</Text>
+                    <View style={s.livePillsRow}>
+                      <View style={s.livePill}>
+                        <Text style={s.livePillValue}>{abiertasEnJuego}</Text>
+                        <Text style={s.livePillLabel}>Abiertas</Text>
+                      </View>
+                      <View style={s.livePill}>
+                        <Text style={s.livePillValue}>{cerradasEnJuego}</Text>
+                        <Text style={s.livePillLabel}>Cerradas</Text>
+                      </View>
+                      <View style={s.livePill}>
+                        <Text style={s.livePillValue}>{enJuego.length}</Text>
+                        <Text style={s.livePillLabel}>Total</Text>
+                      </View>
                     </View>
-                    <View style={[s.statsFinBox, { borderLeftWidth: 1, borderLeftColor: '#1E2330' }]}>
-                      <Text style={s.statsFinLbl}>GANADO</Text>
-                      <Text style={[s.statsFinVal, { color: '#2ECC71', textShadowColor: '#2ECC71', textShadowRadius: 8 }]}>
-                        ${totalGanado.toLocaleString()}
-                      </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={s.overviewTitle}>{deporteEmoji} Rendimiento acumulado</Text>
+                    <Text style={s.overviewSub}>Revisa tu desempeño historico y retorno total.</Text>
+
+                    <View style={s.kpiGrid}>
+                      <StatBox valor={String(totalJugadas)} label="Jugadas" tone="accent" />
+                      <StatBox valor={String(totalGanadas)} label="Ganadas" tone="good" />
+                      <StatBox valor={String(totalPerdidas)} label="Perdidas" tone="warn" />
+                      <StatBox valor={`${pctAcierto}%`} label="Win Rate" tone="neutral" />
                     </View>
-                  </View>
+
+                    <View style={s.moneyRow}>
+                      <View style={s.moneyBox}>
+                        <Text style={s.moneyLabel}>Invertido</Text>
+                        <Text style={s.moneyValue}>${totalInvertido.toLocaleString()}</Text>
+                      </View>
+                      <View style={s.moneyBox}>
+                        <Text style={s.moneyLabel}>Ganado</Text>
+                        <Text style={[s.moneyValue, { color: '#35D07F' }]}>${totalGanado.toLocaleString()}</Text>
+                      </View>
+                      <View style={s.moneyBox}>
+                        <Text style={s.moneyLabel}>ROI</Text>
+                        <Text style={[s.moneyValue, { color: roiNum >= 0 ? '#35D07F' : '#F7B955' }]}>
+                          {`${roiNum >= 0 ? '+' : ''}${roi}%`}
+                        </Text>
+                      </View>
+                    </View>
+                  </>
+                )}
+              </View>
+
+              {tab === 'Historial' && totalJugadas === 0 && (
+                <View style={s.hintCard}>
+                  <Text style={s.hintText}>Aun no tienes quinielas finalizadas para mostrar estadisticas.</Text>
                 </View>
               )}
 
               <View style={s.sectionRow}>
                 {tab === 'En Juego' ? (
-                  <><View style={s.liveDot} />
-                  <Text style={s.sectionTxt}>{deporteEmoji} Quinielas activas</Text></>
+                  <>
+                    <View style={s.liveDot} />
+                    <Text style={s.sectionTxt}>{deporteEmoji} En juego</Text>
+                  </>
                 ) : (
-                  <Text style={s.sectionTxt}>{deporteEmoji} Resultados finales</Text>
+                  <Text style={s.sectionTxt}>{deporteEmoji} Historial</Text>
                 )}
                 <View style={s.countPill}>
                   <Text style={s.countTxt}>{lista.length}</Text>
@@ -246,14 +285,12 @@ export default function ResultsScreen() {
           }
           ListEmptyComponent={
             <View style={s.emptyBox}>
-              <Text style={s.emptyIcon}>{tab === 'En Juego' ? (deporteActivo === 'beisbol' ? '\u26be' : '\ud83c\udfa5') : '\ud83d\udcca'}</Text>
-              <Text style={s.emptyTitulo}>
-                {tab === 'En Juego' ? 'Sin quinielas activas' : 'Sin historial a\u00fan'}
-              </Text>
+              <Text style={s.emptyIcon}>{tab === 'En Juego' ? (deporteActivo === 'beisbol' ? '⚾' : '🎥') : '📊'}</Text>
+              <Text style={s.emptyTitulo}>{tab === 'En Juego' ? 'No hay quinielas activas' : 'Aun sin historial'}</Text>
               <Text style={s.emptySub}>
                 {tab === 'En Juego'
-                  ? `Las quinielas de ${deporteActivo === 'beisbol' ? 'b\u00e9isbol' : 'f\u00fatbol'} donde participes aparecer\u00e1n aqu\u00ed.`
-                  : 'Las quinielas finalizadas aparecer\u00e1n aqu\u00ed.'}
+                  ? `Tus participaciones activas de ${deporteActivo === 'beisbol' ? 'beisbol' : 'futbol'} apareceran aqui.`
+                  : 'Cuando tus quinielas terminen, veras resultados y rendimiento en esta seccion.'}
               </Text>
             </View>
           }
@@ -274,9 +311,11 @@ export default function ResultsScreen() {
                 fechaCierre={item.fecha_primer_partido}
                 jugadoresMinimos={q.jugadores_minimos ?? 0}
                 porcentajeAdmin={q.porcentaje_admin ?? 0}
+                numGanadores={q.num_ganadores ?? 1}
+                porcentajesPremios={q.porcentajes_premios ?? [100]}
                 modoResultados
                 jugadoresCount={item.jugadores_count}
-                yaParticipo={true}
+                yaParticipo
               />
             );
           }}
@@ -287,32 +326,103 @@ export default function ResultsScreen() {
 }
 
 const s = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: '#0A0C10' },
-  list:        { paddingHorizontal: 14, paddingBottom: 40, paddingTop: 8 },
-  centered:    { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingTxt:  { color: '#606060', fontSize: 13, letterSpacing: 1 },
-  statsCard:   { backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 18, borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden', shadowColor: '#9B59B6', shadowOpacity: 0.2, shadowRadius: 14, elevation: 6 },
-  statsNeonLine: { height: 2, backgroundColor: '#9B59B6', shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
-  statsTitle:  { color: '#404040', fontSize: 9, fontWeight: 'bold', letterSpacing: 3, textAlign: 'center', paddingTop: 14, paddingBottom: 10 },
-  statsGrid:   { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 14, alignItems: 'center' },
-  statsDiv:    { width: 1, height: 36, backgroundColor: '#1E2330' },
-  statsFinRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1E2330' },
-  statsFinBox: { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  statsFinLbl: { color: '#404040', fontSize: 9, letterSpacing: 2, marginBottom: 4 },
-  statsFinVal: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  sectionRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  liveDot:     { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 1, shadowRadius: 6 },
-  sectionTxt:  { color: '#FFF', fontSize: 15, fontWeight: 'bold', flex: 1 },
-  countPill:   { backgroundColor: 'rgba(155,89,182,0.15)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 2, borderWidth: 1, borderColor: '#9B59B6' },
-  countTxt:    { color: '#9B59B6', fontWeight: 'bold', fontSize: 12 },
-  emptyBox:    { alignItems: 'center', paddingTop: 60, gap: 10 },
-  emptyIcon:   { fontSize: 50 },
-  emptyTitulo: { color: '#FFF', fontSize: 17, fontWeight: 'bold' },
-  emptySub:    { color: '#505050', fontSize: 13, textAlign: 'center', lineHeight: 20 },
-});
+  container: { flex: 1, backgroundColor: '#0A0C10' },
+  list: { paddingHorizontal: 14, paddingBottom: 40, paddingTop: 8 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingTxt: { color: '#5F6B7D', fontSize: 13, letterSpacing: 1 },
 
-const sb = StyleSheet.create({
-  box:   { flex: 1, alignItems: 'center' },
-  valor: { fontSize: 22, fontWeight: 'bold' },
-  label: { color: '#404040', fontSize: 9, letterSpacing: 1.5, marginTop: 3 },
+  overviewCard: {
+    backgroundColor: '#0F1622',
+    borderRadius: 18,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#253247',
+    padding: 14,
+    shadowColor: '#67BAFF',
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  overviewTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  overviewTag: { color: '#7FA8D8', fontSize: 10, letterSpacing: 1.5, fontWeight: '700' },
+  overviewCountPill: {
+    minWidth: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#2B3A53',
+    backgroundColor: '#142238',
+  },
+  overviewCountText: { color: '#CBE0FF', fontWeight: '700', fontSize: 12 },
+  overviewTitle: { color: '#F1F5FC', fontSize: 19, fontWeight: '700', marginBottom: 4 },
+  overviewSub: { color: '#93A1B8', fontSize: 13, lineHeight: 18, marginBottom: 12 },
+
+  livePillsRow: { flexDirection: 'row', gap: 8 },
+  livePill: {
+    flex: 1,
+    backgroundColor: '#121D2E',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#24344A',
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  livePillValue: { color: '#EAF0FA', fontSize: 18, fontWeight: '700' },
+  livePillLabel: { color: '#8FA2BE', fontSize: 10, letterSpacing: 1.1, marginTop: 2 },
+
+  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
+  kpiTile: {
+    width: '49%',
+    backgroundColor: '#121D2E',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  kpiValue: { fontSize: 19, fontWeight: '700' },
+  kpiLabel: { color: '#8FA2BE', fontSize: 10, letterSpacing: 1.1, marginTop: 2 },
+
+  moneyRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  moneyBox: {
+    flex: 1,
+    backgroundColor: '#121A28',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#253247',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  moneyLabel: { color: '#8A9DB7', fontSize: 10, letterSpacing: 1.2, marginBottom: 3 },
+  moneyValue: { color: '#EAF0FA', fontSize: 15, fontWeight: '700' },
+
+  hintCard: {
+    backgroundColor: '#101722',
+    borderColor: '#253247',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  hintText: { color: '#95A4BC', fontSize: 12, lineHeight: 18, textAlign: 'center' },
+
+  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2ECC71', shadowColor: '#2ECC71', shadowOpacity: 1, shadowRadius: 6 },
+  sectionTxt: { color: '#F3F6FC', fontSize: 15, fontWeight: '700', flex: 1 },
+  countPill: {
+    backgroundColor: 'rgba(103,186,255,0.14)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#67BAFF',
+  },
+  countTxt: { color: '#67BAFF', fontWeight: '700', fontSize: 12 },
+
+  emptyBox: { alignItems: 'center', paddingTop: 56, gap: 10 },
+  emptyIcon: { fontSize: 50 },
+  emptyTitulo: { color: '#F3F6FC', fontSize: 18, fontWeight: '700' },
+  emptySub: { color: '#8595AD', fontSize: 13, textAlign: 'center', lineHeight: 20, maxWidth: 320 },
 });

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { QuinielasService } from '../services/quinielas.service';
 
 function useCountdown(targetDate: string | null) {
@@ -146,15 +146,39 @@ export default function EmptyQuinielas() {
 
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <View style={styles.topPanel}>
+        <View style={styles.topIconWrap}>
+          <Text style={styles.topIcon}>⚡</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.topEyebrow}>ESTADO ACTUAL</Text>
+          <Text style={styles.topTitle}>Lobby en espera</Text>
+          <Text style={styles.topSub}>No hay pools abiertos por ahora.</Text>
+        </View>
+        <View style={styles.topChip}>
+          <View style={styles.topChipDot} />
+          <Text style={styles.topChipText}>Standby</Text>
+        </View>
+      </View>
 
-      <Text style={styles.icon}>🏆</Text>
-      <Text style={styles.titulo}>Sin quinielas activas</Text>
-      <Text style={styles.sub}>{`El admin aún no ha publicado quinielas.\nVuelve pronto.`}</Text>
+      <View style={styles.factsRow}>
+        <View style={styles.factPill}>
+          <Text style={styles.factValue}>{finalizadas.length}</Text>
+          <Text style={styles.factLabel}>Quinielas en historial</Text>
+        </View>
+        <View style={styles.factPill}>
+          <Text style={styles.factValue}>{notifActiva ? 'ON' : 'OFF'}</Text>
+          <Text style={styles.factLabel}>Avisos</Text>
+        </View>
+      </View>
+
+      <Text style={styles.sub}>Estamos preparando la siguiente ronda. En cuanto se publique una nueva, te avisamos.</Text>
 
       {/* Countdown */}
       {proximaFecha && !countdown.pasado && (
         <View style={styles.cdBox}>
-          <Text style={styles.cdLabel}>⏳ PRÓXIMA QUINIELA EN</Text>
+          <Text style={styles.cdLabel}>CUENTA REGRESIVA</Text>
+          <Text style={styles.cdTitle}>Próxima quiniela en</Text>
           <View style={styles.cdRow}>
             {[{ v: countdown.dias, l: 'DÍAS' }, { v: countdown.horas, l: 'HORAS' }, { v: countdown.minutos, l: 'MIN' }, { v: countdown.segundos, l: 'SEG' }].map((u, i) => (
               <React.Fragment key={i}>
@@ -169,6 +193,13 @@ export default function EmptyQuinielas() {
         </View>
       )}
 
+      {!proximaFecha && (
+        <View style={styles.cdBoxMuted}>
+          <Text style={styles.cdMutedTitle}>Sin fecha programada todavía</Text>
+          <Text style={styles.cdMutedSub}>El admin aún no define hora de publicación para la siguiente quiniela.</Text>
+        </View>
+      )}
+
       {/* Notif btn */}
       <TouchableOpacity
         style={[styles.notifBtn, notifActiva && styles.notifOn]}
@@ -176,7 +207,7 @@ export default function EmptyQuinielas() {
         disabled={notifActiva}
       >
         <Text style={[styles.notifTxt, notifActiva && { color: '#2ECC71' }]}>
-          {notifActiva ? '🔔 Te avisaremos pronto ✅' : '🔔 Avísame cuando haya una nueva'}
+          {notifActiva ? 'Te avisaremos en cuanto salga la próxima' : 'Activar aviso de nueva quiniela'}
         </Text>
       </TouchableOpacity>
 
@@ -197,59 +228,127 @@ export default function EmptyQuinielas() {
 }
 
 const styles = StyleSheet.create({
-  container: { alignItems: 'center', paddingTop: 50, paddingBottom: 40, paddingHorizontal: 18 },
-  icon:      { fontSize: 72, marginBottom: 14 },
-  titulo:    { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 6 },
-  sub:       { color: '#606060', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 28 },
+  container: { alignItems: 'center', paddingTop: 12, paddingBottom: 40, paddingHorizontal: 16 },
+
+  topPanel: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#223047',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  topIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(77,163,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  topIcon: { fontSize: 18 },
+  topEyebrow: { color: '#7FA8D8', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 1 },
+  topTitle: { color: '#EAF0FA', fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  topSub: { color: '#9AA8BF', fontSize: 12 },
+  topChip: {
+    marginLeft: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(243,156,18,0.65)',
+    backgroundColor: 'rgba(243,156,18,0.14)',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  topChipDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F39C12', marginRight: 6 },
+  topChipText: { color: '#FFD58B', fontSize: 11, fontWeight: '700' },
+
+  factsRow: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  factPill: {
+    width: '49%',
+    backgroundColor: '#0F1522',
+    borderWidth: 1,
+    borderColor: '#233049',
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  factValue: { color: '#EAF0FA', fontSize: 16, fontWeight: '700' },
+  factLabel: { color: '#93A2BA', fontSize: 11, marginTop: 1 },
+
+  sub:       { color: '#97A2B2', fontSize: 13, textAlign: 'left', lineHeight: 20, width: '100%', marginBottom: 12 },
 
   // Countdown
-  cdBox:  { width: '100%', backgroundColor: '#0D1117', borderRadius: 18, padding: 20, marginBottom: 20,
-             borderWidth: 1.5, borderColor: '#F39C12',
-             shadowColor: '#F39C12', shadowOpacity: 0.35, shadowRadius: 14, elevation: 8 },
-  cdLabel:{ color: '#F39C12', fontSize: 10, fontWeight: 'bold', letterSpacing: 2, textAlign: 'center', marginBottom: 14 },
+  cdBox:  { width: '100%', backgroundColor: '#101722', borderRadius: 20, padding: 18, marginBottom: 18,
+             borderWidth: 1.5, borderColor: 'rgba(243,156,18,0.8)',
+             shadowColor: '#F39C12', shadowOpacity: 0.26, shadowRadius: 12, elevation: 6 },
+  cdLabel:{ color: '#F7B955', fontSize: 10, fontWeight: '700', letterSpacing: 1.8, textAlign: 'center', marginBottom: 7 },
+  cdTitle:{ color: '#FFF', fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 12 },
   cdRow:  { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  cdUnit: { alignItems: 'center', minWidth: 58 },
-  cdNum:  { color: '#FFF', fontSize: 38, fontWeight: 'bold',
+  cdUnit: { alignItems: 'center', minWidth: 56, backgroundColor: '#0C1118', borderRadius: 12, paddingVertical: 8 },
+  cdNum:  { color: '#FFF', fontSize: 30, fontWeight: '800',
              textShadowColor: '#F39C12', textShadowRadius: 10 },
-  cdLbl:  { color: '#F39C12', fontSize: 9, letterSpacing: 1, marginTop: 2 },
-  cdSep:  { color: '#F39C12', fontSize: 30, fontWeight: 'bold', marginBottom: 16, opacity: 0.6 },
+  cdLbl:  { color: '#F7B955', fontSize: 9, letterSpacing: 1, marginTop: 1, fontWeight: '700' },
+  cdSep:  { color: '#F39C12', fontSize: 24, fontWeight: '800', marginBottom: 8, opacity: 0.75 },
+  cdBoxMuted: {
+    width: '100%',
+    backgroundColor: '#101722',
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: '#253245',
+  },
+  cdMutedTitle: { color: '#D7DEEA', fontSize: 16, fontWeight: '700', marginBottom: 6, textAlign: 'center' },
+  cdMutedSub: { color: '#8D98A9', fontSize: 12, textAlign: 'center', lineHeight: 18 },
 
   // Notif
-  notifBtn: { width: '100%', backgroundColor: '#0D1117', borderWidth: 1.5, borderColor: '#9B59B6',
-              borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 32,
-              shadowColor: '#9B59B6', shadowOpacity: 0.3, shadowRadius: 10, elevation: 5 },
+  notifBtn: { width: '100%', backgroundColor: '#132033', borderWidth: 1.5, borderColor: '#4DA3FF',
+              borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginBottom: 30,
+              shadowColor: '#4DA3FF', shadowOpacity: 0.22, shadowRadius: 10, elevation: 4 },
   notifOn:  { borderColor: '#2ECC71', shadowColor: '#2ECC71' },
-  notifTxt: { color: '#9B59B6', fontWeight: 'bold', fontSize: 14, letterSpacing: 0.5 },
+  notifTxt: { color: '#7CC0FF', fontWeight: '700', fontSize: 14, letterSpacing: 0.3 },
 
   // Historial header
   histHead:   { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
   histLine:   { flex: 1, height: 1, backgroundColor: '#2A2D35' },
-  histTitulo: { color: '#606060', fontSize: 10, fontWeight: 'bold', letterSpacing: 2 },
+  histTitulo: { color: '#7F8CA1', fontSize: 10, fontWeight: '700', letterSpacing: 2 },
 });
 
 const card = StyleSheet.create({
-  wrap:       { width: '100%', backgroundColor: '#0D1117', borderRadius: 18, marginBottom: 18,
-                borderWidth: 1, borderColor: '#1E2330', overflow: 'hidden',
-                shadowColor: '#9B59B6', shadowOpacity: 0.15, shadowRadius: 12, elevation: 4 },
-  neonLine:   { height: 2, backgroundColor: '#9B59B6',
-                shadowColor: '#9B59B6', shadowOpacity: 1, shadowRadius: 8 },
+  wrap:       { width: '100%', backgroundColor: '#0F1622', borderRadius: 20, marginBottom: 16,
+                borderWidth: 1, borderColor: '#263244', overflow: 'hidden',
+                shadowColor: '#55B7FF', shadowOpacity: 0.13, shadowRadius: 10, elevation: 4 },
+  neonLine:   { height: 2, backgroundColor: '#4DA3FF',
+                shadowColor: '#4DA3FF', shadowOpacity: 0.7, shadowRadius: 6 },
 
   header:    { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
-  titulo:    { color: '#FFF', fontSize: 15, fontWeight: 'bold', marginBottom: 3 },
-  meta:      { color: '#404040', fontSize: 11 },
+  titulo:    { color: '#F5F7FA', fontSize: 15, fontWeight: '700', marginBottom: 3 },
+  meta:      { color: '#8A96A8', fontSize: 11 },
   bolsaBox:  { alignItems: 'flex-end' },
-  bolsaVal:  { color: '#2ECC71', fontSize: 18, fontWeight: 'bold',
+  bolsaVal:  { color: '#2ECC71', fontSize: 18, fontWeight: '700',
                textShadowColor: '#2ECC71', textShadowRadius: 8 },
-  bolsaLbl:  { color: '#2ECC71', fontSize: 8, letterSpacing: 2, opacity: 0.7 },
+  bolsaLbl:  { color: '#2ECC71', fontSize: 8, letterSpacing: 1.8, opacity: 0.7 },
 
-  statsRow:  { flexDirection: 'row', backgroundColor: '#111520', paddingVertical: 10, paddingHorizontal: 16 },
+  statsRow:  { flexDirection: 'row', backgroundColor: '#121A28', paddingVertical: 10, paddingHorizontal: 16 },
   statItem:  { flex: 1, alignItems: 'center' },
-  statNum:   { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
-  statLbl:   { color: '#404040', fontSize: 9, letterSpacing: 1, marginTop: 2 },
-  statSep:   { width: 1, backgroundColor: '#1E2330' },
+  statNum:   { color: '#F5F7FA', fontSize: 14, fontWeight: '700' },
+  statLbl:   { color: '#8291A8', fontSize: 9, letterSpacing: 1, marginTop: 2 },
+  statSep:   { width: 1, backgroundColor: '#263244' },
 
-  podio:      { padding: 16, borderTopWidth: 1, borderTopColor: '#1E2330' },
-  podioTitle: { color: '#FFF', fontSize: 11, fontWeight: 'bold', letterSpacing: 2,
+  podio:      { padding: 16, borderTopWidth: 1, borderTopColor: '#263244' },
+  podioTitle: { color: '#E5EAF3', fontSize: 11, fontWeight: '700', letterSpacing: 2,
                 textAlign: 'center', marginBottom: 14, opacity: 0.6 },
 
   jugRow:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14,
@@ -277,10 +376,10 @@ const card = StyleSheet.create({
                   textShadowColor: '#2ECC71', textShadowRadius: 6 },
   premioNeonLbl: { color: '#2ECC71', fontSize: 8, letterSpacing: 1, opacity: 0.7 },
 
-  sinData:   { color: '#404040', textAlign: 'center', padding: 20, fontSize: 12, letterSpacing: 1 },
+  sinData:   { color: '#7F8CA1', textAlign: 'center', padding: 20, fontSize: 12, letterSpacing: 1 },
 
   toggleBtn: { paddingVertical: 11, alignItems: 'center',
-               borderTopWidth: 1, borderTopColor: '#1E2330', backgroundColor: '#0A0D14' },
-  toggleTxt: { color: '#9B59B6', fontSize: 11, fontWeight: 'bold', letterSpacing: 2,
-               textShadowColor: '#9B59B6', textShadowRadius: 6 },
+               borderTopWidth: 1, borderTopColor: '#263244', backgroundColor: '#0D1420' },
+  toggleTxt: { color: '#70B5FF', fontSize: 11, fontWeight: '700', letterSpacing: 2,
+               textShadowColor: '#70B5FF', textShadowRadius: 4 },
 });

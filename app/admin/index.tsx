@@ -42,7 +42,7 @@ type FiltroSPEI    = 'todos' | 'pendiente_revision' | 'spei_pendiente' | 'pagado
 type FiltroDeporte = 'todos' | 'futbol' | 'beisbol';
 
 const TABS_ESTADO: { key: FiltroEstado; label: string; emoji: string; color: string }[] = [
-  { key: 'todas',      label: 'Todas',    emoji: '📋', color: '#9B59B6' },
+  { key: 'todas',      label: 'Todas',    emoji: '📋', color: '#67BAFF' },
   { key: 'abierta',   label: 'Abiertas', emoji: '🟢', color: '#2ECC71' },
   { key: 'cerrada',   label: 'Cerradas', emoji: '🔵', color: '#3498DB' },
   { key: 'finalizada',label: 'Canceladas',emoji: '🔴', color: '#E74C3C' },
@@ -50,13 +50,13 @@ const TABS_ESTADO: { key: FiltroEstado; label: string; emoji: string; color: str
 ];
 
 const TABS_DEPORTE = [
-  { key: 'todos',   label: 'Todos',   emoji: '🏆', color: '#9B59B6' },
+  { key: 'todos',   label: 'Todos',   emoji: '🏆', color: '#67BAFF' },
   { key: 'futbol',  label: 'Fútbol',  emoji: '⚽', color: '#2ECC71' },
   { key: 'beisbol', label: 'Béisbol', emoji: '⚾', color: '#E8A020' },
 ];
 
 const TABS_SPEI: { key: FiltroSPEI; label: string; emoji: string; color: string }[] = [
-  { key: 'todos',              label: 'Todos',       emoji: '📋', color: '#9B59B6' },
+  { key: 'todos',              label: 'Todos',       emoji: '📋', color: '#67BAFF' },
   { key: 'spei_pendiente',     label: 'Pendientes',  emoji: '⏳', color: '#F39C12' },
   { key: 'pendiente_revision', label: 'Revisión',    emoji: '👁',  color: '#3498DB' },
   { key: 'pagado',             label: 'Aprobados',   emoji: '✅', color: '#2ECC71' },
@@ -539,7 +539,7 @@ export default function AdminDashboardScreen() {
   };
 
   const getEstadoColor     = (e: string) => e === 'abierta' ? '#2ECC71' : e === 'cerrada' ? '#3498DB' : '#A0A0A0';
-  const getEstadoPartColor = (e: string) => ({ pagado: '#2ECC71', pendiente: '#F39C12', ganador: '#9B59B6', perdedor: '#E74C3C' }[e] ?? '#A0A0A0');
+  const getEstadoPartColor = (e: string) => ({ pagado: '#2ECC71', pendiente: '#F39C12', ganador: '#67BAFF', perdedor: '#E74C3C' }[e] ?? '#A0A0A0');
   const totalBolsa = quinielas.reduce((acc, q) => acc + (q.premio_total ?? 0), 0);
 
   const speiEstadoColor = (estado: string) => {
@@ -556,21 +556,13 @@ export default function AdminDashboardScreen() {
   if (loading) return (
     <SafeAreaView style={styles.container}>
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#9B59B6" />
+        <ActivityIndicator size="large" color="#35D07F" />
       </View>
     </SafeAreaView>
   );
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Text style={styles.backText}>← Volver</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Panel Admin</Text>
-        <View style={{ width: 60 }} />
-      </View>
-
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
@@ -581,47 +573,74 @@ export default function AdminDashboardScreen() {
               setRetirosData([]);
               loadQuinielas();
             }}
-            tintColor="#9B59B6"
+            tintColor="#67BAFF"
+            colors={['#35D07F']}
           />
         }
       >
-        {/* Stats */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{quinielas.length}</Text>
-            <Text style={styles.statLabel}>Quinielas</Text>
+        <View style={styles.heroCard}>
+          <View style={styles.heroGlowA} />
+          <View style={styles.heroGlowB} />
+          <View style={styles.header}>
+            <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+              <Text style={styles.backText}>← Volver</Text>
+            </TouchableOpacity>
+            <Text style={styles.title}>Panel Admin</Text>
+            <View style={{ width: 72 }} />
           </View>
-          <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: '#2A2D35' }]}>
-            <Text style={[styles.statValue, { color: '#2ECC71' }]}>${totalBolsa.toFixed(0)}</Text>
-            <Text style={styles.statLabel}>Bolsa Total</Text>
-          </View>
-        </View>
 
-        {/* ── Comprobantes SPEI ── */}
-        <TouchableOpacity
-          style={[styles.speiHeader, speiPendientesCount > 0 && styles.speiHeaderAlert]}
-          onPress={() => setSpeiExpanded(v => !v)}
-        >
-          <View style={styles.speiHeaderLeft}>
-            <Text style={styles.speiEmoji}>🧾</Text>
-            <View>
-              <Text style={styles.speiHeaderTitle}>Comprobantes SPEI</Text>
-              <Text style={styles.speiHeaderSub}>
-                {speiPendientesCount > 0
-                  ? `${speiPendientesCount} por revisar · ${todosSpei.filter(p => p.estado === 'pagado').length} aprobados`
-                  : `${todosSpei.filter(p => p.estado === 'pagado').length} aprobados · sin pendientes`}
-              </Text>
+          <Text style={styles.heroSub}>Control total de quinielas, cobros y retiros</Text>
+
+          <View style={styles.statsContainer}>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{quinielas.length}</Text>
+              <Text style={styles.statLabel}>Quinielas</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={[styles.statValue, { color: '#35D07F' }]}>${totalBolsa.toFixed(0)}</Text>
+              <Text style={styles.statLabel}>Bolsa Total</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={[styles.statValue, { color: retirosPendientes > 0 ? '#F39C12' : '#67BAFF' }]}>{retirosPendientes}</Text>
+              <Text style={styles.statLabel}>Retiros</Text>
             </View>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {speiPendientesCount > 0 && (
-              <View style={styles.speiBadge}>
-                <Text style={styles.speiBadgeCount}>{speiPendientesCount}</Text>
+
+          <TouchableOpacity style={styles.createBtn} onPress={() => router.push('/admin/create')}>
+            <Text style={styles.createBtnText}>+ Diseñar Nueva Quiniela</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.sectionSpacer} />
+
+        <View style={styles.blockCard}>
+          <Text style={styles.blockTitle}>Pagos SPEI</Text>
+
+          <TouchableOpacity
+            style={[styles.speiHeader, speiPendientesCount > 0 && styles.speiHeaderAlert]}
+            onPress={() => setSpeiExpanded(v => !v)}
+          >
+            <View style={styles.speiHeaderLeft}>
+              <Text style={styles.speiEmoji}>🧾</Text>
+              <View>
+                <Text style={styles.speiHeaderTitle}>Comprobantes SPEI</Text>
+                <Text style={styles.speiHeaderSub}>
+                  {speiPendientesCount > 0
+                    ? `${speiPendientesCount} por revisar · ${todosSpei.filter(p => p.estado === 'pagado').length} aprobados`
+                    : `${todosSpei.filter(p => p.estado === 'pagado').length} aprobados · sin pendientes`}
+                </Text>
               </View>
-            )}
-            <Text style={styles.speiChevron}>{speiExpanded ? '▲' : '▼'}</Text>
-          </View>
-        </TouchableOpacity>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {speiPendientesCount > 0 && (
+                <View style={styles.speiBadge}>
+                  <Text style={styles.speiBadgeCount}>{speiPendientesCount}</Text>
+                </View>
+              )}
+              <Text style={styles.speiChevron}>{speiExpanded ? '▲' : '▼'}</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
 
         {speiExpanded && (
           <View style={styles.speiList}>
@@ -735,31 +754,33 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
-        {/* ── Gestionar Retiros ── */}
-        <TouchableOpacity
-          style={[styles.retirosBtn, retirosPendientes > 0 && styles.retirosBtnAlert]}
-          onPress={handleToggleRetiros}
-        >
-          <View style={styles.retirosBtnLeft}>
-            <Text style={styles.retirosEmoji}>💸</Text>
-            <View>
-              <Text style={styles.retirosBtnTitle}>Gestionar Retiros</Text>
-              <Text style={styles.retirosBtnSub}>
-                {retirosPendientes > 0
-                  ? `${retirosPendientes} solicitud${retirosPendientes > 1 ? 'es' : ''} pendiente${retirosPendientes > 1 ? 's' : ''}`
-                  : 'Sin solicitudes pendientes'}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.retirosBtnRight}>
-            {retirosPendientes > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeCount}>{retirosPendientes}</Text>
+        <View style={styles.blockCard}>
+          <Text style={styles.blockTitle}>Retiros</Text>
+          <TouchableOpacity
+            style={[styles.retirosBtn, retirosPendientes > 0 && styles.retirosBtnAlert]}
+            onPress={handleToggleRetiros}
+          >
+            <View style={styles.retirosBtnLeft}>
+              <Text style={styles.retirosEmoji}>💸</Text>
+              <View>
+                <Text style={styles.retirosBtnTitle}>Gestionar Retiros</Text>
+                <Text style={styles.retirosBtnSub}>
+                  {retirosPendientes > 0
+                    ? `${retirosPendientes} solicitud${retirosPendientes > 1 ? 'es' : ''} pendiente${retirosPendientes > 1 ? 's' : ''}`
+                    : 'Sin solicitudes pendientes'}
+                </Text>
               </View>
-            )}
-            <Text style={styles.retirosChevron}>{retirosExpanded ? '▲' : '▼'}</Text>
-          </View>
-        </TouchableOpacity>
+            </View>
+            <View style={styles.retirosBtnRight}>
+              {retirosPendientes > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeCount}>{retirosPendientes}</Text>
+                </View>
+              )}
+              <Text style={styles.retirosChevron}>{retirosExpanded ? '▲' : '▼'}</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
 
         {retirosExpanded && (
           <View style={styles.retirosList}>
@@ -822,11 +843,13 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
-        {/* Configurar próxima quiniela */}
-        <TouchableOpacity style={styles.configHeader} onPress={() => setConfigExpanded(v => !v)}>
-          <Text style={styles.configHeaderText}>⏰ Configurar Próxima Quiniela</Text>
-          <Text style={styles.configChevron}>{configExpanded ? '▲' : '▼'}</Text>
-        </TouchableOpacity>
+        <View style={styles.blockCard}>
+          <Text style={styles.blockTitle}>Configuración</Text>
+          <TouchableOpacity style={styles.configHeader} onPress={() => setConfigExpanded(v => !v)}>
+            <Text style={styles.configHeaderText}>⏰ Configurar Próxima Quiniela</Text>
+            <Text style={styles.configChevron}>{configExpanded ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+        </View>
 
         {configExpanded && (
           <View style={styles.configBox}>
@@ -850,10 +873,6 @@ export default function AdminDashboardScreen() {
             </View>
           </View>
         )}
-
-        <TouchableOpacity style={[styles.createBtn, styles.neonBorderPurple]} onPress={() => router.push('/admin/create')}>
-          <Text style={styles.createBtnText}>+ Diseñar Nueva Quiniela</Text>
-        </TouchableOpacity>
 
         {/* ── Sección Quinielas con filtros estado + deporte ── */}
         <View style={styles.quinielasPanel}>
@@ -926,7 +945,7 @@ export default function AdminDashboardScreen() {
                   </View>
                   <View style={styles.cardInfo}>
                     <Text style={styles.infoText}>👥 Mín: <Text style={{ color: '#F39C12', fontWeight: 'bold' }}>{q.jugadores_minimos ?? 0}</Text></Text>
-                    <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#9B59B6', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
+                    <Text style={styles.infoText}>🏠 Casa: <Text style={{ color: '#67BAFF', fontWeight: 'bold' }}>{q.porcentaje_admin ?? 0}%</Text></Text>
                   </View>
                   <View style={styles.cardActions}>
                     <TouchableOpacity style={styles.actionBtn} onPress={(e) => { e.stopPropagation?.(); handleVerUsuarios(q.id, q.titulo); }}>
@@ -1079,32 +1098,44 @@ export default function AdminDashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:            { flex: 1, backgroundColor: '#0A0C10' },
-  header:               { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2A2D35' },
-  backButton:           { width: 60 },
-  backText:             { color: '#9B59B6', fontSize: 16 },
-  title:                { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  container:            { flex: 1, backgroundColor: '#070B12' },
   content:              { padding: 15, paddingBottom: 40 },
 
-  statsContainer:       { flexDirection: 'row', backgroundColor: '#15181F', borderRadius: 12, paddingVertical: 20, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
-  statBox:              { flex: 1, alignItems: 'center' },
-  statValue:            { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
-  statLabel:            { color: '#A0A0A0', fontSize: 12 },
+  heroCard:             { backgroundColor: '#0F1622', borderRadius: 20, borderWidth: 1, borderColor: '#26364F', padding: 14, marginBottom: 12, overflow: 'hidden' },
+  heroGlowA:            { position: 'absolute', width: 170, height: 170, borderRadius: 100, top: -70, left: -70, backgroundColor: 'rgba(53,208,127,0.13)' },
+  heroGlowB:            { position: 'absolute', width: 180, height: 180, borderRadius: 100, right: -70, bottom: -80, backgroundColor: 'rgba(103,186,255,0.14)' },
+  header:               { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  backButton:           { width: 72, backgroundColor: '#15233A', borderWidth: 1, borderColor: '#2E486A', borderRadius: 10, paddingVertical: 7, alignItems: 'center' },
+  backText:             { color: '#D8E8FB', fontSize: 13, fontWeight: '700' },
+  title:                { color: '#EFF4FC', fontSize: 19, fontWeight: '800' },
+  heroSub:              { color: '#A3B8D3', fontSize: 12, marginBottom: 12, marginTop: 4 },
 
-  speiHeader:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: '#2A2D35' },
+  statsContainer:       { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  statBox:              { flex: 1, alignItems: 'center', backgroundColor: '#121D2E', borderWidth: 1, borderColor: '#2C415F', borderRadius: 12, paddingVertical: 12 },
+  statValue:            { color: '#F1F6FD', fontSize: 20, fontWeight: '800', marginBottom: 4 },
+  statLabel:            { color: '#90A6C1', fontSize: 11 },
+
+  createBtn:            { paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#3D684B', backgroundColor: '#35D07F' },
+  createBtnText:        { color: '#08131C', fontWeight: '800', fontSize: 15 },
+
+  sectionSpacer:        { height: 4 },
+  blockCard:            { backgroundColor: '#0F1622', borderRadius: 14, borderWidth: 1, borderColor: '#24344C', padding: 10, marginBottom: 12 },
+  blockTitle:           { color: '#A6BCD7', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8, marginLeft: 2 },
+
+  speiHeader:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#121D2E', borderRadius: 12, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: '#2A3D57' },
   speiHeaderAlert:      { borderColor: '#2ECC71' },
   speiHeaderLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
   speiEmoji:            { fontSize: 28 },
-  speiHeaderTitle:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  speiHeaderSub:        { color: '#A0A0A0', fontSize: 12, marginTop: 2 },
+  speiHeaderTitle:      { color: '#EAF1FB', fontWeight: 'bold', fontSize: 15 },
+  speiHeaderSub:        { color: '#90A6C1', fontSize: 12, marginTop: 2 },
   speiBadge:            { backgroundColor: '#2ECC71', borderRadius: 12, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
   speiBadgeCount:       { color: '#000', fontWeight: 'bold', fontSize: 12 },
   speiChevron:          { color: '#2ECC71', fontSize: 12 },
-  speiList:             { backgroundColor: '#15181F', borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35', gap: 10 },
+  speiList:             { backgroundColor: '#111B2B', borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#273A55', gap: 10 },
   speiEmpty:            { color: '#2ECC71', fontSize: 13, textAlign: 'center', paddingVertical: 12 },
-  speiCard:             { backgroundColor: '#1C1F26', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2A2D35' },
+  speiCard:             { backgroundColor: '#152238', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2A3F5D' },
   speiCardHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  speiUser:             { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
+  speiUser:             { color: '#EAF1FB', fontWeight: 'bold', fontSize: 14 },
   speiMonto:            { color: '#2ECC71', fontWeight: 'bold', fontSize: 16 },
   speiEstadoBadge:      { borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   speiEstadoTxt:        { fontSize: 10, fontWeight: 'bold' },
@@ -1113,41 +1144,41 @@ const styles = StyleSheet.create({
   speiError:            { color: '#E74C3C', fontSize: 10, marginBottom: 4, fontStyle: 'italic' },
   speiDate:             { color: '#505050', fontSize: 10, marginBottom: 8 },
   speiActions:          { flexDirection: 'row', gap: 8 },
-  speiVerBtn:           { flex: 1, backgroundColor: '#1C1F26', paddingVertical: 9, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#3498DB' },
-  speiVerText:          { color: '#3498DB', fontSize: 12, fontWeight: '600' },
+  speiVerBtn:           { flex: 1, backgroundColor: '#12233A', paddingVertical: 9, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#67BAFF' },
+  speiVerText:          { color: '#67BAFF', fontSize: 12, fontWeight: '600' },
   speiAprobarBtn:       { flex: 1, backgroundColor: '#2ECC71', paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
   speiAprobarText:      { color: '#000', fontSize: 12, fontWeight: 'bold' },
 
-  ocrToggleBtn:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#12151C', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 4, borderWidth: 1, borderColor: '#9B59B633' },
-  ocrToggleText:        { color: '#9B59B6', fontSize: 11, fontWeight: 'bold' },
-  ocrToggleChevron:     { color: '#9B59B6', fontSize: 10 },
-  ocrBox:               { backgroundColor: '#12151C', borderRadius: 8, paddingHorizontal: 10, paddingBottom: 10, paddingTop: 6, marginBottom: 8, borderWidth: 1, borderColor: '#9B59B633', gap: 4 },
+  ocrToggleBtn:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#101A2A', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 4, borderWidth: 1, borderColor: 'rgba(103,186,255,0.28)' },
+  ocrToggleText:        { color: '#67BAFF', fontSize: 11, fontWeight: 'bold' },
+  ocrToggleChevron:     { color: '#67BAFF', fontSize: 10 },
+  ocrBox:               { backgroundColor: '#101A2A', borderRadius: 8, paddingHorizontal: 10, paddingBottom: 10, paddingTop: 6, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(103,186,255,0.28)', gap: 4 },
   ocrRow:               { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   ocrKey:               { color: '#505050', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', flex: 1 },
   ocrVal:               { color: '#E0E0E0', fontSize: 10, fontWeight: '600', flex: 2, textAlign: 'right' },
 
-  retirosBtn:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 12, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: '#2A2D35' },
+  retirosBtn:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#121D2E', borderRadius: 12, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: '#2A3D57' },
   retirosBtnAlert:      { borderColor: '#F39C12' },
   retirosBtnLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
   retirosEmoji:         { fontSize: 28 },
-  retirosBtnTitle:      { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  retirosBtnSub:        { color: '#A0A0A0', fontSize: 12, marginTop: 2 },
+  retirosBtnTitle:      { color: '#EAF1FB', fontWeight: 'bold', fontSize: 15 },
+  retirosBtnSub:        { color: '#90A6C1', fontSize: 12, marginTop: 2 },
   retirosBtnRight:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge:                { backgroundColor: '#E74C3C', borderRadius: 12, minWidth: 22, height: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
   badgeCount:           { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   retirosChevron:       { color: '#F39C12', fontSize: 12 },
 
-  retirosList:          { backgroundColor: '#15181F', borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35', gap: 10 },
+  retirosList:          { backgroundColor: '#111B2B', borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#273A55', gap: 10 },
   retirosEmpty:         { color: '#2ECC71', fontSize: 13, textAlign: 'center', paddingVertical: 12 },
-  retiroCard:           { backgroundColor: '#1C1F26', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2A2D35' },
+  retiroCard:           { backgroundColor: '#152238', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#2A3F5D' },
   retiroCardHeader:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   retiroAvatarCircle:   { width: 36, height: 36, borderRadius: 18, backgroundColor: '#15181F', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2A2D35' },
   retiroAvatarTxt:      { color: '#F39C12', fontWeight: 'bold', fontSize: 15 },
   retiroUser:           { color: '#FFF', fontWeight: '700', fontSize: 13 },
   retiroFecha:          { color: '#505050', fontSize: 10, marginTop: 1 },
   retiroMetodoBadge:    { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1 },
-  retiroMetodoSPEI:     { backgroundColor: 'rgba(52,152,219,0.1)', borderColor: 'rgba(52,152,219,0.3)' },
-  retiroMetodoMP:       { backgroundColor: 'rgba(0,177,234,0.1)', borderColor: 'rgba(0,177,234,0.3)' },
+  retiroMetodoSPEI:     { backgroundColor: 'rgba(103,186,255,0.12)', borderColor: 'rgba(103,186,255,0.35)' },
+  retiroMetodoMP:       { backgroundColor: 'rgba(53,208,127,0.12)', borderColor: 'rgba(53,208,127,0.35)' },
   retiroMetodoTxt:      { fontSize: 11, fontWeight: '700' },
   retiroMonto:          { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 8 },
   retiroMxn:            { color: '#505050', fontSize: 13 },
@@ -1162,11 +1193,11 @@ const styles = StyleSheet.create({
   retirosVerTodosBtn:   { marginTop: 4, paddingVertical: 10, alignItems: 'center' },
   retirosVerTodosTxt:   { color: '#F39C12', fontSize: 13, fontWeight: '600' },
 
-  configHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#15181F', borderRadius: 10, padding: 14, marginBottom: 4, borderWidth: 1, borderColor: '#F39C12' },
+  configHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#121D2E', borderRadius: 10, padding: 14, marginBottom: 4, borderWidth: 1, borderColor: '#3B516F' },
   configHeaderText:     { color: '#F39C12', fontWeight: 'bold', fontSize: 14 },
   configChevron:        { color: '#F39C12', fontSize: 12 },
-  configBox:            { backgroundColor: '#15181F', borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
-  datePickerBtn:        { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1F26', borderRadius: 10, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#F39C12', gap: 10 },
+  configBox:            { backgroundColor: '#111B2B', borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#273A55' },
+  datePickerBtn:        { flexDirection: 'row', alignItems: 'center', backgroundColor: '#152238', borderRadius: 10, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#3D5780', gap: 10 },
   datePickerIcon:       { fontSize: 24 },
   datePickerLabel:      { color: '#A0A0A0', fontSize: 11, marginBottom: 2 },
   datePickerValue:      { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
@@ -1175,17 +1206,13 @@ const styles = StyleSheet.create({
   configBtn:            { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   configBtnSave:        { backgroundColor: '#F39C12' },
   configBtnSaveText:    { color: '#000', fontWeight: 'bold', fontSize: 14 },
-  configBtnClear:       { backgroundColor: '#1C1F26', borderWidth: 1, borderColor: '#555' },
+  configBtnClear:       { backgroundColor: '#152238', borderWidth: 1, borderColor: '#3D5780' },
   configBtnClearText:   { color: '#A0A0A0', fontWeight: 'bold', fontSize: 14 },
-
-  createBtn:            { padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1 },
-  neonBorderPurple:     { borderColor: '#9B59B6', backgroundColor: 'rgba(155,89,182,0.1)' },
-  createBtnText:        { color: '#9B59B6', fontWeight: 'bold', fontSize: 16 },
 
   sectionHeaderRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   sectionTitle:         { color: '#A0A0A0', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   sectionCount:         { color: '#505050', fontSize: 12 },
-  quinielasPanel:       { backgroundColor: '#15181F', borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2A2D35' },
+  quinielasPanel:       { backgroundColor: '#0F1622', borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#24344C' },
 
   slidingTabsWrapper:   { marginBottom: 14, marginTop: 2 },
   speiTabsScrollContent:{ paddingRight: 8 },

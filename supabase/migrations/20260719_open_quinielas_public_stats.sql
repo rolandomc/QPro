@@ -28,8 +28,16 @@ AS $$
 DECLARE
   has_liga BOOLEAN;
   has_deporte BOOLEAN;
+  has_jugadores_minimos BOOLEAN;
+  has_porcentaje_admin BOOLEAN;
+  has_cierre_automatico BOOLEAN;
+  has_primer_partido BOOLEAN;
   liga_expr TEXT;
   deporte_expr TEXT;
+  jugadores_minimos_expr TEXT;
+  porcentaje_admin_expr TEXT;
+  cierre_automatico_expr TEXT;
+  primer_partido_expr TEXT;
 BEGIN
   SELECT EXISTS (
     SELECT 1
@@ -47,8 +55,44 @@ BEGIN
       AND column_name = 'deporte'
   ) INTO has_deporte;
 
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'quinielas'
+      AND column_name = 'jugadores_minimos'
+  ) INTO has_jugadores_minimos;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'quinielas'
+      AND column_name = 'porcentaje_admin'
+  ) INTO has_porcentaje_admin;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'quinielas'
+      AND column_name = 'cierre_automatico'
+  ) INTO has_cierre_automatico;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'quinielas'
+      AND column_name = 'primer_partido'
+  ) INTO has_primer_partido;
+
   liga_expr = CASE WHEN has_liga THEN 'q.liga' ELSE 'NULL::text' END;
   deporte_expr = CASE WHEN has_deporte THEN 'q.deporte' ELSE 'NULL::text' END;
+  jugadores_minimos_expr = CASE WHEN has_jugadores_minimos THEN 'q.jugadores_minimos' ELSE '5::integer' END;
+  porcentaje_admin_expr = CASE WHEN has_porcentaje_admin THEN 'q.porcentaje_admin' ELSE '10::numeric' END;
+  cierre_automatico_expr = CASE WHEN has_cierre_automatico THEN 'q.cierre_automatico' ELSE 'false::boolean' END;
+  primer_partido_expr = CASE WHEN has_primer_partido THEN 'q.primer_partido' ELSE 'NULL::timestamptz' END;
 
   RETURN QUERY EXECUTE format(
     'SELECT
@@ -61,10 +105,10 @@ BEGIN
       q.premio_total,
       q.estado,
       q.fecha_cierre,
-      q.jugadores_minimos,
-      q.porcentaje_admin,
-      q.cierre_automatico,
-      q.primer_partido,
+      %s AS jugadores_minimos,
+      %s AS porcentaje_admin,
+      %s AS cierre_automatico,
+      %s AS primer_partido,
       q.created_at,
       COALESCE(pt.total_partidos, 0) AS total_partidos,
       COALESCE(pg.jugadores_count, 0) AS jugadores_count,
@@ -95,7 +139,11 @@ BEGIN
     WHERE q.estado = ''abierta''
     ORDER BY q.created_at DESC',
     liga_expr,
-    deporte_expr
+    deporte_expr,
+    jugadores_minimos_expr,
+    porcentaje_admin_expr,
+    cierre_automatico_expr,
+    primer_partido_expr
   );
 END;
 $$;

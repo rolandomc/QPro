@@ -4,14 +4,50 @@ import { supabase } from '../config/supabase';
 export const QuinielasService = {
 
   async getQuinielasAbiertas() {
-    const { data, error } = await supabase.rpc('get_quinielas_abiertas_public');
-    if (error) throw error;
+    const rpc = await supabase.rpc('get_quinielas_abiertas_public');
+    if (!rpc.error) {
+      return (rpc.data ?? []).map((q: any) => ({
+        ...q,
+        partidos: [{ count: Number(q.total_partidos ?? 0) }],
+        jugadores_count: Number(q.jugadores_count ?? 0),
+        ya_participo: !!q.ya_participo,
+        fecha_primer_partido: q.fecha_primer_partido ?? q.fecha_cierre ?? null,
+      }));
+    }
+
+    // Fallback de resiliencia para entornos con migraciones parciales.
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from('quinielas')
+      .select('id, titulo, descripcion, precio_entrada, premio_total, estado, fecha_cierre, created_at, partidos(count)')
+      .eq('estado', 'abierta')
+      .order('created_at', { ascending: false });
+    if (error) throw rpc.error;
+
+    const ids = (data ?? []).map((q: any) => q.id);
+    const [misParticipacionesRes] = await Promise.all([
+      user && ids.length > 0
+        ? supabase
+            .from('participaciones')
+            .select('quiniela_id')
+            .eq('user_id', user.id)
+            .in('quiniela_id', ids)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    const yaParticipo = new Set(((misParticipacionesRes as any).data || []).map((p: any) => p.quiniela_id));
+
     return (data ?? []).map((q: any) => ({
       ...q,
-      partidos: [{ count: Number(q.total_partidos ?? 0) }],
-      jugadores_count: Number(q.jugadores_count ?? 0),
-      ya_participo: !!q.ya_participo,
-      fecha_primer_partido: q.fecha_primer_partido ?? q.fecha_cierre ?? null,
+      liga: null,
+      deporte: 'futbol',
+      jugadores_minimos: 5,
+      porcentaje_admin: 10,
+      cierre_automatico: false,
+      primer_partido: null,
+      jugadores_count: 0,
+      ya_participo: yaParticipo.has(q.id),
+      fecha_primer_partido: q.fecha_cierre ?? null,
     }));
   },
 
